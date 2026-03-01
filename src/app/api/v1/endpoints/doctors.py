@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ....core.doctor_utils import synthesise_identity as _synthesise_identity
-from ....core.rbac import AdminOrOperationalUser
+from ....core.rbac import CurrentUser
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
 from ....db.session import DbSession
 from ....models.doctor import Doctor as DoctorModel
@@ -327,9 +327,14 @@ async def update_doctor(
     doctor_id: int,
     data: DoctorUpdate,
     repo: DoctorRepoDep,
-    _: AdminOrOperationalUser,
+    current_user: CurrentUser,
 ) -> GenericResponse[DoctorResponse]:
-    """Update a doctor's profile by ID. Requires admin or operational role."""
+    """Update a doctor's profile by ID. Requires admin/operational role OR self-update."""
+    if not current_user.can_access_admin and current_user.doctor_id != doctor_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this doctor profile.",
+        )
     doctor = await repo.update(doctor_id, data)
     return GenericResponse(
         message="Doctor updated successfully",
