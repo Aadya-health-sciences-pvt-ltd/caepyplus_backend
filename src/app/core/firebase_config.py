@@ -13,7 +13,9 @@ import asyncio
 import functools
 import os
 
-import firebase_admin
+from typing import Any
+
+import firebase_admin  # type: ignore[import-untyped]
 import httpx
 import structlog
 from firebase_admin import auth as firebase_auth
@@ -48,7 +50,7 @@ def _init_firebase() -> None:
             logger.info("Firebase Admin already initialized")
 
 
-async def _verify_via_google_api_async(id_token: str) -> dict:
+async def _verify_via_google_api_async(id_token: str) -> dict[str, Any]:
     """Verify Firebase ID token via Google's public API (async fallback).
 
     Uses an async HTTP client to avoid blocking the event loop.
@@ -93,7 +95,7 @@ async def _verify_via_google_api_async(id_token: str) -> dict:
     }
 
 
-async def verify_firebase_token(id_token: str) -> dict:
+async def verify_firebase_token(id_token: str) -> dict[str, Any]:
     """Verify a Firebase ID token and return the decoded claims.
 
     Attempts firebase-admin SDK first.  ``firebase_auth.verify_id_token`` is a
@@ -125,11 +127,12 @@ async def verify_firebase_token(id_token: str) -> dict:
             uid=decoded_token.get("uid"),
             email=decoded_token.get("email"),
         )
-        return decoded_token
-    except Exception as sdk_error:
+        return decoded_token  # type: ignore[no-any-return]
+    except Exception as e:
+        sdk_error_str = str(e)
         logger.warning(
             "Firebase SDK verification failed, trying Google API fallback",
-            error=str(sdk_error),
+            error=sdk_error_str,
         )
 
     # Fallback: async verify via Google's public API.
@@ -143,7 +146,7 @@ async def verify_firebase_token(id_token: str) -> dict:
     if app_env == "production":
         logger.error(
             "Firebase SDK verification failed in production — rejecting token",
-            error=str(sdk_error),  # type: ignore[possibly-undefined]
+            error=sdk_error_str,
         )
         raise ValueError(
             "Firebase token verification failed. "

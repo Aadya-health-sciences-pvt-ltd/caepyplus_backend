@@ -187,7 +187,7 @@ async def extract_resume(
 
 @router.post(
     "/submit/{doctor_id}",
-    response_model=GenericResponse[dict],
+    response_model=GenericResponse[dict[str, Any]],
     summary="Submit profile for verification",
     description="Submit the doctor's own profile for admin review. Requires authentication.",
 )
@@ -195,7 +195,7 @@ async def submit_profile(
     doctor_id: int,
     db: DbSession,
     current_user: CurrentUser,
-) -> GenericResponse[dict]:
+) -> GenericResponse[dict[str, Any]]:
     doctor_repo = DoctorRepository(db)
     repo = OnboardingRepository(db)
 
@@ -227,6 +227,7 @@ async def submit_profile(
     identity = await repo.get_identity_by_doctor_id(doctor_id)
     if identity is None:
         import uuid as _uuid
+
         from ....models.onboarding import DoctorIdentity as _DoctorIdentity
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),
@@ -365,7 +366,7 @@ class VerifyProfilePayload(BaseModel):
 
 @router.post(
     "/verify/{doctor_id}",
-    response_model=GenericResponse[dict],
+    response_model=GenericResponse[dict[str, Any]],
     summary="Verify a doctor profile (Admin/Operational only)",
 )
 async def verify_profile(
@@ -374,7 +375,7 @@ async def verify_profile(
     db: DbSession,
     current_user: AdminOrOperationalUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
-) -> GenericResponse[dict]:
+) -> GenericResponse[dict[str, Any]]:
     """
     Mark a doctor profile as verified.
 
@@ -402,6 +403,7 @@ async def verify_profile(
     identity = await repo.get_identity_by_doctor_id(doctor_id)
     if identity is None:
         import uuid as _uuid
+
         from ....models.onboarding import DoctorIdentity as _DoctorIdentity
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),
@@ -515,7 +517,7 @@ class RejectProfilePayload(BaseModel):
 
 @router.post(
     "/reject/{doctor_id}",
-    response_model=GenericResponse[dict],
+    response_model=GenericResponse[dict[str, Any]],
     summary="Reject a doctor profile (Admin/Operational only)",
 )
 async def reject_profile(
@@ -524,7 +526,7 @@ async def reject_profile(
     db: DbSession,
     current_user: AdminOrOperationalUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
-) -> GenericResponse[dict]:
+) -> GenericResponse[dict[str, Any]]:
     """
     Mark a doctor profile as rejected.
 
@@ -552,6 +554,7 @@ async def reject_profile(
     identity = await repo.get_identity_by_doctor_id(doctor_id)
     if identity is None:
         import uuid as _uuid
+
         from ....models.onboarding import DoctorIdentity as _DoctorIdentity
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),

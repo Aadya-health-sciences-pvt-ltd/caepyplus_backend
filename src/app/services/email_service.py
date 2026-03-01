@@ -26,7 +26,6 @@ from __future__ import annotations
 import re
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -96,10 +95,10 @@ def render_template(template: dict[str, str], variables: dict[str, str]) -> dict
         def sub_func(match: re.Match[str]) -> str:
             key = match.group(1)
             return variables.get(key, match.group(0))  # Return original if not found
-        
+
         # Match {variable_name} where variable_name is alphanumeric + underscore
         return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', sub_func, text)
-    
+
     return {
         "subject": replace(template["subject"]),
         "body_html": replace(template["body_html"]),

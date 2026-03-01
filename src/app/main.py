@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import sys
 import uuid
-from collections.abc import AsyncGenerator, Callable, Awaitable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 import structlog
@@ -31,7 +31,6 @@ from .core.responses import ErrorDetail, ErrorResponse, ResponseMeta
 from .db.session import close_db, get_db_manager
 from .services import otp_service as _otp_service_module
 from .services.voice_service import get_voice_service
-
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -176,7 +175,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     settings = get_settings()
     logger = structlog.get_logger()
-    cleanup_task: asyncio.Task | None = None
+    cleanup_task: asyncio.Task[None] | None = None
 
     async def _periodic_session_cleanup() -> None:
         """Purge expired voice sessions every 5 minutes."""
@@ -380,8 +379,8 @@ All endpoints are versioned under `/api/v1/`.
 
     # Root redirect — not in OpenAPI schema
     @app.get("/", include_in_schema=False)
-    async def root() -> dict:
-        payload: dict = {
+    async def root() -> dict[str, str]:
+        payload: dict[str, str] = {
             "service": settings.APP_NAME,
             "version": settings.APP_VERSION,
             "health": "/api/v1/health",

@@ -206,7 +206,7 @@ class Settings(BaseSettings):
     # CORS Configuration
     # ========================================
     CORS_ORIGINS: str = Field(
-        default="*",
+        default="http://localhost:3000",
         description=(
             "Comma-separated list of allowed CORS origins. "
             "Set to explicit origins (e.g. https://app.linqmd.com) in production — "

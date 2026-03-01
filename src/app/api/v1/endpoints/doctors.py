@@ -156,7 +156,7 @@ async def list_doctors(
         alias="status",
         description="Filter by onboarding status — returns full info when set",
     ),
-) -> PaginatedResponse:
+) -> PaginatedResponse[Any]:
     """Return a paginated doctor list.
 
     When *status* is provided the list is sourced from ``doctor_identity``
@@ -177,7 +177,7 @@ async def list_doctors(
             eager_load=True,
         )
         total = await onboarding_repo.count_identities_by_status(status=onboarding_status.value)
-        data: list = [
+        data: list[Any] = [
             DoctorWithFullInfoResponse(
                 identity=identity,
                 details=identity.details,
@@ -271,10 +271,13 @@ async def lookup_doctor(
     if identity is None and doctor is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found.")
 
-    identity_resp = (
-        DoctorIdentityResponse.model_validate(identity)
-        if identity else _synthesise_identity(doctor)
-    )
+    assert resolved_id is not None
+
+    if identity:
+        identity_resp = DoctorIdentityResponse.model_validate(identity)
+    else:
+        assert doctor is not None
+        identity_resp = _synthesise_identity(doctor)
 
     details = await repo.get_details_by_doctor_id(resolved_id)
     media = await repo.list_media(resolved_id)

@@ -16,6 +16,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,7 +59,7 @@ def _base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
-def _encode_jwt(payload: dict, *, secret: str, algorithm: str = "HS256") -> str:
+def _encode_jwt(payload: dict[str, Any], *, secret: str, algorithm: str = "HS256") -> str:
     """Minimal HS256 JWT encoder using only the standard library."""
     if algorithm != "HS256":
         raise ValueError("Only HS256 algorithm is supported")
@@ -213,7 +214,7 @@ async def verify_otp(
     doctor = await doctor_repo.get_by_phone_number(request.mobile_number)
     is_new_user = doctor is None
 
-    if is_new_user:
+    if doctor is None:
         doctor = await doctor_repo.create_from_phone(
             phone_number=request.mobile_number,
             role="user",
@@ -502,7 +503,7 @@ async def google_verify(
     doctor = await doctor_repo.get_by_email(google_email)
     is_new_user = doctor is None
 
-    if is_new_user:
+    if doctor is None:
         doctor = await doctor_repo.create_from_email(
             email=google_email,
             name=google_name,

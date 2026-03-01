@@ -7,7 +7,6 @@ import time
 from typing import Annotated
 
 import structlog
-
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession

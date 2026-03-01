@@ -66,10 +66,10 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Identification
-    phone: Mapped[str] = mapped_column(
+    phone: Mapped[str | None] = mapped_column(
         String(20),
         unique=True,
-        nullable=False,
+        nullable=True,
         index=True,
         comment="Phone number with country code (e.g., +919988776655)"
     )

@@ -77,7 +77,7 @@ class GeminiService:
             "max_output_tokens": max_tokens or self.settings.GEMINI_MAX_TOKENS,
         }
 
-    def _get_retry_decorator(self):
+    def _get_retry_decorator(self) -> Any:
         """Return a cached tenacity retry decorator.
 
         The decorator is built once and stored on the instance — rebuilding it
@@ -133,13 +133,13 @@ class GeminiService:
             response = await self.client.aio.models.generate_content(
                 model=self.settings.GEMINI_MODEL,
                 contents=prompt,
-                config=config,
+                config=config,  # type: ignore[arg-type]
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info("Gemini response in %.2fms", elapsed_ms)
 
-            return response.text
+            return response.text or ""
 
         except Exception as e:
             error_str = str(e).lower()
@@ -166,11 +166,11 @@ class GeminiService:
         
         Uses exponential backoff for transient failures.
         """
-        @self._get_retry_decorator()
-        async def _generate():
+        @self._get_retry_decorator()  # type: ignore[untyped-decorator]
+        async def _generate() -> str:
             return await self.generate(prompt, temperature, max_tokens)
 
-        return await _generate()
+        return await _generate()  # type: ignore[no-any-return]
 
     async def generate_structured(
         self,
@@ -222,7 +222,7 @@ class GeminiService:
         cleaned = cleaned.strip()
 
         try:
-            return json.loads(cleaned)
+            return json.loads(cleaned)  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             pass
 
@@ -230,7 +230,7 @@ class GeminiService:
         # characters inside string values, which are technically invalid JSON but
         # recoverable when strict mode is disabled.
         try:
-            return json.loads(cleaned, strict=False)
+            return json.loads(cleaned, strict=False)  # type: ignore[no-any-return]
         except json.JSONDecodeError as e:
             logger.error("Failed to parse JSON response: %s", e)
             logger.debug("Raw response: %s", response)
@@ -278,17 +278,18 @@ class GeminiService:
 
             logger.info("Gemini Vision request for %s", mime_type)
 
+            contents_list: list[Any] = [prompt, image_part]
             # Use new google.genai API with multimodal content
             response = await self.client.aio.models.generate_content(
                 model=self.settings.GEMINI_MODEL,
-                contents=[prompt, image_part],
-                config=config,
+                contents=contents_list,
+                config=config,  # type: ignore[arg-type]
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info("Gemini Vision response in %.2fms", elapsed_ms)
 
-            return self._parse_json_response(response.text)
+            return self._parse_json_response(response.text or "")
 
         except ExtractionError:
             raise

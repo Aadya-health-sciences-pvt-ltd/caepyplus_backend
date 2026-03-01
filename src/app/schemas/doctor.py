@@ -194,7 +194,7 @@ class DoctorCreate(DoctorBase):
         description="Source of onboarding data"
     )
     resume_url: str | None = Field(default=None, description="URL to uploaded resume")
-    raw_extraction_data: dict | None = Field(
+    raw_extraction_data: dict[str, Any] | None = Field(
         default=None,
         description="Raw AI extraction output"
     )

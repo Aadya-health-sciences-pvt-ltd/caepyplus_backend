@@ -44,12 +44,12 @@ class RedisOTPStore:
         if not REDIS_AVAILABLE:
             return False
         try:
-            self._redis = await aioredis.from_url(
+            self._redis = aioredis.from_url(
                 self._redis_url,
                 encoding="utf-8",
                 decode_responses=True,
             )
-            await self._redis.ping()
+            await self._redis.ping()  # type: ignore[misc]
             self._connected = True
             logger.info("Redis OTP store connected", url=self._redis_url[:30] + "...")
             return True

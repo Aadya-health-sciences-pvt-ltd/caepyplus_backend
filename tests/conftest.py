@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import json
 from collections.abc import AsyncGenerator, Generator
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -46,7 +46,7 @@ def _create_test_jwt(
     secret = settings.SECRET_KEY
     algorithm = "HS256"
 
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=expire_minutes)
 
     payload = {

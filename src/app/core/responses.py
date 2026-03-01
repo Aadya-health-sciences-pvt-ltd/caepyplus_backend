@@ -5,7 +5,7 @@ Provides consistent response structures across all API endpoints.
 Uses generic types for type-safe responses.
 """
 from datetime import UTC, datetime
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -111,7 +111,7 @@ class ErrorDetail(BaseModel):
 
     code: str = Field(description="Machine-readable error code")
     message: str = Field(description="Human-readable error message")
-    details: dict | None = Field(
+    details: dict[str, Any] | None = Field(
         default=None,
         description="Additional error context"
     )

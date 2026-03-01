@@ -12,7 +12,6 @@ approve / reject / CRUD.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -481,7 +480,7 @@ class DropdownRepository:
             )
         )
         result = await self.session.execute(stmt)
-        count = result.rowcount or 0
+        count = int(getattr(result, "rowcount", 0) or 0)
         log.info(
             "dropdown_bulk_approved",
             count=count,
@@ -520,7 +519,7 @@ class DropdownRepository:
             )
         )
         result = await self.session.execute(stmt)
-        count = result.rowcount or 0
+        count = int(getattr(result, "rowcount", 0) or 0)
         log.info(
             "dropdown_bulk_rejected",
             count=count,

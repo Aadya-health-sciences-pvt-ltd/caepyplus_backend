@@ -205,7 +205,7 @@ class OnboardingRepository:
 
             existing.phone_number = phone_number or existing.phone_number
             if title is not None:
-                existing.title = title
+                existing.title = title  # type: ignore[assignment]
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
@@ -314,7 +314,7 @@ class OnboardingRepository:
         self,
         *,
         doctor_id: int,
-        payload: dict,
+        payload: dict[str, Any],
     ) -> DoctorDetails:
         """Create or update doctor_details for a given doctor_id.
 
@@ -352,7 +352,7 @@ class OnboardingRepository:
         media_category: str,
         file_uri: str,
         file_name: str,
-        **extra,
+        **extra: Any,
     ) -> DoctorMedia:
         """Add a media record for a doctor and update media_urls.
 
@@ -450,7 +450,7 @@ class OnboardingRepository:
         stmt = delete(DoctorMedia).where(DoctorMedia.media_id == media_id)
         result = await self.session.execute(stmt)
         await self.session.commit()
-        return (result.rowcount or 0) > 0
+        return (result.rowcount or 0) > 0  # type: ignore[attr-defined]
 
     # ---------------------------------------------------------------------
     # doctor_status_history
