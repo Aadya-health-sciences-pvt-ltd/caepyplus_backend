@@ -46,6 +46,8 @@ class DoctorIdentityBase(BaseModel):
 class DoctorIdentityCreate(DoctorIdentityBase):
     """Payload for creating a doctor_identity."""
 
+    doctor_id: int | None = None
+
 class DoctorIdentityResponse(DoctorIdentityBase):
     """API response model for doctor_identity."""
 
@@ -54,7 +56,7 @@ class DoctorIdentityResponse(DoctorIdentityBase):
     id: str
     doctor_id: int
     # Override base fields to allow empty/placeholder values in responses (e.g. OTP-created doctors)
-    title: str | None = None
+    title: str | None = None  # type: ignore[assignment]
     first_name: str = Field(max_length=100, default="")
     last_name: str = Field(max_length=100, default="")
     email: str = ""

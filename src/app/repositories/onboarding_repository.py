@@ -10,6 +10,7 @@ All operations use SQLAlchemy's async session against PostgreSQL.
 """
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
 from typing import Any
 
@@ -167,9 +168,11 @@ class OnboardingRepository:
         # Block 6
         content_seeds: list[dict[str, Any]] | None = None,
     ) -> DoctorIdentity:
-        """Create a new doctor_identity row.
+        """Create or update a doctor_identity row (upsert by doctor_id).
 
-        Returns the persisted identity with populated doctor_id.
+        If an identity already exists for the given doctor_id, its fields are
+        updated with the supplied values so that callers never hit a UNIQUE
+        constraint violation.  Returns the persisted identity.
         """
         status = (
             onboarding_status
@@ -179,6 +182,33 @@ class OnboardingRepository:
 
         if doctor_id is None:
             doctor_id = await self.get_next_doctor_id()
+
+        # Check whether an identity already exists for this doctor.
+        existing = await self.get_identity_by_doctor_id(doctor_id)
+        if existing is not None:
+            # Update fields supplied by the caller; leave status unchanged if
+            # the identity is already in a terminal state.
+            existing.first_name = first_name or existing.first_name
+            existing.last_name = last_name or existing.last_name
+
+            # If we're setting a new email, check if another row has it first.
+            # If so, reset the other row's email to a unique placeholder first,
+            # then flush, to avoid UNIQUE constraint collision (nullable=False).
+            new_email = email or existing.email
+            if new_email and new_email != existing.email:
+                conflicting = await self.get_identity_by_email(new_email)
+                if conflicting is not None and conflicting.id != existing.id:
+                    conflicting.email = f"_displaced_{uuid.uuid4().hex}@placeholder"
+                    self.session.add(conflicting)
+                    await self.session.flush()  # clear the conflicting email before setting ours
+            existing.email = new_email
+
+            existing.phone_number = phone_number or existing.phone_number
+            if title is not None:
+                existing.title = title  # type: ignore[assignment]
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
 
         # Create DoctorIdentity with only its own fields
         identity = DoctorIdentity(
@@ -208,9 +238,20 @@ class OnboardingRepository:
         return result.scalar_one_or_none()
 
     async def get_identity_by_phone(self, phone_number: str) -> DoctorIdentity | None:
-        """Fetch doctor_identity by phone_number."""
+        """Fetch doctor_identity by phone_number.
 
-        stmt = select(DoctorIdentity).where(DoctorIdentity.phone_number == phone_number)
+        Uses ``scalars().first()`` instead of ``scalar_one_or_none()`` to
+        gracefully handle edge-cases where the same phone number appears on
+        more than one identity row (e.g. data-migration artefacts).  The
+        row with the lowest ``doctor_id`` — i.e. the original registration —
+        is returned.
+        """
+        stmt = (
+            select(DoctorIdentity)
+            .where(DoctorIdentity.phone_number == phone_number)
+            .order_by(DoctorIdentity.doctor_id.asc())
+            .limit(1)
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -273,7 +314,7 @@ class OnboardingRepository:
         self,
         *,
         doctor_id: int,
-        payload: dict,
+        payload: dict[str, Any],
     ) -> DoctorDetails:
         """Create or update doctor_details for a given doctor_id.
 
@@ -311,7 +352,7 @@ class OnboardingRepository:
         media_category: str,
         file_uri: str,
         file_name: str,
-        **extra,
+        **extra: Any,
     ) -> DoctorMedia:
         """Add a media record for a doctor and update media_urls.
 
@@ -409,7 +450,7 @@ class OnboardingRepository:
         stmt = delete(DoctorMedia).where(DoctorMedia.media_id == media_id)
         result = await self.session.execute(stmt)
         await self.session.commit()
-        return (result.rowcount or 0) > 0
+        return (result.rowcount or 0) > 0  # type: ignore[attr-defined]
 
     # ---------------------------------------------------------------------
     # doctor_status_history
@@ -439,12 +480,12 @@ class OnboardingRepository:
             if previous_status is None
             else previous_status
             if isinstance(previous_status, OnboardingStatus)
-            else OnboardingStatus(previous_status)
+            else OnboardingStatus(previous_status.lower() if isinstance(previous_status, str) else previous_status)
         )
         new = (
             new_status
             if isinstance(new_status, OnboardingStatus)
-            else OnboardingStatus(new_status)
+            else OnboardingStatus(new_status.lower() if isinstance(new_status, str) else new_status)
         )
 
         history = DoctorStatusHistory(

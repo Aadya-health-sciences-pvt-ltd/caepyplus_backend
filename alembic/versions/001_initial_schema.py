@@ -621,7 +621,8 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
     op.execute("""
         SELECT setval(
             'doctor_id_seq',
-            COALESCE((SELECT MAX(doctor_id) FROM doctor_identity), 0)
+            COALESCE((SELECT MAX(doctor_id) FROM doctor_identity), 1),
+            false
         );
     """)
 
@@ -641,14 +642,11 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
     _admin_email = _os.environ.get("SEED_ADMIN_EMAIL", "admin@linqmd.com")
 
     op.execute(
-        sa.text(
-            """
-            INSERT INTO users (phone, email, role, is_active, created_at)
-            VALUES (:phone, :email, 'admin', true, now())
-            ON CONFLICT DO NOTHING
-            """
-        ),
-        {"phone": _admin_phone, "email": _admin_email},
+        f"""
+        INSERT INTO users (phone, email, role, is_active, created_at)
+        VALUES ('{_admin_phone}', '{_admin_email}', 'admin', true, now())
+        ON CONFLICT DO NOTHING
+        """
     )
 
     # =======================================================================
@@ -659,21 +657,20 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
     # it cannot be accidentally deleted through the admin API.
     for field_name, values in _DROPDOWN_SEED.items():
         for value in values:
+            # Escape single quotes in the value
+            escaped_value = value.replace("'", "''")
             op.execute(
-                sa.text(
-                    """
-                    INSERT INTO dropdown_options
-                        (field_name, value, label,
-                         status, is_system, display_order,
-                         created_at, updated_at)
-                    VALUES
-                        (:field_name, :value, :value,
-                         'approved', TRUE, 0,
-                         now(), now())
-                    ON CONFLICT (field_name, value) DO NOTHING
-                    """
-                ),
-                {"field_name": field_name, "value": value},
+                f"""
+                INSERT INTO dropdown_options
+                    (field_name, value, label,
+                     status, is_system, display_order,
+                     created_at, updated_at)
+                VALUES
+                    ('{field_name}', '{escaped_value}', '{escaped_value}',
+                     'approved', TRUE, 0,
+                     now(), now())
+                ON CONFLICT (field_name, value) DO NOTHING
+                """
             )
 
 

@@ -52,7 +52,7 @@ class PromptManager:
             config_path: Path to prompts.yaml. Defaults to config/prompts.yaml
         """
         if config_path is None:
-            # Default to config/prompts.yaml relative to project root
+            # Default to config/prompts.yaml relative to project root (three levels above src/app/core/)
             config_path = Path(__file__).parent.parent.parent.parent / "config" / "prompts.yaml"
 
         self.config_path = config_path
@@ -342,12 +342,12 @@ class PromptManager:
             variants = self.get_value(f"profile_generation.{section}.variants")
 
             if isinstance(variants, list) and 0 <= variant_idx < len(variants):
-                return variants[variant_idx]
+                return variants[variant_idx]  # type: ignore[no-any-return]
 
             # Fallback to first variant if index out of range
             if variants:
                 logger.warning("Variant index %s out of range for %s, using 0", variant_idx, section)
-                return variants[0]
+                return variants[0]  # type: ignore[no-any-return]
 
         except KeyError:
             logger.warning("No variants found for section: %s", section)

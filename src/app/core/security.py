@@ -85,7 +85,7 @@ def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
             error_code="TOKEN_EXPIRED",
         )
 
-    return payload
+    return payload  # type: ignore[no-any-return]
 
 
 async def require_authentication(

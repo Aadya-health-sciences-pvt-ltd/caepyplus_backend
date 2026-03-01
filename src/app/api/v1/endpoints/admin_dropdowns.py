@@ -18,11 +18,10 @@ POST   /admin/dropdowns/bulk-reject             — bulk reject
 GET    /admin/dropdowns/fields                  — list all supported field names
 """
 from __future__ import annotations
-
-from typing import Annotated
+from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from ....core.rbac import AdminOrOperationalUser
 from ....core.responses import GenericResponse
@@ -59,13 +58,13 @@ def _to_response(row: object) -> DropdownOptionResponse:
 
 @router.get(
     "/fields",
-    response_model=GenericResponse[dict],
+    response_model=GenericResponse[dict[str, Any]],
     summary="List all supported dropdown field names (Admin/Operational)",
     tags=["Admin - Dropdowns"],
 )
 async def list_supported_fields(
     current_user: AdminOrOperationalUser,
-) -> GenericResponse[dict]:
+) -> GenericResponse[dict[str, Any]]:
     """Return the canonical list of dropdown field names and their descriptions."""
     return GenericResponse(
         message="Supported dropdown fields",
@@ -308,7 +307,7 @@ async def update_option(
 
 @router.delete(
     "/{option_id}",
-    response_model=GenericResponse[dict],
+    response_model=GenericResponse[dict[str, Any]],
     summary="Delete a dropdown option (Admin/Operational — system rows protected)",
     tags=["Admin - Dropdowns"],
 )
@@ -316,7 +315,7 @@ async def delete_option(
     option_id: int,
     db: DbSession,
     current_user: AdminOrOperationalUser,
-) -> GenericResponse[dict]:
+) -> GenericResponse[dict[str, Any]]:
     """Delete a dropdown option.
 
     System-seeded rows (`is_system=true`) cannot be deleted — reject them

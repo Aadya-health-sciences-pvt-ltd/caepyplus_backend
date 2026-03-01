@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import aiofiles
@@ -31,8 +31,8 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 try:
-    import aioboto3
-    from botocore.exceptions import BotoCoreError, ClientError
+    import aioboto3  # type: ignore[import-untyped]
+    from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
     S3_AVAILABLE = True
 except ImportError:
     S3_AVAILABLE = False
@@ -521,7 +521,7 @@ class LocalBlobStorageService:
         blob_path = self._get_blob_path(doctor_id, media_category, blob_id, extension)
         return blob_path.exists()
 
-    def get_storage_stats(self) -> dict:
+    def get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics."""
         total_size = 0
         total_files = 0
@@ -841,7 +841,7 @@ class S3BlobStorageService:
                     },
                     ExpiresIn=self.signed_url_expiry,
                 )
-                return url
+                return str(url)
         else:
             # Return public URL
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{s3_key}"
@@ -880,7 +880,7 @@ class BlobStorageFactory:
     """
 
     @staticmethod
-    def create_blob_service(settings) -> LocalBlobStorageService | S3BlobStorageService:
+    def create_blob_service(settings: Any) -> LocalBlobStorageService | S3BlobStorageService:
         """
         Create blob storage service based on configuration.
         

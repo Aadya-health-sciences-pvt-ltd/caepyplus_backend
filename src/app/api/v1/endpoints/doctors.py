@@ -17,7 +17,6 @@ were consolidated here to reduce duplication (team-lead review comment #3/#4).
 """
 from __future__ import annotations
 
-import asyncio
 import csv
 import io
 from pathlib import Path
@@ -29,7 +28,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ....core.doctor_utils import synthesise_identity as _synthesise_identity
-from ....core.rbac import AdminOrOperationalUser
+from ....core.rbac import CurrentUser
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
 from ....db.session import DbSession
 from ....models.doctor import Doctor as DoctorModel
@@ -157,7 +156,7 @@ async def list_doctors(
         alias="status",
         description="Filter by onboarding status — returns full info when set",
     ),
-) -> PaginatedResponse:
+) -> PaginatedResponse[Any]:
     """Return a paginated doctor list.
 
     When *status* is provided the list is sourced from ``doctor_identity``
@@ -170,16 +169,15 @@ async def list_doctors(
         # Enriched admin view — sourced from doctor_identity with eager-loaded
         # related rows (3 fixed-cost IN-clause queries via selectinload).
         onboarding_repo = OnboardingRepository(db)
-        identities, total = await asyncio.gather(
-            onboarding_repo.list_identities(
-                status=onboarding_status.value,
-                skip=skip,
-                limit=page_size,
-                eager_load=True,
-            ),
-            onboarding_repo.count_identities_by_status(status=onboarding_status.value),
+        # Execute sequentially to avoid session state conflicts
+        identities = await onboarding_repo.list_identities(
+            status=onboarding_status.value,
+            skip=skip,
+            limit=page_size,
+            eager_load=True,
         )
-        data: list = [
+        total = await onboarding_repo.count_identities_by_status(status=onboarding_status.value)
+        data: list[Any] = [
             DoctorWithFullInfoResponse(
                 identity=identity,
                 details=identity.details,
@@ -191,10 +189,9 @@ async def list_doctors(
         message = f"Found {total} doctor(s) with status '{onboarding_status.value}'"
     else:
         # Lightweight basic list
-        all_doctors, total = await asyncio.gather(
-            repo.get_all(skip=skip, limit=page_size, specialization=specialization),
-            repo.count(specialization=specialization),
-        )
+        # Execute sequentially to avoid session state conflicts
+        all_doctors = await repo.get_all(skip=skip, limit=page_size, specialization=specialization)
+        total = await repo.count(specialization=specialization)
         data = [DoctorResponse.model_validate(d) for d in all_doctors]
         message = "Doctors retrieved successfully"
 
@@ -274,10 +271,13 @@ async def lookup_doctor(
     if identity is None and doctor is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found.")
 
-    identity_resp = (
-        DoctorIdentityResponse.model_validate(identity)
-        if identity else _synthesise_identity(doctor)
-    )
+    assert resolved_id is not None
+
+    if identity:
+        identity_resp = DoctorIdentityResponse.model_validate(identity)
+    else:
+        assert doctor is not None
+        identity_resp = _synthesise_identity(doctor)
 
     details = await repo.get_details_by_doctor_id(resolved_id)
     media = await repo.list_media(resolved_id)
@@ -327,9 +327,14 @@ async def update_doctor(
     doctor_id: int,
     data: DoctorUpdate,
     repo: DoctorRepoDep,
-    _: AdminOrOperationalUser,
+    current_user: CurrentUser,
 ) -> GenericResponse[DoctorResponse]:
-    """Update a doctor's profile by ID. Requires admin or operational role."""
+    """Update a doctor's profile by ID. Requires admin/operational role OR self-update."""
+    if not current_user.can_access_admin and current_user.doctor_id != doctor_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this doctor profile.",
+        )
     doctor = await repo.update(doctor_id, data)
     return GenericResponse(
         message="Doctor updated successfully",

@@ -91,7 +91,7 @@ async def create_identity(
         admin_id=current_user.id,
         email=payload.email,
     )
-    return await repo.create_identity(**payload.model_dump())
+    return await repo.create_identity(**payload.model_dump())  # type: ignore[return-value]
 
 
 @router.get(
@@ -127,7 +127,7 @@ async def get_identity(
             detail="Doctor identity not found.",
         )
 
-    return identity
+    return identity  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ async def upsert_details(
     repo = OnboardingRepository(db)
     log.info("admin_details_upsert", doctor_id=doctor_id, admin_id=current_user.id)
     details_payload = {k: v for k, v in payload.model_dump().items() if v is not None}
-    return await repo.upsert_details(doctor_id=doctor_id, payload=details_payload)
+    return await repo.upsert_details(doctor_id=doctor_id, payload=details_payload)  # type: ignore[return-value]
 
 
 @router.get(
@@ -177,7 +177,7 @@ async def get_details(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Doctor details not found.",
         )
-    return details
+    return details  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ async def add_media(
         media_id=media.media_id,
         admin_id=current_user.id,
     )
-    return media
+    return media  # type: ignore[return-value]
 
 
 @router.get(
@@ -233,7 +233,7 @@ async def list_media(
     media = await repo.list_media(doctor_id)
     for item in media:
         item.file_uri = _build_absolute_uri(request, item.file_uri)
-    return list(media)
+    return list(media)  # type: ignore[arg-type]
 
 
 @router.delete(
@@ -355,7 +355,7 @@ async def upload_media_file(
         file_uri=upload_result.file_uri,
         admin_id=current_user.id,
     )
-    return media
+    return media  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +385,7 @@ async def log_status_history(
         doctor_id=doctor_id,
         admin_id=current_user.id,
     )
-    return await repo.log_status_change(doctor_id=doctor_id, **payload.model_dump())
+    return await repo.log_status_change(doctor_id=doctor_id, **payload.model_dump())  # type: ignore[return-value]
 
 
 @router.get(
@@ -403,7 +403,7 @@ async def get_status_history(
     Requires Admin or Operational role.
     """
     repo = OnboardingRepository(db)
-    return list(await repo.get_status_history(doctor_id))
+    return list(await repo.get_status_history(doctor_id))  # type: ignore[arg-type]
 
 
 # NOTE: The aggregated list and lookup routes that were previously here

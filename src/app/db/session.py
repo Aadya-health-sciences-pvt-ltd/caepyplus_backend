@@ -8,7 +8,7 @@ Run `alembic upgrade head` (or `python scripts/migrate.py`) before first deploym
 """
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from fastapi import Depends
@@ -81,7 +81,7 @@ class DatabaseManager:
             self._session_factory = None
             log.info("db_connections_closed")
 
-    async def health_check(self) -> dict:
+    async def health_check(self) -> dict[str, Any]:
         """Ping the database. Returns {'status': 'healthy'|'unhealthy'}."""
         from sqlalchemy import text
         try:

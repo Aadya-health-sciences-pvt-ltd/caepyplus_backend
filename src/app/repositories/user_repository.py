@@ -111,7 +111,7 @@ class UserRepository:
 
     async def create(
         self,
-        phone: str,
+        phone: str | None,
         email: str | None = None,
         role: str = UserRole.USER.value,
         is_active: bool = True,
@@ -138,7 +138,7 @@ class UserRepository:
     async def create_from_doctor(
         self,
         doctor_id: int,
-        phone: str,
+        phone: str | None,
         email: str | None = None,
         role: str = UserRole.USER.value,
     ) -> User:
@@ -153,7 +153,7 @@ class UserRepository:
 
     async def get_or_create(
         self,
-        phone: str,
+        phone: str | None,
         email: str | None = None,
         doctor_id: int | None = None,
     ) -> tuple[User, bool]:
@@ -163,9 +163,16 @@ class UserRepository:
         Returns:
             Tuple of (user, is_new) where is_new is True if created
         """
-        existing = await self.get_by_phone(phone)
-        if existing:
-            return existing, False
+        if phone:
+            existing = await self.get_by_phone(phone)
+            if existing:
+                return existing, False
+        elif email:
+            existing = await self.get_by_email(email)
+            if existing:
+                return existing, False
+        else:
+            raise ValueError("Must provide either phone or email to get_or_create")
 
         new_user = await self.create(
             phone=phone,
@@ -316,7 +323,7 @@ class UserRepository:
     # HELPERS
     # =========================================================================
 
-    def _normalize_phone(self, phone: str) -> str:
+    def _normalize_phone(self, phone: str | None) -> str | None:
         """Normalize an Indian mobile phone number to E.164 (+91XXXXXXXXXX) format.
 
         Handles these common input variants:
@@ -329,6 +336,9 @@ class UserRepository:
         non-Indian numbers (e.g. +1-555-0123) pass through correctly and
         can be looked up by their stored value.
         """
+        if not phone:
+            return phone
+
         stripped = phone.strip()
         if not stripped:
             return stripped

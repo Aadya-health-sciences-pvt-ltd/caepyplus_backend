@@ -70,24 +70,15 @@ log "PostgreSQL is ready at ${DB_HOST}:${DB_PORT}."
 # ── 3. Run Alembic migrations ─────────────────────────────────────────────────
 # `alembic upgrade head` is idempotent — it applies only pending migrations.
 # If the database is already up to date, this is a no-op.
-#
-# Set SKIP_MIGRATIONS=true to skip this step (e.g., when a DBA handles
-# migrations separately, or when running from a CI/CD pipeline).
+log "Running database migrations (alembic upgrade head)..."
 
-if [[ "${SKIP_MIGRATIONS:-false}" == "true" ]]; then
-    warn "SKIP_MIGRATIONS=true — skipping Alembic migrations."
-    warn "Ensure the database schema is up to date before serving traffic."
-else
-    log "Running database migrations (alembic upgrade head)..."
-
-    if ! alembic upgrade head; then
-        err "Alembic migrations FAILED. Aborting startup."
-        err "Fix the migration error and redeploy. The database has NOT been changed."
-        exit 1
-    fi
-
-    log "Database migrations applied successfully."
+if ! alembic upgrade head; then
+    err "Alembic migrations FAILED. Aborting startup."
+    err "Fix the migration error and redeploy. The database has NOT been changed."
+    exit 1
 fi
+
+log "Database migrations applied successfully."
 
 # ── 4. (Optional) Seed dropdown values ───────────────────────────────────────
 # Uncomment the lines below to seed initial dropdown data on first run.

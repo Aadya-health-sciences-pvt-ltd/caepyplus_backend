@@ -187,7 +187,7 @@ async def extract_resume(
 
 @router.post(
     "/submit/{doctor_id}",
-    response_model=GenericResponse[dict],
+    response_model=GenericResponse[dict[str, Any]],
     summary="Submit profile for verification",
     description="Submit the doctor's own profile for admin review. Requires authentication.",
 )
@@ -195,7 +195,7 @@ async def submit_profile(
     doctor_id: int,
     db: DbSession,
     current_user: CurrentUser,
-) -> GenericResponse[dict]:
+) -> GenericResponse[dict[str, Any]]:
     doctor_repo = DoctorRepository(db)
     repo = OnboardingRepository(db)
 
@@ -222,9 +222,25 @@ async def submit_profile(
     doctor.onboarding_status = OnboardingStatus.SUBMITTED.value
     doctor.updated_at = now
 
-    # Also update doctor_identity if it exists
+    # Ensure a doctor_identity row exists (required for FK in doctor_status_history).
+    # OTP-created doctors may not have one yet — auto-create a minimal identity.
     identity = await repo.get_identity_by_doctor_id(doctor_id)
-    if identity is not None:
+    if identity is None:
+        import uuid as _uuid
+
+        from ....models.onboarding import DoctorIdentity as _DoctorIdentity
+        identity = _DoctorIdentity(
+            id=str(_uuid.uuid4()),
+            doctor_id=doctor_id,
+            first_name=doctor.first_name or "",
+            last_name=doctor.last_name or "",
+            email=doctor.email or "",
+            phone_number=doctor.phone or "",
+            onboarding_status=OnboardingStatus.SUBMITTED,
+        )
+        db.add(identity)
+        await db.flush()
+    else:
         identity.onboarding_status = OnboardingStatus.SUBMITTED
         identity.updated_at = now
         identity.status_updated_at = now
@@ -350,7 +366,7 @@ class VerifyProfilePayload(BaseModel):
 
 @router.post(
     "/verify/{doctor_id}",
-    response_model=GenericResponse[dict],
+    response_model=GenericResponse[dict[str, Any]],
     summary="Verify a doctor profile (Admin/Operational only)",
 )
 async def verify_profile(
@@ -359,7 +375,7 @@ async def verify_profile(
     db: DbSession,
     current_user: AdminOrOperationalUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
-) -> GenericResponse[dict]:
+) -> GenericResponse[dict[str, Any]]:
     """
     Mark a doctor profile as verified.
 
@@ -383,9 +399,27 @@ async def verify_profile(
     doctor.onboarding_status = OnboardingStatus.VERIFIED.value
     doctor.updated_at = now
 
-    # Also update doctor_identity if it exists
+    # Ensure a doctor_identity row exists (required for FK in doctor_status_history).
     identity = await repo.get_identity_by_doctor_id(doctor_id)
-    if identity is not None:
+    if identity is None:
+        import uuid as _uuid
+
+        from ....models.onboarding import DoctorIdentity as _DoctorIdentity
+        identity = _DoctorIdentity(
+            id=str(_uuid.uuid4()),
+            doctor_id=doctor_id,
+            first_name=doctor.first_name or "",
+            last_name=doctor.last_name or "",
+            email=doctor.email or "",
+            phone_number=doctor.phone or "",
+            onboarding_status=OnboardingStatus.VERIFIED,
+            verified_at=now,
+            status_updated_at=now,
+            status_updated_by=str(current_user.id),
+        )
+        db.add(identity)
+        await db.flush()
+    else:
         identity.onboarding_status = OnboardingStatus.VERIFIED
         identity.verified_at = now
         identity.status_updated_at = now
@@ -483,7 +517,7 @@ class RejectProfilePayload(BaseModel):
 
 @router.post(
     "/reject/{doctor_id}",
-    response_model=GenericResponse[dict],
+    response_model=GenericResponse[dict[str, Any]],
     summary="Reject a doctor profile (Admin/Operational only)",
 )
 async def reject_profile(
@@ -492,7 +526,7 @@ async def reject_profile(
     db: DbSession,
     current_user: AdminOrOperationalUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
-) -> GenericResponse[dict]:
+) -> GenericResponse[dict[str, Any]]:
     """
     Mark a doctor profile as rejected.
 
@@ -516,9 +550,27 @@ async def reject_profile(
     doctor.onboarding_status = OnboardingStatus.REJECTED.value
     doctor.updated_at = now
 
-    # Also update doctor_identity if it exists
+    # Ensure a doctor_identity row exists (required for FK in doctor_status_history).
     identity = await repo.get_identity_by_doctor_id(doctor_id)
-    if identity is not None:
+    if identity is None:
+        import uuid as _uuid
+
+        from ....models.onboarding import DoctorIdentity as _DoctorIdentity
+        identity = _DoctorIdentity(
+            id=str(_uuid.uuid4()),
+            doctor_id=doctor_id,
+            first_name=doctor.first_name or "",
+            last_name=doctor.last_name or "",
+            email=doctor.email or "",
+            phone_number=doctor.phone or "",
+            onboarding_status=OnboardingStatus.REJECTED,
+            rejection_reason=payload.reason,
+            status_updated_at=now,
+            status_updated_by=str(current_user.id),
+        )
+        db.add(identity)
+        await db.flush()
+    else:
         identity.onboarding_status = OnboardingStatus.REJECTED
         identity.rejection_reason = payload.reason
         identity.status_updated_at = now

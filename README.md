@@ -195,14 +195,12 @@ caepy_plus_back_end/
 │   ├── api/v1/
 │   │   ├── __init__.py               # Versioned router (prefix /api/v1)
 │   │   └── endpoints/
-│   │       ├── admin_dropdowns.py    # Admin dropdown option management (CRUD, approve/reject)
 │   │       ├── admin_users.py        # Admin user management (RBAC)
-│   │       ├── doctors.py            # Doctor CRUD + bulk CSV upload endpoints
-│   │       ├── dropdowns.py          # Public dropdown options + user submission
+│   │       ├── doctors.py            # Doctor CRUD endpoints
 │   │       ├── health.py             # Health / liveness / readiness probes
-│   │       ├── onboarding.py         # Resume extraction, verify/reject, email templates
-│   │       ├── onboarding_admin.py   # Admin onboarding data CRUD + media upload
-│   │       ├── otp.py                # OTP auth + Google Sign-In + JWT issuance
+│   │       ├── onboarding.py         # Doctor onboarding status endpoints
+│   │       ├── onboarding_admin.py   # Admin onboarding dashboard endpoints
+│   │       ├── otp.py                # OTP auth + JWT issuance
 │   │       └── voice.py              # Voice conversation endpoints
 │   ├── core/
 │   │   ├── config.py                 # Pydantic BaseSettings (12-factor)
@@ -895,26 +893,785 @@ resume_extraction:
 
 ## 📡 API Reference
 
-> **Full API documentation:** See **[API_DOCUMENTATION.md](API_DOCUMENTATION.md)** for complete endpoint reference with request/response examples.
+### Base URL
+```
+http://localhost:8000/api/v1
+```
 
-### Quick Links
+### Interactive Documentation
 - **Swagger UI:** http://localhost:8000/docs
 - **ReDoc:** http://localhost:8000/redoc
-- **Base URL:** `http://localhost:8000/api/v1`
 
-### Endpoint Summary (58 total)
+### Authentication
 
-| Section | Prefix | Count | Auth |
-|---------|--------|-------|------|
-| Authentication | `/auth` | 5 | Public |
-| Health Check | `/health`, `/live`, `/ready` | 3 | Public |
-| Doctors | `/doctors` | 7 | JWT (Admin/Ops for write) |
-| Dropdowns | `/dropdowns` | 3 | Public (submit = JWT) |
-| Onboarding | `/onboarding` | 5 | JWT (Admin/Ops for verify/reject) |
-| Voice Onboarding | `/voice` | 5 | JWT |
-| Onboarding Admin | `/onboarding-admin` | 10 | JWT + Admin/Ops |
-| Admin Users | `/admin/users` | 9 | JWT + Admin |
-| Admin Dropdowns | `/admin/dropdowns` | 11 | JWT + Admin/Ops |
+All endpoints (except `/health`, `/live`, `/ready`) require a valid **Bearer JWT** in the `Authorization` header. Tokens are issued by the OTP verification flow.
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Core Endpoints
+
+#### Health Probes (no auth required)
+```http
+GET /api/v1/health      # Comprehensive health check (DB + AI service)
+GET /api/v1/ready       # Kubernetes readiness probe
+GET /api/v1/live        # Kubernetes liveness probe
+```
+
+#### OTP Authentication
+```http
+POST /api/v1/auth/otp/request           # Send OTP to mobile number
+POST /api/v1/auth/otp/verify           # Verify OTP + receive JWT (doctor flow)
+POST /api/v1/auth/otp/resend           # Resend OTP
+POST /api/v1/auth/admin/otp/verify     # Admin OTP verify (no auto-create)
+POST /api/v1/auth/google/verify        # Google Sign-In verify
+```
+
+#### Doctor Management
+```http
+GET    /api/v1/doctors                          # List doctors (paginated, lightweight DoctorResponse)
+GET    /api/v1/doctors?status=PENDING           # List by onboarding status (returns full DoctorWithFullInfoResponse)
+GET    /api/v1/doctors/lookup                   # Full doctor profile by doctor_id / email / phone
+GET    /api/v1/doctors/{id}                     # Get single doctor by ID
+PUT    /api/v1/doctors/{id}                     # Update doctor profile (admin/operational only)
+GET    /api/v1/doctors/bulk-upload/csv/template # Download template CSV with sample rows
+POST   /api/v1/doctors/bulk-upload/csv/validate # Phase 1: validate CSV, return all row errors (no DB writes)
+POST   /api/v1/doctors/bulk-upload/csv          # Phase 2: confirm upload, persist PENDING doctor records
+```
+
+#### Doctor Onboarding
+```http
+POST /api/v1/onboarding/extract-resume              # AI resume extraction (PDF/image → structured data)
+GET  /api/v1/onboarding/email-template/{doctor_id}  # Pre-fill email template for admin popup (Admin/Operational)
+POST /api/v1/onboarding/submit/{doctor_id}          # Submit own profile for admin review (any authenticated user)
+POST /api/v1/onboarding/verify/{doctor_id}          # Admin: mark profile as verified + optional email
+POST /api/v1/onboarding/reject/{doctor_id}          # Admin: reject profile with reason + optional email
+```
+
+#### Onboarding Admin (admin/operational role)
+```http
+POST   /api/v1/onboarding-admin/identities                  # Create doctor identity
+GET    /api/v1/onboarding-admin/identities                  # Fetch identity by doctor_id or email
+PUT    /api/v1/onboarding-admin/details/{doctor_id}         # Upsert doctor details (6-block questionnaire)
+GET    /api/v1/onboarding-admin/details/{doctor_id}         # Fetch doctor details
+POST   /api/v1/onboarding-admin/media/{doctor_id}           # Add media record (metadata only)
+GET    /api/v1/onboarding-admin/media/{doctor_id}           # List media for a doctor
+DELETE /api/v1/onboarding-admin/media/{media_id}            # Delete media record
+POST   /api/v1/onboarding-admin/media/{doctor_id}/upload    # Upload file to blob storage + register
+POST   /api/v1/onboarding-admin/status-history/{doctor_id}  # Log status change
+GET    /api/v1/onboarding-admin/status-history/{doctor_id}  # Fetch status history
+```
+
+#### Voice Onboarding
+```http
+POST   /api/v1/voice/start                         # Start conversation session
+POST   /api/v1/voice/chat                          # Send message, get AI response
+GET    /api/v1/voice/session/{session_id}          # Get session status
+POST   /api/v1/voice/session/{session_id}/finalize # Complete & persist session
+DELETE /api/v1/voice/session/{session_id}          # Cancel session
+```
+
+#### Bulk Doctor CSV Upload (admin / operational role)
+
+The bulk upload feature lets admin and operational users register up to **500 doctors at once** from a CSV file via a two-phase workflow.
+
+##### Authentication & Authorization
+
+All three endpoints require:
+1. A valid **Bearer JWT** in the `Authorization` header (issued by `/auth/otp/verify` or `/auth/google/verify`)
+2. The authenticated user's role must be **`admin`** or **`operational`** — `user` role is rejected with `403 Forbidden`
+
+```http
+Authorization: Bearer <access_token>
+```
+
+The auth chain for each request:
+```
+Bearer token
+  └── require_authentication()   [JWT signature + expiry check — router-level]
+        └── get_current_user()   [load User from DB, check is_active]
+              └── require_admin_or_operational()  [role ∈ {admin, operational}]
+```
+
+##### Two-Phase Workflow
+
+```
+Step 1  POST /bulk-upload/csv/validate   ← upload CSV, get ALL row errors
+           │
+           ├── errors found  → fix CSV, repeat Step 1
+           │
+           └── valid=true, errors=[]
+                    │
+Step 2  POST /bulk-upload/csv           ← upload clean CSV, write to DB
+           │
+           ├── rows created with onboarding_status = PENDING
+           └── audit entry added to doctor_status_history
+```
+
+##### Download Template
+
+```http
+GET /api/v1/doctors/bulk-upload/csv/template
+Authorization: Bearer <token>
+```
+
+Returns the official CSV template pre-filled with two sample rows (Dr. Arjun Sharma — Cardiology; Dr. Priya Nair — Neurology). Fill in your data, remove the sample rows, then upload via the validate endpoint.
+
+**Response:** `Content-Type: text/csv`, `Content-Disposition: attachment; filename="doctor_bulk_upload_template.csv"`
+
+```bash
+curl -O -J \
+  -H "Authorization: Bearer <token>" \
+  http://localhost:8000/api/v1/doctors/bulk-upload/csv/template
+```
+
+##### Phase 1 — Validate (no DB writes)
+
+```http
+POST /api/v1/doctors/bulk-upload/csv/validate
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+```
+
+| Constraint | Value |
+|------------|-------|
+| Max rows | 500 |
+| Encoding | UTF-8 (BOM stripped automatically) |
+| Multi-value fields | Pipe-separated: `English\|Hindi\|Marathi` |
+| Required columns | `first_name`, `last_name`, `phone` |
+| Phone normalisation | Auto-converted to E.164 `+91XXXXXXXXXX` |
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@doctors.csv" \
+  http://localhost:8000/api/v1/doctors/bulk-upload/csv/validate
+```
+
+**Response — valid file:**
+```json
+{
+  "valid": true,
+  "total_rows": 3,
+  "error_count": 0,
+  "errors": []
+}
+```
+
+**Response — file with errors:**
+```json
+{
+  "valid": false,
+  "total_rows": 3,
+  "error_count": 2,
+  "errors": [
+    { "row": 2, "field": "phone", "error": "'abc' is not a valid phone number (too short)." },
+    { "row": 4, "field": "email", "error": "'notanemail' is not a valid email address." }
+  ]
+}
+```
+
+All errors across all rows are returned in one shot — fix everything, then re-validate.
+
+**Validated fields per row:**
+
+| Field | Validation |
+|-------|-----------|
+| `phone` | Required; digits only ≥ 10; normalised to `+91…` |
+| `first_name` | Required; non-empty |
+| `last_name` | Required; non-empty |
+| `email` | Optional; must contain `@` and a dot in the domain when provided |
+| `years_of_experience` | Optional; numeric 0–100 |
+| `consultation_fee` | Optional; numeric ≥ 0 |
+| `registration_year` | Optional; numeric 1900–2100 |
+| `year_of_mbbs` | Optional; numeric 1900–2100 |
+| `year_of_specialisation` | Optional; numeric 1900–2100 |
+| `years_of_clinical_experience` | Optional; numeric 0–100 |
+| `years_post_specialisation` | Optional; numeric 0–100 |
+
+##### Phase 2 — Confirm Upload
+
+```http
+POST /api/v1/doctors/bulk-upload/csv
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+```
+
+Runs the identical validation gate — returns `422` with the full error report if any row fails. Only a fully-clean file proceeds to database writes.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@doctors_clean.csv" \
+  http://localhost:8000/api/v1/doctors/bulk-upload/csv
+```
+
+**What happens for each row:**
+- **New doctor** (no existing record with that phone): Creates a `doctors` row + `doctor_identity` row with `onboarding_status = PENDING` + an initial `doctor_status_history` audit entry.
+- **Existing doctor** (phone already in DB): Updates profile fields in-place; onboarding status is **not** changed (they may already be `SUBMITTED` or `VERIFIED`).
+- **DB-level error** (e.g. unique constraint race condition): The row is rolled back via savepoint; all other rows continue. The skipped row appears in `rows[].status = "skipped"`.
+
+**Entire batch is atomic** — the outer transaction commits only after all rows have been processed. An unexpected system error rolls back everything.
+
+**Response (all rows successful):**
+```json
+{
+  "success": true,
+  "message": "Processed 3 row(s): 2 created, 1 updated.",
+  "total_rows": 3,
+  "created": 2,
+  "updated": 1,
+  "skipped": 0,
+  "rows": [
+    { "row": 2, "status": "created", "doctor_id": 101, "phone": "+919988776655", "email": "arjun@example.com" },
+    { "row": 3, "status": "created", "doctor_id": 102, "phone": "+919876543210", "email": "priya@example.com" },
+    { "row": 4, "status": "updated", "doctor_id": 77,  "phone": "+918800001111", "email": null }
+  ],
+  "skipped_errors": []
+}
+```
+
+**Response (one row skipped due to a DB-level race condition):**
+```json
+{
+  "success": false,
+  "message": "Processed 3 row(s): 2 created, 0 updated, 1 row(s) skipped due to errors.",
+  "total_rows": 3,
+  "created": 2,
+  "updated": 0,
+  "skipped": 1,
+  "rows": [
+    { "row": 2, "status": "created", "doctor_id": 101, "phone": "+919988776655", "email": "arjun@example.com" },
+    { "row": 3, "status": "created", "doctor_id": 102, "phone": "+919876543210", "email": "priya@example.com" },
+    { "row": 4, "status": "skipped",  "doctor_id": null, "phone": "9800001111",   "email": null }
+  ],
+  "skipped_errors": [
+    { "row": 4, "field": null, "error": "Could not save row: UNIQUE constraint failed: doctors.email" }
+  ]
+}
+```
+
+**Error Responses:**
+
+| HTTP | Scenario |
+|------|----------|
+| `400` | CSV encoding error, missing required columns, no data rows |
+| `401` | Missing or invalid / expired JWT |
+| `403` | User role is not `admin` or `operational` |
+| `413` | More than 500 data rows |
+| `422` | Row-level validation failures (full error list returned) |
+
+##### CSV Template — Column Reference
+
+The template contains 48 columns. Required columns are marked ✱.
+
+| Column | Required | Notes |
+|--------|----------|-------|
+| `first_name` | ✱ | |
+| `last_name` | ✱ | |
+| `phone` | ✱ | Auto-normalised to E.164 |
+| `email` | | If provided, creates `doctor_identity` row with PENDING status |
+| `title` | | `Dr.`, `Prof.`, etc. |
+| `gender` | | |
+| `primary_specialization` | | |
+| `medical_registration_number` | | |
+| `medical_council` | | Full name of the issuing medical council |
+| `registration_year` | | Numeric |
+| `registration_authority` | | |
+| `years_of_experience` | | Numeric 0–100 |
+| `consultation_fee` | | Numeric ≥ 0 |
+| `year_of_mbbs` | | Numeric 1900–2100 |
+| `year_of_specialisation` | | Numeric 1900–2100 |
+| `years_of_clinical_experience` | | Numeric 0–100 |
+| `years_post_specialisation` | | Numeric 0–100 |
+| `specialty` | | |
+| `primary_practice_location` | | |
+| `sub_specialties` | | Pipe-separated |
+| `areas_of_expertise` | | Pipe-separated |
+| `languages` | | Pipe-separated |
+| `conditions_treated` | | Pipe-separated |
+| `procedures_performed` | | Pipe-separated |
+| `age_groups_treated` | | Pipe-separated |
+| `awards_recognition` | | Pipe-separated |
+| `memberships` | | Pipe-separated |
+| `publications` | | Pipe-separated |
+| `qualifications` | | Pipe-separated |
+| `fellowships` | | Pipe-separated |
+| `professional_memberships` | | Pipe-separated |
+| `awards_academic_honours` | | Pipe-separated |
+| `areas_of_clinical_interest` | | Pipe-separated |
+| `practice_segments` | | |
+| `conditions_commonly_treated` | | Pipe-separated |
+| `conditions_known_for` | | Pipe-separated |
+| `conditions_want_to_treat_more` | | Pipe-separated |
+| `full_name` | | Display name |
+| `professional_achievement` | | Free text |
+| `personal_achievement` | | Free text |
+| `professional_aspiration` | | Free text |
+| `personal_aspiration` | | Free text |
+| `what_patients_value_most` | | Free text |
+| `approach_to_care` | | Free text |
+| `availability_philosophy` | | Free text |
+| `quality_time_interests_text` | | Free text |
+| `professional_overview` | | Free text |
+| `about_me` | | Free text |
+| `professional_tagline` | | Free text |
+
+---
+
+#### Admin Verification & Email Notifications
+
+When an admin verifies or rejects a doctor's profile, the backend can optionally
+send an email notification to the doctor. The flow is:
+
+1. **Admin opens the action popup** → frontend fetches the pre-filled template
+2. **Admin edits** subject/body if desired
+3. **Admin clicks Send (Verify / Reject)** → frontend calls the action endpoint with the final content
+
+```
+GET  /api/v1/onboarding/email-template/{doctor_id}?action=verified|rejected
+POST /api/v1/onboarding/verify/{doctor_id}
+POST /api/v1/onboarding/reject/{doctor_id}
+```
+
+All three endpoints require **Admin or Operational** role (Bearer token).
+
+---
+
+##### Step 1 — Fetch pre-filled template (for the popup)
+
+```http
+GET /api/v1/onboarding/email-template/{doctor_id}?action=verified
+Authorization: Bearer <admin_token>
+```
+
+**Response `200 OK`:**
+```json
+{
+  "success": true,
+  "message": "Email template loaded successfully",
+  "data": {
+    "action": "verified",
+    "doctor_id": 42,
+    "doctor_email": "arjun.sharma@example.com",
+    "subject": "🎉 Congratulations! Your LinQMD Profile Has Been Verified",
+    "body_html": "<html>…pre-rendered HTML…</html>"
+  }
+}
+```
+
+The frontend displays `subject` and `body_html` in editable fields inside the popup.
+
+---
+
+##### Step 2 — Verify with optional email
+
+```http
+POST /api/v1/onboarding/verify/{doctor_id}
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+```
+
+**Payload:**
+```json
+{
+  "send_email": true,
+  "email_subject": "Your LinQMD profile is verified!",
+  "email_body": "<p>Dear Dr. Sharma…</p>"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `send_email` | `bool` | `false` | Set `true` to trigger email delivery |
+| `email_subject` | `string \| null` | `null` | Admin-edited subject; uses template default if omitted |
+| `email_body` | `string \| null` | `null` | Admin-edited HTML body; uses template default if omitted |
+
+**Response `200 OK`:**
+```json
+{
+  "success": true,
+  "message": "Profile verified successfully",
+  "data": {
+    "doctor_id": 42,
+    "previous_status": "submitted",
+    "new_status": "verified",
+    "verified_at": "2025-06-01T10:30:00+00:00",
+    "email_sent": true
+  }
+}
+```
+
+> **Non-blocking email**: If SMTP delivery fails, the verification is **not rolled back**.
+> The response will include `"email_sent": false` and an `"email_error"` field with the reason.
+> The status change is always committed atomically.
+
+---
+
+##### Step 3 — Reject with optional email
+
+```http
+POST /api/v1/onboarding/reject/{doctor_id}
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+```
+
+**Payload:**
+```json
+{
+  "reason": "Registration certificate image is blurry — please re-upload.",
+  "send_email": true,
+  "email_subject": null,
+  "email_body": null
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `reason` | `string \| null` | `null` | Rejection reason stored in audit log and injected into email template |
+| `send_email` | `bool` | `false` | Set `true` to trigger email delivery |
+| `email_subject` | `string \| null` | `null` | Admin-edited subject; uses template default if omitted |
+| `email_body` | `string \| null` | `null` | Admin-edited HTML body; uses template default if omitted |
+
+**Response `200 OK`:**
+```json
+{
+  "success": true,
+  "message": "Profile rejected successfully",
+  "data": {
+    "doctor_id": 42,
+    "previous_status": "submitted",
+    "new_status": "rejected",
+    "reason": "Registration certificate image is blurry — please re-upload.",
+    "email_sent": true
+  }
+}
+```
+
+---
+
+##### Email Template Configuration
+
+Templates live in **`config/email_templates.yaml`** and are loaded from disk at runtime.
+To customise email copy, edit that file — no code change or redeploy required (restart the server to pick up changes).
+
+**Available placeholder variables:**
+
+| Placeholder | Description |
+|-------------|-------------|
+| `{doctor_name}` | Full name with title (e.g. `Dr. Arjun Sharma`) |
+| `{first_name}` | Doctor's first name |
+| `{medical_registration_number}` | MRN on file |
+| `{medical_council}` | Issuing medical council |
+| `{specialization}` | Primary specialisation |
+| `{reason}` | Rejection reason (only relevant in `rejected` template) |
+| `{platform_name}` | Taken from `EMAIL_FROM_NAME` env variable |
+| `{support_email}` | Taken from `EMAIL_FROM_ADDRESS` env variable |
+
+---
+
+##### Frontend Integration Checklist
+
+> **What the frontend must implement:**
+
+- [ ] **GET `/email-template/{doctor_id}?action=verified`** when the admin opens the Verify popup — populate the Subject and Body fields with the response.
+- [ ] **GET `/email-template/{doctor_id}?action=rejected`** when the admin opens the Reject popup — same.
+- [ ] Render the popup with:
+  - A **read-only** "To:" field showing `doctor_email` from the response.
+  - An **editable** "Subject" text input pre-filled with `subject`.
+  - An **editable** rich-text / textarea pre-filled with `body_html` (render as HTML preview or raw source, depending on your editor).
+  - A **"Send email"** toggle/checkbox (default: on).
+- [ ] On **Verify / Reject** button click, POST to the respective endpoint with:
+  - `send_email: true` (if toggle is on)
+  - `email_subject`: current value of the subject field (pass `null` if unchanged to use template default)
+  - `email_body`: current value of the body field (pass `null` if unchanged to use template default)
+- [ ] Show a **success toast** if `email_sent === true`.
+- [ ] Show a **warning toast** if `email_sent === false && email_error` is present (e.g. "Profile verified but email could not be sent: \<error\>").
+- [ ] The **Subject** and **Body** fields are always optional — if the admin closes the popup without editing, pass `null` for both to use template defaults.
+
+---
+
+#### Dropdown Options (Speciality & Other Fields)
+
+The platform manages all dropdown option lists through a **3-status approval workflow**:
+
+| Status | Visible in public dropdowns? | Created by |
+|--------|------------------------------|------------|
+| `approved` | ✅ Yes | Admin direct-create **or** approved user submission |
+| `pending` | ❌ No — hidden until reviewed | Doctor / user `POST /dropdowns/submit` |
+| `rejected` | ❌ Never | Admin reject action |
+
+---
+
+##### Supported dropdown fields
+
+| `field_name` | Description |
+|---|---|
+| `specialty` | Medical specialisation |
+| `sub_specialties` | Sub-specialisation |
+| `qualifications` | Academic qualifications / degrees |
+| `fellowships` | Fellowship programmes |
+| `professional_memberships` | Professional association memberships |
+| `languages_spoken` | Languages spoken |
+| `age_groups_treated` | Patient age groups |
+| `primary_practice_location` | City / practice location |
+| `practice_segments` | Practice segment / setting |
+| `training_experience` | Notable training & experience |
+| `motivation_in_practice` | Motivation in practice |
+| `unwinding_after_work` | After-work activities |
+| `quality_time_interests` | Personal interests |
+| `conditions_treated` | Conditions commonly treated |
+| `procedures_performed` | Procedures performed |
+
+---
+
+##### Public endpoints (no auth)
+
+```http
+GET /api/v1/dropdowns
+GET /api/v1/dropdowns/{field_name}
+```
+
+**`GET /api/v1/dropdowns`** — all fields at once:
+```json
+{
+  "success": true,
+  "message": "Dropdown options loaded successfully",
+  "data": {
+    "supported_fields": ["age_groups_treated", "fellowships", "..."],
+    "fields": {
+      "specialty": {
+        "field_name": "specialty",
+        "description": "Medical specialisation",
+        "options": [
+          { "id": 1, "value": "Cardiology", "label": "Cardiology", "display_order": 0 },
+          { "id": 2, "value": "Neurology",  "label": "Neurology",  "display_order": 0 }
+        ]
+      }
+    }
+  }
+}
+```
+
+**`GET /api/v1/dropdowns/specialty`** — single field.
+
+---
+
+##### User submission (authenticated — any role)
+
+```http
+POST /api/v1/dropdowns/submit
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "field_name": "specialty",
+  "value": "Sports Medicine",
+  "label": "Sports Medicine"
+}
+```
+
+**Response `202 Accepted`:**
+```json
+{
+  "success": true,
+  "message": "'Sports Medicine' has been submitted for 'specialty' and is pending admin review.",
+  "data": {
+    "id": 183,
+    "field_name": "specialty",
+    "value": "Sports Medicine",
+    "label": "Sports Medicine",
+    "status": "pending",
+    "message": "..."
+  }
+}
+```
+
+> The value is **not** visible in public dropdowns until approved.
+> Submitting an already-existing value returns the existing record without creating a duplicate.
+
+---
+
+##### Admin endpoints (Admin / Operational role)
+
+```http
+GET    /api/v1/admin/dropdowns                        # List all (filter: field, status, search)
+GET    /api/v1/admin/dropdowns/pending                # Pending-only (badge view)
+GET    /api/v1/admin/dropdowns/fields                 # List supported field names
+GET    /api/v1/admin/dropdowns/{option_id}            # Get single option
+POST   /api/v1/admin/dropdowns                        # Create option (approved immediately)
+PATCH  /api/v1/admin/dropdowns/{option_id}            # Update label / display_order
+DELETE /api/v1/admin/dropdowns/{option_id}            # Delete (system rows protected)
+POST   /api/v1/admin/dropdowns/{option_id}/approve    # Approve a PENDING option
+POST   /api/v1/admin/dropdowns/{option_id}/reject     # Reject a PENDING option
+POST   /api/v1/admin/dropdowns/bulk-approve           # Approve up to 200 at once
+POST   /api/v1/admin/dropdowns/bulk-reject            # Reject up to 200 at once
+```
+
+**Approve a pending submission:**
+```http
+POST /api/v1/admin/dropdowns/183/approve
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{ "review_notes": "Verified — valid specialty." }
+```
+
+**Bulk-approve:**
+```http
+POST /api/v1/admin/dropdowns/bulk-approve
+Authorization: Bearer <admin_token>
+Content-Type: application/json
+
+{ "option_ids": [183, 184, 185], "review_notes": "Batch approved after review." }
+```
+
+**List pending (for admin badge / notification count):**
+```http
+GET /api/v1/admin/dropdowns/pending
+Authorization: Bearer <admin_token>
+```
+```json
+{
+  "data": {
+    "items": [...],
+    "total": 3,
+    "pending_count": 3
+  }
+}
+```
+
+---
+
+##### Frontend Integration Checklist — Dropdowns
+
+> **What the frontend must implement:**
+
+**Doctor / user registration form:**
+- [ ] On page load, call `GET /api/v1/dropdowns` once and cache the full `fields` map.
+- [ ] Populate each dropdown field from `fields[field_name].options`.
+- [ ] For each dropdown, add an **"+ Add new value"** option/button.
+- [ ] When "Add new value" is clicked, show a small text input for the new value.
+- [ ] On submit of the new value, call `POST /api/v1/dropdowns/submit` with `field_name` + `value`.
+- [ ] Show the user a confirmation: *"Your value has been submitted and is pending review. It will appear in the list once approved."*
+- [ ] Do **not** pre-select the submitted value in the current session's dropdown (it is `pending`, not yet approved).
+
+**Admin portal — Dropdown Management page:**
+- [ ] Show a **badge** / counter for pending submissions: `GET /api/v1/admin/dropdowns/pending` → `data.pending_count`.
+- [ ] Render a table of all dropdown options with columns: Field, Value, Status, Submitted by, Submitted at.
+- [ ] Support filtering by `field_name`, `status`, and `search`.
+- [ ] Per row: **Approve** button → `POST /admin/dropdowns/{id}/approve`.
+- [ ] Per row: **Reject** button → `POST /admin/dropdowns/{id}/reject` with optional `review_notes`.
+- [ ] Support **multi-select + bulk approve / bulk reject** → `POST /admin/dropdowns/bulk-approve` or `bulk-reject`.
+- [ ] Provide a **"+ Add option"** form → `POST /api/v1/admin/dropdowns` (creates as `approved` immediately).
+- [ ] Allow editing display label and sort order via `PATCH /admin/dropdowns/{id}`.
+- [ ] Allow deletion of non-system rows via `DELETE /admin/dropdowns/{id}`.
+- [ ] System rows (`is_system: true`) should show a 🔒 lock icon and disable Delete.
+
+---
+
+#### Admin User Management (admin role only)
+```http
+GET    /api/v1/admin/users              # List users
+GET    /api/v1/admin/users/{user_id}    # Get user
+PATCH  /api/v1/admin/users/{user_id}    # Update role / active / doctor_id
+DELETE /api/v1/admin/users/{user_id}    # Delete user
+```
+
+### Response Format
+
+**Success:**
+```json
+{
+  "message": "Operation successful",
+  "data": {}
+}
+```
+
+**Paginated:**
+```json
+{
+  "message": "Items retrieved",
+  "data": [],
+  "pagination": {
+    "page": 1,
+    "page_size": 20,
+    "total_items": 100,
+    "total_pages": 5,
+    "has_next": true,
+    "has_previous": false
+  }
+}
+```
+
+**Error:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human readable message",
+    "details": {}
+  }
+}
+```
+
+### Error Codes
+
+| Code | HTTP | Description |
+|------|------|-------------|
+| `UNAUTHORIZED` | 401 | Missing or invalid token |
+| `INVALID_TOKEN` | 401 | Token is invalid |
+| `OTP_EXPIRED` | 401 | OTP has expired |
+| `INVALID_OTP` | 401 | OTP is incorrect |
+| `USER_NOT_FOUND` | 401 | User not in users table |
+| `USER_INACTIVE` | 403 | User account deactivated |
+| `ADMIN_REQUIRED` | 403 | Admin role required |
+| `INSUFFICIENT_PERMISSIONS` | 403 | Role lacks permissions |
+| `DOCTOR_NOT_FOUND` | 404 | Doctor record not found |
+| `VALIDATION_ERROR` | 422 | Request validation failed |
+| `EXTRACTION_ERROR` | 422 | AI extraction failed |
+
+### Rate Limits
+
+| Endpoint Type | Limit |
+|--------------|-------|
+| OTP Request | 3 per minute per phone |
+| OTP Verify | 5 attempts per OTP |
+| Resume Extraction | 10 per minute |
+| Voice Chat | 60 per minute per session |
+| Admin APIs | 100 per minute |
+
+### Example Usage
+
+#### Extract Data from Resume
+```bash
+curl -X POST http://localhost:8000/api/v1/onboarding/extract-resume \
+  -F "file=@doctor_resume.pdf"
+```
+
+#### Create Doctor Record
+```bash
+curl -X POST http://localhost:8000/api/v1/doctors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "first_name": "Sarah",
+    "last_name": "Johnson",
+    "email": "sarah.johnson@hospital.com",
+    "primary_specialization": "Cardiology",
+    "medical_registration_number": "MED123456"
+  }'
+```
+
+#### Start Voice Session
+```bash
+curl -X POST http://localhost:8000/api/v1/voice/start \
+  -H "Content-Type: application/json" \
+  -d '{"language": "en"}'
+```
 
 ---
 

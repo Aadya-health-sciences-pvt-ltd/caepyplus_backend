@@ -10,10 +10,8 @@ AUTHENTICATED (any logged-in user / doctor):
 """
 from __future__ import annotations
 
-from typing import Annotated
-
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
 from ....core.rbac import CurrentUser
 from ....core.responses import GenericResponse

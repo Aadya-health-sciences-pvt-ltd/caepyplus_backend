@@ -83,7 +83,7 @@ class DoctorIdentity(Base):
     )
 
     title: Mapped[DoctorTitle | None] = mapped_column(
-        SQLEnum(DoctorTitle, name="doctor_title_enum", native_enum=False),
+        SQLEnum(DoctorTitle, name="doctor_title_enum", native_enum=False, values_callable=lambda x: [e.value for e in x]),
         nullable=True,
     )
 
@@ -93,7 +93,7 @@ class DoctorIdentity(Base):
     phone_number: Mapped[str] = mapped_column(String(20), nullable=False)
 
     onboarding_status: Mapped[OnboardingStatus] = mapped_column(
-        SQLEnum(OnboardingStatus, name="onboarding_status_enum", native_enum=False),
+        SQLEnum(OnboardingStatus, name="onboarding_status_enum", native_enum=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=OnboardingStatus.PENDING,
         index=True,
@@ -334,7 +334,7 @@ class DropdownOption(Base):
 
     # Approval workflow
     status: Mapped[DropdownOptionStatus] = mapped_column(
-        SQLEnum(DropdownOptionStatus, name="dropdown_option_status_enum", native_enum=False),
+        SQLEnum(DropdownOptionStatus, name="dropdown_option_status_enum", native_enum=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
         default=DropdownOptionStatus.APPROVED,
         index=True,
@@ -385,11 +385,11 @@ class DoctorStatusHistory(Base):
     )
 
     previous_status: Mapped[OnboardingStatus | None] = mapped_column(
-        SQLEnum(OnboardingStatus, name="onboarding_status_enum", native_enum=False),
+        SQLEnum(OnboardingStatus, name="onboarding_status_enum", native_enum=False, values_callable=lambda x: [e.value for e in x]),
         nullable=True,
     )
     new_status: Mapped[OnboardingStatus] = mapped_column(
-        SQLEnum(OnboardingStatus, name="onboarding_status_enum", native_enum=False),
+        SQLEnum(OnboardingStatus, name="onboarding_status_enum", native_enum=False, values_callable=lambda x: [e.value for e in x]),
         nullable=False,
     )
 

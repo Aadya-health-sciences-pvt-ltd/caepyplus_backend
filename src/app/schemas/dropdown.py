@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field, field_validator
 from ..models.onboarding import DropdownOptionStatus
 from ..repositories.dropdown_repository import SUPPORTED_FIELDS
 
-
 # ---------------------------------------------------------------------------
 # Shared
 # ---------------------------------------------------------------------------
