@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ....core.doctor_utils import synthesise_identity as _synthesise_identity
-from ....core.rbac import CurrentUser
+from ....core.rbac import CurrentUser, AdminOrOperationalUser
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
 from ....db.session import DbSession
 from ....models.doctor import Doctor as DoctorModel
@@ -552,7 +552,7 @@ _TEMPLATE_CSV_PATH: Path = (
     },
 )
 async def download_bulk_upload_template(
-    _: AdminOrOperationalUser,
+    _current_user: AdminOrOperationalUser,
 ) -> FileResponse:
     """Return the doctor bulk-upload CSV template as a file download."""
     if not _TEMPLATE_CSV_PATH.exists():
