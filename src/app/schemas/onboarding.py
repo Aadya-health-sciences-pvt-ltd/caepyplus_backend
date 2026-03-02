@@ -23,21 +23,12 @@ class OnboardingStatusEnum(str, Enum):
     VERIFIED = "verified"
     REJECTED = "rejected"
 
-class DoctorTitleEnum(str, Enum):
-    """Public enum for doctor title used by APIs."""
-
-    DR = "dr"
-    PROF = "prof"
-    PROF_DR = "prof.dr"
-
 # ---------------------------------------------------------------------------
 # doctor_identity
 # ---------------------------------------------------------------------------
 
 class DoctorIdentityBase(BaseModel):
-    title: DoctorTitleEnum | None = None
-    first_name: str = Field(min_length=1, max_length=100)
-    last_name: str = Field(min_length=1, max_length=100)
+    full_name: str = Field(min_length=1, max_length=200)
     email: EmailStr
     phone_number: str = Field(min_length=3, max_length=32)
     onboarding_status: OnboardingStatusEnum = Field(default=OnboardingStatusEnum.PENDING)
@@ -54,10 +45,7 @@ class DoctorIdentityResponse(DoctorIdentityBase):
 
     id: str
     doctor_id: int
-    # Override base fields to allow empty/placeholder values in responses (e.g. OTP-created doctors)
-    title: str | None = None  # type: ignore[assignment]
-    first_name: str = Field(max_length=100, default="")
-    last_name: str = Field(max_length=100, default="")
+    full_name: str = Field(max_length=200, default="")
     email: str = ""
     phone_number: str = Field(max_length=32, default="")
     status_updated_at: datetime | None = None

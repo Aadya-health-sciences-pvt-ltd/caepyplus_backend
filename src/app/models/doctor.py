@@ -55,10 +55,9 @@ class Doctor(Base):
         3. Voice registration (Conversational AI)
     
     Attributes:
-        Personal: title, gender, first_name, last_name, email, phone
+        Contact: email, phone
         Professional: specialization, experience, registration, fee
-        Expertise: sub_specialties, areas_of_expertise, languages (JSON arrays)
-        Achievements: awards, memberships (JSON arrays)
+        Expertise: languages (JSON array)
         Locations: practice_locations (JSON array of objects)
         Meta: onboarding_source, timestamps, raw_extraction_data
         
@@ -79,32 +78,8 @@ class Doctor(Base):
     )
 
     # ==========================================================================
-    # PERSONAL DETAILS
+    # CONTACT DETAILS
     # ==========================================================================
-    title: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
-        comment="Professional title: Dr., Prof., Prof. Dr.",
-    )
-
-    gender: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
-        comment="Gender: Male, Female, Other",
-    )
-
-    first_name: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        index=True,
-    )
-
-    last_name: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        index=True,
-    )
-
     email: Mapped[str | None] = mapped_column(
         String(100),
         unique=True,
@@ -232,60 +207,16 @@ class Doctor(Base):
         nullable=False,
         comment="List of conditions commonly treated",
     )
-    procedures_performed: Mapped[list[str]] = mapped_column(
-        JSON,
-        default=list,
-        nullable=False,
-        comment="List of procedures performed",
-    )
-
-    age_groups_treated: Mapped[list[str]] = mapped_column(
-        JSON,
-        default=list,
-        nullable=False,
-        comment="Age groups treated (Children, Adults, Elderly, etc.)",
-    )
 
     # ==========================================================================
     # EXPERTISE (JSON ARRAYS)
     # ==========================================================================
-
-    sub_specialties: Mapped[list[str]] = mapped_column(
-        JSON,
-        default=list,
-        nullable=False,
-        comment="List of sub-specializations",
-    )
-
-    areas_of_expertise: Mapped[list[str]] = mapped_column(
-        JSON,
-        default=list,
-        nullable=False,
-        comment="Specific skills, procedures, conditions treated",
-    )
 
     languages: Mapped[list[str]] = mapped_column(
         JSON,
         default=list,
         nullable=False,
         comment="Languages spoken",
-    )
-
-    # ==========================================================================
-    # PROFESSIONAL ACHIEVEMENTS (JSON type)
-    # ==========================================================================
-    achievements: Mapped[list[str]] = mapped_column(
-        JSON,
-        default=list,
-        nullable=False,
-        comment="Achievements/awards as JSON array",
-    )
-
-    publications: Mapped[list[str]] = mapped_column(
-        JSON,
-        default=list,
-        nullable=False,
-        comment="Publications as JSON array",
     )
 
     # ==========================================================================
@@ -375,8 +306,6 @@ class Doctor(Base):
     # TABLE CONFIGURATION
     # ==========================================================================
     __table_args__ = (
-        # Composite index for name search
-        Index("ix_doctors_full_name", "first_name", "last_name"),
         # Composite index for common filters
         Index("ix_doctors_spec_exp", "primary_specialization", "years_of_experience"),
     )
@@ -396,28 +325,7 @@ class Doctor(Base):
     # METHODS
     # ==========================================================================
     def __repr__(self) -> str:
-        return (
-            f"<Doctor(id={self.id}, email='{self.email}', "
-            f"name='{self.first_name} {self.last_name}')>"
-        )
-
-    @property
-    def computed_full_name(self) -> str:
-        """Get doctor's full name with title (computed from parts)."""
-        parts = []
-        if self.title:
-            parts.append(self.title)
-        parts.append(self.first_name)
-        if self.last_name:
-            parts.append(self.last_name)
-        return " ".join(parts)
-
-    @property
-    def display_name(self) -> str:
-        """Get display name (title + last name)."""
-        if self.title:
-            return f"{self.title} {self.last_name}"
-        return self.computed_full_name
+        return f"<Doctor(id={self.id}, email='{self.email}')>"
 
     @property
     def language_names(self) -> list[str]:
@@ -432,8 +340,8 @@ class Doctor(Base):
 
     @property
     def awards_recognition(self) -> list[str]:
-        """Map achievements field to awards_recognition for response schema."""
-        return self.achievements
+        """Map professional_memberships to awards_recognition for response schema."""
+        return self.professional_memberships
 
     @property
     def memberships(self) -> list[str]:

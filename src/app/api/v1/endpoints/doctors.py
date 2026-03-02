@@ -343,7 +343,7 @@ async def update_doctor(
 # ---------------------------------------------------------------------------
 
 # Required columns every template CSV must include.
-_CSV_REQUIRED_COLUMNS: frozenset[str] = frozenset({"first_name", "last_name", "phone"})
+_CSV_REQUIRED_COLUMNS: frozenset[str] = frozenset({"phone"})
 
 # Guard against abuse / accidental uploads of huge files.
 _CSV_MAX_ROWS = 500
@@ -431,8 +431,6 @@ def _parse_and_validate_csv(
         }
 
         phone_raw = row.get("phone", "")
-        first_name = row.get("first_name", "")
-        last_name = row.get("last_name", "")
         email_val = row.get("email", "")
 
         # Required fields
@@ -447,16 +445,6 @@ def _parse_and_validate_csv(
                     row=row_num, field="phone",
                     error=f"'{phone_raw}' is not a valid phone number (too short).",
                 ))
-
-        if not first_name:
-            errors.append(CsvRowValidationError(
-                row=row_num, field="first_name", error="First name is required.",
-            ))
-
-        if not last_name:
-            errors.append(CsvRowValidationError(
-                row=row_num, field="last_name", error="Last name is required.",
-            ))
 
         # Optional email — validate format when provided
         if email_val:
@@ -583,7 +571,7 @@ response lists every row-level error found so the operator can correct the
 file and re-upload.  When ``valid=true`` and ``errors=[]`` the file is safe
 to submit to the confirm-upload endpoint.
 
-**Required columns:** `first_name`, `last_name`, `phone`
+**Required columns:** `phone`
 **Optional columns:** `email`, `primary_specialization`, `years_of_experience`,
 `consultation_fee`, `medical_registration_number`, `medical_council`,
 `registration_year`, `year_of_mbbs`, `year_of_specialisation`,
@@ -729,8 +717,6 @@ async def bulk_upload_doctors_csv(
         row_num = int(row["_row_num"])
         phone_raw = row.get("phone", "")
         phone = _normalise_phone(phone_raw)
-        first_name = row.get("first_name", "")
-        last_name = row.get("last_name", "")
         email_val = row.get("email", "") or None
 
         # Each row runs in its own savepoint so a DB-level error on one row
@@ -750,10 +736,6 @@ async def bulk_upload_doctors_csv(
                 if existing:
                     # ── UPDATE existing doctor (flush only, no commit) ───────
                     update_data: dict[str, Any] = {}
-                    if first_name:
-                        update_data["first_name"] = first_name
-                    if last_name:
-                        update_data["last_name"] = last_name
                     # Only fill email if the record has none yet — avoid
                     # overwriting an existing verified email.
                     if email_val and not existing.email:
@@ -791,8 +773,6 @@ async def bulk_upload_doctors_csv(
                     # ``phone`` is already E.164 (+91…) from _normalise_phone().
                     new_doctor = DoctorModel(
                         phone=phone,
-                        first_name=first_name or "",
-                        last_name=last_name or "",
                         email=email_val,
                         role="user",
                     )
@@ -823,11 +803,10 @@ async def bulk_upload_doctors_csv(
                     # ── doctor_identity with PENDING status (flush only) ─────
                     # The identity row drives the onboarding workflow:
                     # PENDING → SUBMITTED → VERIFIED / REJECTED
-                    if email_val and first_name and last_name:
+                    if email_val:
                         identity = DoctorIdentity(
                             doctor_id=new_doctor.id,
-                            first_name=first_name,
-                            last_name=last_name,
+                            full_name=new_doctor.full_name or "",
                             email=email_val,
                             phone_number=phone,
                             onboarding_status=OnboardingStatus.PENDING,

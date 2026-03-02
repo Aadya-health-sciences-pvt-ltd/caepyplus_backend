@@ -46,8 +46,6 @@ async def seeded_doctor_id(client: AsyncClient, test_engine: "AsyncEngine") -> i
     )
     async with session_factory() as session:
         doctor = Doctor(
-            first_name="Base",
-            last_name="Doctor",
             email="base.doctor.onboard@example.com",
             phone="+911231231234",
             primary_specialization="General",
@@ -163,7 +161,7 @@ async def test_extract_resume(client: AsyncClient, auth_headers: dict[str, str])
         new_callable=AsyncMock,
     ) as mock_extract:
         mock_extract.return_value = (
-            {"personal_details": {"first_name": "John", "last_name": "Doe"}},
+            {"personal_details": {"email": "john@example.com"}},
             123.4,
         )
 
@@ -175,7 +173,7 @@ async def test_extract_resume(client: AsyncClient, auth_headers: dict[str, str])
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["data"]["personal_details"]["first_name"] == "John"
+        assert data["data"]["personal_details"]["email"] == "john@example.com"
 
 
 @pytest.mark.asyncio

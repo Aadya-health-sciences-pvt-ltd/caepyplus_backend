@@ -752,19 +752,13 @@ class VoiceOnboardingService:
         """Transform voice data to doctor creation schema."""
         data = session.collected_data
 
-        # Parse full name into components
-        full_name = data.get("full_name", "")
-        title, first_name, last_name = self._parse_full_name(full_name)
-
         # Get languages as list
         languages = data.get("languages", [])
         if isinstance(languages, str):
             languages = [lang.strip() for lang in languages.split(",")]
 
         return {
-            "title": title,
-            "first_name": first_name,
-            "last_name": last_name,
+            "full_name": data.get("full_name", ""),
             "email": data.get("email"),
             "phone_number": data.get("phone_number"),
             "primary_specialization": data.get("primary_specialization", ""),
@@ -774,8 +768,6 @@ class VoiceOnboardingService:
             "onboarding_source": "voice",
             "qualifications": [],
             "practice_locations": [],
-            "sub_specialties": [],
-            "areas_of_expertise": [],
             "awards_recognition": [],
             "memberships": [],
             "raw_extraction_data": {
@@ -784,31 +776,6 @@ class VoiceOnboardingService:
                 "confidence_scores": session.field_confidence,
             },
         }
-
-    def _parse_full_name(self, full_name: str) -> tuple[str | None, str, str]:
-        """Parse full name into (title, first_name, last_name)."""
-        if not full_name:
-            return None, "", ""
-
-        parts = full_name.strip().split()
-        title = None
-
-        # Check for title
-        title_prefixes = ("Dr.", "Dr", "Prof.", "Prof", "Professor")
-        if parts and parts[0] in title_prefixes:
-            title = "Dr." if parts[0].startswith("Dr") else "Prof."
-            parts = parts[1:]
-
-        if not parts:
-            return title, "", ""
-
-        if len(parts) == 1:
-            return title, parts[0], ""
-
-        first_name = parts[0]
-        last_name = " ".join(parts[1:])
-
-        return title, first_name, last_name
 
 
 # =============================================================================

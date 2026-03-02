@@ -13,8 +13,7 @@ if TYPE_CHECKING:
 def identity_payload() -> dict:
     return {
         "doctor_id": 999,
-        "first_name": "Admin",
-        "last_name": "Test",
+        "full_name": "Admin Test",
         "email": "admin.test@example.com",
         "phone_number": "1112223334",
         "onboarding_status": "pending"
@@ -53,28 +52,6 @@ async def test_get_identity_by_email(client: AsyncClient, auth_headers: dict[str
     assert response.status_code == 200
     assert response.json()["doctor_id"] == sample_identity["doctor_id"]
 
-@pytest.mark.asyncio
-async def test_upsert_details(client: AsyncClient, auth_headers: dict[str, str], sample_identity: dict) -> None:
-    """Test upsert details."""
-    doctor_id = sample_identity["doctor_id"]
-    payload = {
-        "specialty": "Neurology",
-        "years_of_experience": 15
-    }
-    response = await client.put(f"/api/v1/onboarding-admin/details/{doctor_id}", json=payload, headers=auth_headers)
-    assert response.status_code == 200
-    assert response.json()["specialty"] == "Neurology"
-
-@pytest.mark.asyncio
-async def test_get_details(client: AsyncClient, auth_headers: dict[str, str], sample_identity: dict) -> None:
-    """Test get details."""
-    doctor_id = sample_identity["doctor_id"]
-    # Upsert first to ensure it's there
-    await client.put(f"/api/v1/onboarding-admin/details/{doctor_id}", json={"specialty": "Test"}, headers=auth_headers)
-
-    response = await client.get(f"/api/v1/onboarding-admin/details/{doctor_id}", headers=auth_headers)
-    assert response.status_code == 200
-    assert response.json()["doctor_id"] == doctor_id
 
 @pytest.mark.asyncio
 async def test_add_media(client: AsyncClient, auth_headers: dict[str, str], sample_identity: dict) -> None:

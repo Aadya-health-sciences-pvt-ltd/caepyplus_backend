@@ -14,18 +14,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 # Enumerations
 # ============================================
 
-class TitleEnum(str, Enum):
-    """Valid doctor titles."""
-    DR = "Dr."
-    PROF = "Prof."
-    PROF_DR = "Prof. Dr."
-
-class GenderEnum(str, Enum):
-    """Valid gender values."""
-    MALE = "Male"
-    FEMALE = "Female"
-    OTHER = "Other"
-
 class OnboardingSource(str, Enum):
     """How the doctor was onboarded."""
     RESUME = "resume"
@@ -121,10 +109,6 @@ class DoctorBase(BaseModel):
     content_seeds: list[dict[str, Any]] | None = None
 
     # Existing fields (for compatibility)
-    title: str | None = Field(default=None, max_length=20, description="Title (Dr., Prof.)")
-    gender: str | None = Field(default=None, max_length=20, description="Gender")
-    first_name: str = Field(min_length=1, max_length=100, description="First name")
-    last_name: str = Field(min_length=1, max_length=100, description="Last name")
     email: EmailStr = Field(description="Email address (must be unique)")
     phone_number: str | None = Field(default=None, max_length=30, description="Phone number")
     primary_specialization: str = Field(
@@ -164,15 +148,10 @@ class DoctorBase(BaseModel):
         max_length=200,
         description="Issuing medical council or authority",
     )
-    sub_specialties: list[str] = Field(default_factory=list, description="Sub-specializations")
-    areas_of_expertise: list[str] = Field(default_factory=list, description="Areas of expertise")
     languages: list[str] = Field(default_factory=list, description="Languages spoken")
     conditions_treated: list[str] = Field(default_factory=list, description="Conditions commonly treated")
-    procedures_performed: list[str] = Field(default_factory=list, description="Procedures performed")
-    age_groups_treated: list[str] = Field(default_factory=list, description="Age groups treated")
     awards_recognition: list[str] = Field(default_factory=list, description="Awards and recognition")
     memberships: list[str] = Field(default_factory=list, description="Professional memberships")
-    publications: list[str] = Field(default_factory=list, description="Publications")
     verbal_intro_file: str | None = Field(default=None, description="Verbal introduction file URL")
     professional_documents: list[str] = Field(default_factory=list, description="Professional document URLs")
     achievement_images: list[str] = Field(default_factory=list, description="Achievement image URLs")
@@ -204,12 +183,6 @@ class DoctorCreate(DoctorBase):
     def normalize_email(cls, v: str) -> str:
         """Normalize email to lowercase."""
         return v.lower().strip()
-
-    @field_validator("first_name", "last_name")
-    @classmethod
-    def normalize_names(cls, v: str) -> str:
-        """Normalize names to title case."""
-        return v.strip().title()
 
 class DoctorUpdate(BaseModel):
     """
@@ -262,10 +235,6 @@ class DoctorUpdate(BaseModel):
     content_seeds: list[dict[str, Any]] | None = None
 
     # Existing fields (legacy/compatibility)
-    title: str | None = None
-    gender: str | None = None
-    first_name: str | None = Field(default=None, min_length=1, max_length=100)
-    last_name: str | None = Field(default=None, min_length=1, max_length=100)
     email: EmailStr | None = None
     phone_number: str | None = None
     primary_specialization: str | None = Field(default=None, min_length=1, max_length=200)
@@ -275,15 +244,10 @@ class DoctorUpdate(BaseModel):
     medical_council: str | None = Field(default=None, max_length=200, description="Name of the issuing medical council")
     registration_year: int | None = Field(default=None, ge=1900, le=2100)
     registration_authority: str | None = None
-    sub_specialties: list[str] | None = None
-    areas_of_expertise: list[str] | None = None
     languages: list[str] | None = None
     conditions_treated: list[str] | None = None
-    procedures_performed: list[str] | None = None
-    age_groups_treated: list[str] | None = None
     awards_recognition: list[str] | None = None
     memberships: list[str] | None = None
-    publications: list[str] | None = None
     verbal_intro_file: str | None = None
     professional_documents: list[str] | None = None
     achievement_images: list[str] | None = None
@@ -301,10 +265,6 @@ class DoctorResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: int
-    title: str | None = None
-    gender: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
     email: str | None = None
     phone_number: str | None = Field(default=None, validation_alias="phone")
     primary_specialization: str | None = None
@@ -315,15 +275,10 @@ class DoctorResponse(BaseModel):
     medical_council: str | None = None
     registration_year: int | None = None
     registration_authority: str | None = None
-    sub_specialties: list[str] = Field(default_factory=list)
-    areas_of_expertise: list[str] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list)
     conditions_treated: list[str] = Field(default_factory=list)
-    procedures_performed: list[str] = Field(default_factory=list)
-    age_groups_treated: list[str] = Field(default_factory=list)
     awards_recognition: list[str] = Field(default_factory=list)
     memberships: list[str] = Field(default_factory=list)
-    publications: list[str] = Field(default_factory=list)
     verbal_intro_file: str | None = None
     professional_documents: list[str] = Field(default_factory=list)
     achievement_images: list[str] = Field(default_factory=list)
@@ -387,9 +342,6 @@ class DoctorSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    title: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
     email: str | None = None
     primary_specialization: str | None = None
     years_of_experience: int | None = None
@@ -401,22 +353,14 @@ class DoctorSummary(BaseModel):
 
 class PersonalDetails(BaseModel):
     """Extracted personal details from resume."""
-    title: str | None = None
-    gender: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
     email: str | None = None
     phone: str | None = None
 
 class ProfessionalInformation(BaseModel):
     """Extracted professional information from resume."""
     primary_specialization: str | None = None
-    sub_specialties: list[str] = Field(default_factory=list)
-    areas_of_expertise: list[str] = Field(default_factory=list)
     years_of_experience: int | None = None
     conditions_treated: list[str] = Field(default_factory=list)
-    procedures_performed: list[str] = Field(default_factory=list)
-    age_groups_treated: list[str] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list)
 
 class Registration(BaseModel):
@@ -430,7 +374,6 @@ class Achievements(BaseModel):
     """Extracted achievements from resume."""
     awards_recognition: list[str] = Field(default_factory=list)
     memberships: list[str] = Field(default_factory=list)
-    publications: list[str] = Field(default_factory=list)
 
 class Media(BaseModel):
     """Extracted media and documents from resume."""
@@ -467,10 +410,6 @@ class ResumeExtractedData(BaseModel):
         ]
 
         return DoctorCreate(
-            title=self.personal_details.title,
-            gender=self.personal_details.gender,
-            first_name=self.personal_details.first_name or "",
-            last_name=self.personal_details.last_name or "",
             email=self.personal_details.email or "",
             phone_number=self.personal_details.phone,
             primary_specialization=self.professional_information.primary_specialization or "",
@@ -480,15 +419,10 @@ class ResumeExtractedData(BaseModel):
             medical_council=self.registration.medical_council,
             registration_year=self.registration.registration_year,
             registration_authority=self.registration.registration_authority,
-            sub_specialties=self.professional_information.sub_specialties,
-            areas_of_expertise=self.professional_information.areas_of_expertise,
             languages=self.professional_information.languages,
             conditions_treated=self.professional_information.conditions_treated,
-            procedures_performed=self.professional_information.procedures_performed,
-            age_groups_treated=self.professional_information.age_groups_treated,
             awards_recognition=self.achievements.awards_recognition,
             memberships=self.achievements.memberships,
-            publications=self.achievements.publications,
             verbal_intro_file=self.media.verbal_intro_file,
             professional_documents=self.media.professional_documents,
             achievement_images=self.media.achievement_images,

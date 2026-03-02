@@ -120,11 +120,8 @@ class OnboardingRepository:
     async def create_identity(
         self,
         *,
-        first_name: str,
-        last_name: str,
         email: str,
         phone_number: str,
-        title: str | None = None,
         onboarding_status: OnboardingStatus | str = OnboardingStatus.PENDING,
         doctor_id: int | None = None,
         # Block 1
@@ -185,9 +182,6 @@ class OnboardingRepository:
         if existing is not None:
             # Update fields supplied by the caller; leave status unchanged if
             # the identity is already in a terminal state.
-            existing.first_name = first_name or existing.first_name
-            existing.last_name = last_name or existing.last_name
-
             # If we're setting a new email, check if another row has it first.
             # If so, reset the other row's email to a unique placeholder first,
             # then flush, to avoid UNIQUE constraint collision (nullable=False).
@@ -201,8 +195,8 @@ class OnboardingRepository:
             existing.email = new_email
 
             existing.phone_number = phone_number or existing.phone_number
-            if title is not None:
-                existing.title = title  # type: ignore[assignment]
+            if full_name:
+                existing.full_name = full_name
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
@@ -210,9 +204,7 @@ class OnboardingRepository:
         # Create DoctorIdentity with only its own fields
         identity = DoctorIdentity(
             doctor_id=doctor_id,
-            title=title,
-            first_name=first_name,
-            last_name=last_name,
+            full_name=full_name or "",
             email=email,
             phone_number=phone_number,
             onboarding_status=status,
