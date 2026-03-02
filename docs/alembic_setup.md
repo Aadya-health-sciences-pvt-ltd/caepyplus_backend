@@ -25,7 +25,6 @@ This project uses **Alembic** for database schema management. The entire schema 
 │   ├── script.py.mako       # Migration file template
 │   └── versions/
 │       └── 001_initial_schema.py   # Single consolidated migration (7 tables + seed data)
-└── entrypoint.sh            # Docker entrypoint (runs migrations before starting app)
 ```
 
 ---
@@ -111,42 +110,32 @@ alembic history --verbose
 
 ## Docker / Bootstrap Behaviour
 
-The Docker `entrypoint.sh` runs migrations automatically before starting the app:
+The Docker image runs `uvicorn` directly without an intermediate `entrypoint.sh`. Migrations must be run separately against the database before or during deployment.
 
-```
-Container starts
-  → Wait for PostgreSQL to be ready (TCP check, 30 retries × 2s)
-  → alembic upgrade head (idempotent — no-op if already up to date)
-  → Start uvicorn
-```
+### Running Migrations via Docker
 
-### Skipping Migrations at Startup
-
-Set `SKIP_MIGRATIONS=true` to skip the automatic migration step:
+To run migrations using the built image:
 
 ```bash
 # Docker run
-docker run -e SKIP_MIGRATIONS=true -e DATABASE_URL=... doctor-onboarding:latest
-
-# Docker Compose (.env or environment block)
-SKIP_MIGRATIONS=true
+docker run -e DATABASE_URL=... doctor-onboarding:latest alembic upgrade head
 ```
 
-This is useful when:
-- A DBA applies migrations separately before deployment
-- You're running migrations from a CI/CD pipeline before rolling out containers
-- You want faster container startup in development (when schema hasn't changed)
+This is the standard approach for:
+- A DBA applying migrations separately before deployment
+- Running migrations from a CI/CD pipeline before rolling out containers
+- Container orchestration platforms like Kubernetes using InitContainers or Jobs
 
-### Bypassing the Entrypoint Entirely
+### Local development
 
-You can also skip the entrypoint and run uvicorn directly:
+For local development, simply run:
 
 ```bash
-# Docker — override the entrypoint
-docker run ... doctor-onboarding uvicorn src.app.main:app --host 0.0.0.0 --port 8000
+# Run migrations
+alembic upgrade head
 
-# Local development — run uvicorn directly
-uvicorn src.app.main:app --reload
+# Run uvicorn directly
+uvicorn src.app.main:app --reload --port 6555
 ```
 
 ---
@@ -235,5 +224,4 @@ services:
 1. **Single consolidated migration** — No incremental migration chain. The initial migration creates the complete schema. This simplifies fresh deployments and avoids long migration chains.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
-4. **Idempotent startup** — `alembic upgrade head` is safe to run on every container start. If the DB is already at HEAD, it's a no-op.
-5. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.
+4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.

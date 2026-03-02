@@ -1,6 +1,6 @@
 # Doctor Onboarding API - Complete Documentation
 
-**Base URL:** `http://127.0.0.1:8000/api/v1`
+**Base URL:** `http://127.0.0.1:6555/api/v1`
 
 **Total Endpoints:** 58
 
@@ -36,7 +36,7 @@ Send OTP to mobile number for authentication. No auth required.
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/auth/otp/request' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/auth/otp/request' \
   -H 'Content-Type: application/json' \
   -d '{"mobile_number": "9443453525"}'
 ```
@@ -68,7 +68,7 @@ Verify OTP and receive a JWT access token. Creates a new doctor record if the mo
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/auth/otp/verify' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/auth/otp/verify' \
   -H 'Content-Type: application/json' \
   -d '{"mobile_number": "9443453525", "otp": "123456"}'
 ```
@@ -104,7 +104,7 @@ Resend OTP to the same mobile number. Invalidates any previously sent OTP.
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/auth/otp/resend' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/auth/otp/resend' \
   -H 'Content-Type: application/json' \
   -d '{"mobile_number": "9443453525"}'
 ```
@@ -136,7 +136,7 @@ Verify OTP for admin/operational users. The user must already exist in the `user
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/auth/admin/otp/verify' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/auth/admin/otp/verify' \
   -H 'Content-Type: application/json' \
   -d '{"mobile_number": "9443453525", "otp": "123456"}'
 ```
@@ -170,7 +170,7 @@ Authenticate via Google Sign-In by verifying a Firebase ID token. Finds or creat
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/auth/google/verify' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/auth/google/verify' \
   -H 'Content-Type: application/json' \
   -d '{"id_token": "eyJhbGciOiJSUz..."}'
 ```
@@ -201,7 +201,7 @@ Returns comprehensive health status including database and AI service checks. No
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/health'
+curl 'http://127.0.0.1:6555/api/v1/health'
 ```
 
 **Response (200):**
@@ -234,7 +234,7 @@ Kubernetes liveness probe. Returns immediately without checking dependencies.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/live'
+curl 'http://127.0.0.1:6555/api/v1/live'
 ```
 
 **Response (200):**
@@ -253,7 +253,7 @@ Kubernetes readiness probe. Verifies the database connection is healthy.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/ready'
+curl 'http://127.0.0.1:6555/api/v1/ready'
 ```
 
 **Response (200):**
@@ -284,7 +284,7 @@ Paginated list of registered doctors. When the `status` query parameter is provi
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/doctors?page=1&page_size=20' \
+curl 'http://127.0.0.1:6555/api/v1/doctors?page=1&page_size=20' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -321,7 +321,7 @@ Full admin view of a doctor's complete onboarding profile. Looks up by `doctor_i
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/doctors/lookup?doctor_id=7' \
+curl 'http://127.0.0.1:6555/api/v1/doctors/lookup?doctor_id=7' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -344,7 +344,7 @@ Retrieve a single doctor's basic profile.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/doctors/7' \
+curl 'http://127.0.0.1:6555/api/v1/doctors/7' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -382,7 +382,7 @@ Update an existing doctor's profile. Only provided fields are changed (partial u
 
 **cURL:**
 ```bash
-curl -X PUT 'http://127.0.0.1:8000/api/v1/doctors/7' \
+curl -X PUT 'http://127.0.0.1:6555/api/v1/doctors/7' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"first_name": "Updated Name"}'
@@ -406,7 +406,7 @@ Download the official CSV template with sample rows and all supported column hea
 
 **cURL:**
 ```bash
-curl -O 'http://127.0.0.1:8000/api/v1/doctors/bulk-upload/csv/template' \
+curl -O 'http://127.0.0.1:6555/api/v1/doctors/bulk-upload/csv/template' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -427,7 +427,7 @@ Validate a CSV file without writing anything to the database. Returns row-level 
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/doctors/bulk-upload/csv/validate' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/doctors/bulk-upload/csv/validate' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -F 'file=@doctors.csv'
 ```
@@ -471,7 +471,7 @@ Confirm a previously validated CSV upload and write records to the database. Run
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/doctors/bulk-upload/csv' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/doctors/bulk-upload/csv' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -F 'file=@doctors.csv'
 ```
@@ -506,7 +506,7 @@ Return every supported dropdown field with its approved options. **No authentica
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/dropdowns'
+curl 'http://127.0.0.1:6555/api/v1/dropdowns'
 ```
 
 **Response (200):**
@@ -543,7 +543,7 @@ Return approved options for one specific dropdown field. **No authentication req
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/dropdowns/specialty'
+curl 'http://127.0.0.1:6555/api/v1/dropdowns/specialty'
 ```
 
 **Response (200):**
@@ -579,7 +579,7 @@ Propose a new dropdown value. Stored as `pending` until an admin approves it. Re
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/dropdowns/submit' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/dropdowns/submit' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"field_name": "specialty", "value": "Sports Medicine"}'
@@ -618,7 +618,7 @@ Upload a doctor's resume (PDF or Image) and extract structured professional data
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding/extract-resume' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/onboarding/extract-resume' \
   -F 'file=@resume.pdf'
 ```
 
@@ -649,7 +649,7 @@ Submit a doctor's profile for admin review. Requires **JWT authentication**. Reg
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding/submit/7' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/onboarding/submit/7' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -680,7 +680,7 @@ Fetch pre-rendered email subject and body for the admin verification/rejection p
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/onboarding/email-template/7?action=verified' \
+curl 'http://127.0.0.1:6555/api/v1/onboarding/email-template/7?action=verified' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -717,7 +717,7 @@ Mark a doctor's profile as verified. Optionally send a notification email. Requi
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding/verify/7' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/onboarding/verify/7' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"send_email": true}'
@@ -757,7 +757,7 @@ Mark a doctor's profile as rejected. Optionally provide a reason and send a noti
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding/reject/7' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/onboarding/reject/7' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"reason": "Missing documentation", "send_email": true}'
@@ -803,7 +803,7 @@ Start a new voice-based onboarding session. Returns a greeting and session ID.
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/voice/start' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/voice/start' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"language": "en"}'
@@ -838,7 +838,7 @@ Send a user's speech transcript and receive an AI response with extracted data.
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/voice/chat' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/voice/chat' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"session_id": "550e8400-...", "user_transcript": "My name is Dr. Sarah Johnson"}'
@@ -871,7 +871,7 @@ Retrieve the current status of a voice onboarding session.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/voice/session/550e8400-...' \
+curl 'http://127.0.0.1:6555/api/v1/voice/session/550e8400-...' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -902,7 +902,7 @@ Finalize a completed session and retrieve the doctor data with confidence scores
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/voice/session/550e8400-.../finalize' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/voice/session/550e8400-.../finalize' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -936,7 +936,7 @@ Cancel and delete a voice onboarding session. This is irreversible.
 
 **cURL:**
 ```bash
-curl -X DELETE 'http://127.0.0.1:8000/api/v1/voice/session/550e8400-...' \
+curl -X DELETE 'http://127.0.0.1:6555/api/v1/voice/session/550e8400-...' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -966,7 +966,7 @@ Create a new `doctor_identity` record.
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding-admin/identities' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/onboarding-admin/identities' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"doctor_id": 7, "first_name": "John", "last_name": "Doe", "email": "john@example.com"}'
@@ -989,7 +989,7 @@ Fetch a doctor identity by `doctor_id` or `email`.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/onboarding-admin/identities?doctor_id=7' \
+curl 'http://127.0.0.1:6555/api/v1/onboarding-admin/identities?doctor_id=7' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1013,7 +1013,7 @@ Create or update the `doctor_details` row for a doctor.
 
 **cURL:**
 ```bash
-curl -X PUT 'http://127.0.0.1:8000/api/v1/onboarding-admin/details/7' \
+curl -X PUT 'http://127.0.0.1:6555/api/v1/onboarding-admin/details/7' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"bio": "Experienced cardiologist..."}'
@@ -1030,7 +1030,7 @@ Fetch doctor details for a given doctor ID.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/onboarding-admin/details/7' \
+curl 'http://127.0.0.1:6555/api/v1/onboarding-admin/details/7' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1057,7 +1057,7 @@ Insert a `doctor_media` metadata row and return the absolute file URI.
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/onboarding-admin/media/7' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"media_type": "image", "media_category": "profile_photo", "file_uri": "...", "file_name": "photo.jpg"}'
@@ -1074,7 +1074,7 @@ List all media records for a doctor with absolute URIs.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7' \
+curl 'http://127.0.0.1:6555/api/v1/onboarding-admin/media/7' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1089,7 +1089,7 @@ Delete a doctor media record by its UUID `media_id`.
 
 **cURL:**
 ```bash
-curl -X DELETE 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/abc-uuid-123' \
+curl -X DELETE 'http://127.0.0.1:6555/api/v1/onboarding-admin/media/abc-uuid-123' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1112,7 +1112,7 @@ Upload a file directly to blob storage and register its metadata. Supported: ima
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding-admin/media/7/upload?media_category=profile_photo' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/onboarding-admin/media/7/upload?media_category=profile_photo' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -F 'file=@photo.jpg'
 ```
@@ -1138,7 +1138,7 @@ Append a status-change entry to `doctor_status_history`.
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/onboarding-admin/status-history/7' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/onboarding-admin/status-history/7' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"previous_status": "PENDING", "new_status": "SUBMITTED", "changed_by": "admin@example.com"}'
@@ -1155,7 +1155,7 @@ Retrieve all status history entries for a doctor.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/onboarding-admin/status-history/7' \
+curl 'http://127.0.0.1:6555/api/v1/onboarding-admin/status-history/7' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1182,7 +1182,7 @@ Paginated list of users with optional filtering. Requires **Admin or Operational
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/admin/users?limit=50&is_active=true' \
+curl 'http://127.0.0.1:6555/api/v1/admin/users?limit=50&is_active=true' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1221,7 +1221,7 @@ List all admin users (for audit purposes). Requires **Admin** role.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/admin/users/admins' \
+curl 'http://127.0.0.1:6555/api/v1/admin/users/admins' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1236,7 +1236,7 @@ Get details of a specific user. Requires **Admin or Operational** role.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/admin/users/1' \
+curl 'http://127.0.0.1:6555/api/v1/admin/users/1' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1261,7 +1261,7 @@ Create the first admin user when no admins exist. **No authentication required.*
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/admin/users/seed' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/admin/users/seed' \
   -H 'Content-Type: application/json' \
   -d '{"phone": "+919443453525", "email": "admin@example.com", "role": "admin"}'
 ```
@@ -1295,7 +1295,7 @@ Create a new user with a specified role. Requires **Admin** role.
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/admin/users' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/admin/users' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"phone": "+919876543210", "email": "ops@example.com", "role": "operational"}'
@@ -1328,7 +1328,7 @@ Update a user's details (role, active status, doctor_id). Requires **Admin** rol
 
 **cURL:**
 ```bash
-curl -X PATCH 'http://127.0.0.1:8000/api/v1/admin/users/2' \
+curl -X PATCH 'http://127.0.0.1:6555/api/v1/admin/users/2' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"role": "operational"}'
@@ -1359,7 +1359,7 @@ Change a user's role. Requires **Admin** role.
 
 **cURL:**
 ```bash
-curl -X PATCH 'http://127.0.0.1:8000/api/v1/admin/users/2/role' \
+curl -X PATCH 'http://127.0.0.1:6555/api/v1/admin/users/2/role' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"role": "admin"}'
@@ -1390,7 +1390,7 @@ Activate or deactivate a user (soft action). Requires **Admin** role.
 
 **cURL:**
 ```bash
-curl -X PATCH 'http://127.0.0.1:8000/api/v1/admin/users/2/status' \
+curl -X PATCH 'http://127.0.0.1:6555/api/v1/admin/users/2/status' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"is_active": false}'
@@ -1414,7 +1414,7 @@ Deactivate a user. Use this instead of hard delete to preserve audit trail. Requ
 
 **cURL:**
 ```bash
-curl -X DELETE 'http://127.0.0.1:8000/api/v1/admin/users/2' \
+curl -X DELETE 'http://127.0.0.1:6555/api/v1/admin/users/2' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1440,7 +1440,7 @@ Return the canonical list of dropdown field names and their descriptions.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/admin/dropdowns/fields' \
+curl 'http://127.0.0.1:6555/api/v1/admin/dropdowns/fields' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1476,7 +1476,7 @@ List all dropdown options across all fields with optional filtering.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/admin/dropdowns?status=pending&limit=50' \
+curl 'http://127.0.0.1:6555/api/v1/admin/dropdowns?status=pending&limit=50' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1521,7 +1521,7 @@ Shortcut to list only pending options awaiting review.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/admin/dropdowns/pending' \
+curl 'http://127.0.0.1:6555/api/v1/admin/dropdowns/pending' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1536,7 +1536,7 @@ Retrieve a single dropdown option by its ID.
 
 **cURL:**
 ```bash
-curl 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42' \
+curl 'http://127.0.0.1:6555/api/v1/admin/dropdowns/42' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1581,7 +1581,7 @@ Create a new dropdown option (approved immediately since it's admin-created).
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/admin/dropdowns' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"field_name": "specialty", "value": "Nuclear Medicine"}'
@@ -1614,7 +1614,7 @@ Update label, display order, or review notes.
 
 **cURL:**
 ```bash
-curl -X PATCH 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42' \
+curl -X PATCH 'http://127.0.0.1:6555/api/v1/admin/dropdowns/42' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"label": "Updated Label"}'
@@ -1631,7 +1631,7 @@ Delete a dropdown option. System-seeded options (`is_system=true`) cannot be del
 
 **cURL:**
 ```bash
-curl -X DELETE 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42' \
+curl -X DELETE 'http://127.0.0.1:6555/api/v1/admin/dropdowns/42' \
   -H 'Authorization: Bearer YOUR_TOKEN'
 ```
 
@@ -1660,7 +1660,7 @@ Approve a pending dropdown option. Once approved, it appears in public dropdowns
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42/approve' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/admin/dropdowns/42/approve' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"review_notes": "Approved"}'
@@ -1691,7 +1691,7 @@ Reject a pending dropdown option. Rejected options remain in the database for au
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns/42/reject' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/admin/dropdowns/42/reject' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"review_notes": "Duplicate"}'
@@ -1723,7 +1723,7 @@ Approve multiple pending options at once (max 200 per request).
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns/bulk-approve' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/admin/dropdowns/bulk-approve' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"option_ids": [42, 43, 44]}'
@@ -1759,7 +1759,7 @@ Reject multiple pending options at once (max 200 per request).
 
 **cURL:**
 ```bash
-curl -X POST 'http://127.0.0.1:8000/api/v1/admin/dropdowns/bulk-reject' \
+curl -X POST 'http://127.0.0.1:6555/api/v1/admin/dropdowns/bulk-reject' \
   -H 'Authorization: Bearer YOUR_TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"option_ids": [45, 46], "review_notes": "Duplicates"}'

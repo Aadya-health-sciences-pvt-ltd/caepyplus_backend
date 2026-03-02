@@ -257,9 +257,8 @@ caepy_plus_back_end/
 │   ├── core/                         # Core module tests
 │   └── services/                     # Service-layer tests
 ├── pyproject.toml                    # Project metadata + pytest config
-├── Dockerfile                        # Multi-stage production image (builder + production stages)
+├── Dockerfile                        # Production Dockerfile
 ├── docker-compose.yml                # Full dev stack (API + PostgreSQL + Redis + optional pgAdmin)
-├── entrypoint.sh                     # Container startup: wait-for-DB → alembic upgrade head → uvicorn
 ├── .dockerignore                     # Excludes venv/, .env, __pycache__, tests/, etc. from image
 ├── .env.example                      # Environment variable template (no real secrets)
 └── README.md
@@ -453,14 +452,14 @@ source venv/bin/activate
 ./venv/bin/alembic upgrade head
 
 # Start the server in development mode
-./venv/bin/uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
+./venv/bin/uvicorn src.app.main:app --reload --host 0.0.0.0 --port 6555
 ```
 
 > ⚠️ **Schema is managed exclusively by Alembic.** Tables are NOT auto-created on startup. Always run `alembic upgrade head` before the first launch and after any migration is added.
 
 You should see:
 ```
-INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Uvicorn running on http://0.0.0.0:6555
 INFO:     Application startup complete.
 ```
 
@@ -470,15 +469,15 @@ INFO:     Application startup complete.
 
 ```bash
 # Liveness probe — confirms app is running (no auth required)
-curl http://localhost:8000/api/v1/live
+curl http://localhost:6555/api/v1/live
 # → {"status": "alive"}
 
 # Readiness probe — confirms DB connection is healthy
-curl http://localhost:8000/api/v1/ready
+curl http://localhost:6555/api/v1/ready
 # → {"status": "ready"}
 
 # Full health check — DB + AI service status
-curl http://localhost:8000/api/v1/health
+curl http://localhost:6555/api/v1/health
 ```
 
 Expected response for `/api/v1/health`:
@@ -499,9 +498,9 @@ Expected response for `/api/v1/health`:
 
 | URL | Description |
 |-----|-------------|
-| http://localhost:8000/docs | Swagger UI (Interactive API docs) |
-| http://localhost:8000/redoc | ReDoc (Alternative docs) |
-| http://localhost:8000/api/v1/health | Health check endpoint |
+| http://localhost:6555/docs | Swagger UI (Interactive API docs) |
+| http://localhost:6555/redoc | ReDoc (Alternative docs) |
+| http://localhost:6555/api/v1/health | Health check endpoint |
 
 ---
 
@@ -548,11 +547,11 @@ cp .env.example .env   # then edit .env with real keys
 ./venv/bin/alembic upgrade head
 
 # === START SERVER ===
-./venv/bin/uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
+./venv/bin/uvicorn src.app.main:app --reload --host 0.0.0.0 --port 6555
 
 # === VERIFY ===
-curl http://localhost:8000/api/v1/live    # → {"status": "alive"}
-curl http://localhost:8000/api/v1/ready   # → {"status": "ready"}
+curl http://localhost:6555/api/v1/live    # → {"status": "alive"}
+curl http://localhost:6555/api/v1/ready   # → {"status": "ready"}
 ```
 
 #### Option B — Docker (recommended for teams / zero local setup)
@@ -568,8 +567,8 @@ docker compose up --build
 # Migrations run automatically inside the container before the app starts.
 
 # === VERIFY ===
-curl http://localhost:8000/api/v1/live    # → {"status": "alive"}
-curl http://localhost:8000/api/v1/ready   # → {"status": "ready"}
+curl http://localhost:6555/api/v1/live    # → {"status": "alive"}
+curl http://localhost:6555/api/v1/ready   # → {"status": "ready"}
 
 # === STOP ===
 docker compose down        # keeps volumes (DB data preserved)
@@ -591,7 +590,7 @@ docker compose --profile tools up
 | `command not found: psql` | Use full path: `/opt/homebrew/opt/postgresql@15/bin/psql` |
 | `role "your_db_user" already exists` | User exists, skip creation |
 | `database "doctor_onboarding" already exists` | Database exists, skip creation |
-| `Address already in use (port 8000)` | Kill existing process: `lsof -ti:8000 \| xargs kill -9` |
+| `Address already in use (port 6555)` | Kill existing process: `lsof -ti:6555 \| xargs kill -9` |
 | `ModuleNotFoundError` | Activate venv: `source venv/bin/activate` |
 | `Connection refused` to database | Start PostgreSQL: `brew services start postgresql@15` |
 | `python3.12: command not found` | Install Python 3.12: `brew install python@3.12` |
@@ -618,7 +617,8 @@ DEBUG=true
 
 # ── Server ────────────────────────────────────────────────────
 HOST=0.0.0.0
-PORT=8000
+PORT=6555
+ROOT_PATH=
 
 # ── Security (REQUIRED) ───────────────────────────────────────
 # Generate: python -c "import secrets; print(secrets.token_hex(32))"
@@ -895,12 +895,12 @@ resume_extraction:
 
 ### Base URL
 ```
-http://localhost:8000/api/v1
+http://localhost:6555/api/v1
 ```
 
 ### Interactive Documentation
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
+- **Swagger UI:** http://localhost:6555/docs
+- **ReDoc:** http://localhost:6555/redoc
 
 ### Authentication
 
@@ -1023,7 +1023,7 @@ Returns the official CSV template pre-filled with two sample rows (Dr. Arjun Sha
 ```bash
 curl -O -J \
   -H "Authorization: Bearer <token>" \
-  http://localhost:8000/api/v1/doctors/bulk-upload/csv/template
+  http://localhost:6555/api/v1/doctors/bulk-upload/csv/template
 ```
 
 ##### Phase 1 — Validate (no DB writes)
@@ -1046,7 +1046,7 @@ Content-Type: multipart/form-data
 curl -X POST \
   -H "Authorization: Bearer <token>" \
   -F "file=@doctors.csv" \
-  http://localhost:8000/api/v1/doctors/bulk-upload/csv/validate
+  http://localhost:6555/api/v1/doctors/bulk-upload/csv/validate
 ```
 
 **Response — valid file:**
@@ -1104,7 +1104,7 @@ Runs the identical validation gate — returns `422` with the full error report 
 curl -X POST \
   -H "Authorization: Bearer <token>" \
   -F "file=@doctors_clean.csv" \
-  http://localhost:8000/api/v1/doctors/bulk-upload/csv
+  http://localhost:6555/api/v1/doctors/bulk-upload/csv
 ```
 
 **What happens for each row:**
@@ -1126,7 +1126,7 @@ curl -X POST \
   "rows": [
     { "row": 2, "status": "created", "doctor_id": 101, "phone": "+919988776655", "email": "arjun@example.com" },
     { "row": 3, "status": "created", "doctor_id": 102, "phone": "+919876543210", "email": "priya@example.com" },
-    { "row": 4, "status": "updated", "doctor_id": 77,  "phone": "+918800001111", "email": null }
+    { "row": 4, "status": "updated", "doctor_id": 77,  "phone": "+918655501111", "email": null }
   ],
   "skipped_errors": []
 }
@@ -1144,7 +1144,7 @@ curl -X POST \
   "rows": [
     { "row": 2, "status": "created", "doctor_id": 101, "phone": "+919988776655", "email": "arjun@example.com" },
     { "row": 3, "status": "created", "doctor_id": 102, "phone": "+919876543210", "email": "priya@example.com" },
-    { "row": 4, "status": "skipped",  "doctor_id": null, "phone": "9800001111",   "email": null }
+    { "row": 4, "status": "skipped",  "doctor_id": null, "phone": "9655501111",   "email": null }
   ],
   "skipped_errors": [
     { "row": 4, "field": null, "error": "Could not save row: UNIQUE constraint failed: doctors.email" }
@@ -1649,13 +1649,13 @@ DELETE /api/v1/admin/users/{user_id}    # Delete user
 
 #### Extract Data from Resume
 ```bash
-curl -X POST http://localhost:8000/api/v1/onboarding/extract-resume \
+curl -X POST http://localhost:6555/api/v1/onboarding/extract-resume \
   -F "file=@doctor_resume.pdf"
 ```
 
 #### Create Doctor Record
 ```bash
-curl -X POST http://localhost:8000/api/v1/doctors \
+curl -X POST http://localhost:6555/api/v1/doctors \
   -H "Content-Type: application/json" \
   -d '{
     "first_name": "Sarah",
@@ -1668,7 +1668,7 @@ curl -X POST http://localhost:8000/api/v1/doctors \
 
 #### Start Voice Session
 ```bash
-curl -X POST http://localhost:8000/api/v1/voice/start \
+curl -X POST http://localhost:6555/api/v1/voice/start \
   -H "Content-Type: application/json" \
   -d '{"language": "en"}'
 ```
@@ -1933,10 +1933,10 @@ pytest tests/test_doctors.py::test_create_doctor
 uvicorn src.app.main:app --reload
 
 # With custom host/port
-uvicorn src.app.main:app --host 0.0.0.0 --port 8000
+uvicorn src.app.main:app --host 0.0.0.0 --port 6555
 
 # Production server
-uvicorn src.app.main:app --workers 4 --host 0.0.0.0 --port 8000
+uvicorn src.app.main:app --workers 4 --host 0.0.0.0 --port 6555
 ```
 
 ---
@@ -2065,7 +2065,7 @@ Before going to production, verify the following:
 gunicorn src.app.main:app \
   --workers 4 \
   --worker-class uvicorn.workers.UvicornWorker \
-  --bind 0.0.0.0:8000 \
+  --bind 0.0.0.0:6555 \
   --timeout 120
 
 # Worker sizing: workers = (2 * CPU cores) + 1
@@ -2078,8 +2078,8 @@ gunicorn src.app.main:app \
 # Build production image
 docker build -t doctor-onboarding:latest .
 
-# Run standalone (entrypoint.sh runs migrations automatically before starting)
-docker run -p 8000:8000 \
+# Run standalone
+docker run -p 6555:6555 \
   -e APP_ENV=production \
   -e DATABASE_URL=postgresql+asyncpg://user:pass@db-host:5432/doctor_onboarding \
   -e REDIS_URL=redis://redis-host:6379/0 \
@@ -2090,15 +2090,15 @@ docker run -p 8000:8000 \
   doctor-onboarding:latest
 
 # Verify it started correctly
-curl http://localhost:8000/api/v1/live    # → {"status": "alive"}
-curl http://localhost:8000/api/v1/ready   # → {"status": "ready"}
+curl http://localhost:6555/api/v1/live    # → {"status": "alive"}
+curl http://localhost:6555/api/v1/ready   # → {"status": "ready"}
 ```
 
 ### Docker Compose (Full Stack)
 
 ```bash
 # Start the full stack (API + PostgreSQL + Redis)
-# Migrations run automatically before the app starts (via entrypoint.sh)
+# Note: Run migrations manually before starting the app container
 docker compose up -d
 
 # With a production-specific env file
@@ -2119,8 +2119,8 @@ docker compose down -v
 
 ```bash
 # Quick check that the stack is healthy
-curl http://localhost:8000/api/v1/live    # → {"status": "alive"}
-curl http://localhost:8000/api/v1/ready   # → {"status": "ready"}
+curl http://localhost:6555/api/v1/live    # → {"status": "alive"}
+curl http://localhost:6555/api/v1/ready   # → {"status": "ready"}
 ```
 
 ### Kubernetes Deployment
@@ -2141,7 +2141,7 @@ spec:
       - name: api
         image: doctor-onboarding:latest
         ports:
-        - containerPort: 8000
+        - containerPort: 6555
         env:
         - name: GOOGLE_API_KEY
           valueFrom:
@@ -2151,11 +2151,11 @@ spec:
         livenessProbe:
           httpGet:
             path: /api/v1/live
-            port: 8000
+            port: 6555
         readinessProbe:
           httpGet:
             path: /api/v1/ready
-            port: 8000
+            port: 6555
 ```
 
 ### Rollback Procedure
@@ -2195,7 +2195,7 @@ docker run -d --name doctor-onboarding ... doctor-onboarding:previous-version
 #### API Key Issues
 ```bash
 # Check API key configuration
-curl http://localhost:8000/api/v1/health
+curl http://localhost:6555/api/v1/health
 
 # Verify Gemini API access
 python -c "import google.genai as genai; genai.configure(api_key='your_key')"
@@ -2217,7 +2217,7 @@ alembic upgrade head
 docker stats
 
 # Check voice session cleanup
-curl http://localhost:8000/api/v1/health
+curl http://localhost:6555/api/v1/health
 ```
 
 ### Debug Mode
