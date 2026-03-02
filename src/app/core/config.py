@@ -113,6 +113,10 @@ class Settings(BaseSettings):
         default="INFO",
         description="Logging level"
     )
+    ROOT_PATH: str = Field(
+        default="", 
+        description="Base path for the application router, e.g. /api"
+    )
 
     # ========================================
     # Database Configuration (PostgreSQL)

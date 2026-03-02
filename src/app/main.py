@@ -310,6 +310,7 @@ def create_application() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
+        root_path=settings.ROOT_PATH,
         description="""
 # 🏥 Doctor Onboarding Smart-Fill API
 
