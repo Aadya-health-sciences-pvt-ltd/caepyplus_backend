@@ -90,10 +90,6 @@ class DoctorRepository:
             # Block 6
             content_seeds=data.content_seeds or [],
             # Existing fields
-            title=data.title,
-            gender=data.gender,
-            first_name=data.first_name,
-            last_name=data.last_name,
             email=normalized_email,
             phone=data.phone_number,
             primary_specialization=data.primary_specialization,
@@ -101,8 +97,6 @@ class DoctorRepository:
             consultation_fee=data.consultation_fee,
             medical_registration_number=data.medical_registration_number,
             medical_council=data.medical_council,
-            sub_specialties=data.sub_specialties,
-            areas_of_expertise=data.areas_of_expertise,
             languages=data.languages,
             achievements=data.awards_recognition,
             practice_locations=[loc.model_dump() for loc in data.practice_locations],
@@ -289,8 +283,6 @@ class DoctorRepository:
         # and pollute get_by_email().
         doctor = Doctor(
             phone=normalized_phone,
-            first_name="",   # Filled during onboarding
-            last_name="",    # Filled during onboarding
             email=None,      # Provided during onboarding
             role=role,
         )
@@ -324,15 +316,8 @@ class DoctorRepository:
         Returns:
             Created doctor entity with ID
         """
-        # Split name into first/last
-        name_parts = name.strip().split(" ", 1) if name else ["", ""]
-        first_name = name_parts[0] if len(name_parts) > 0 else ""
-        last_name = name_parts[1] if len(name_parts) > 1 else ""
-
         doctor = Doctor(
             email=email.lower(),
-            first_name=first_name,
-            last_name=last_name,
             phone=None,  # Provided during onboarding (Google users may not have one)
             role=role,
         )

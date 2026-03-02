@@ -260,11 +260,7 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
     op.create_table(
         "doctors",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        # Personal details
-        sa.Column("title", sa.String(20), nullable=True, comment="Dr., Prof., Prof. Dr."),
-        sa.Column("gender", sa.String(20), nullable=True),
-        sa.Column("first_name", sa.String(100), nullable=False),
-        sa.Column("last_name", sa.String(100), nullable=False),
+        # Contact
         sa.Column("email", sa.String(100), nullable=True, comment="NULL for phone-only signups; filled during onboarding"),
         sa.Column("phone", sa.String(20), nullable=True, comment="International format with + prefix"),
         # Authorization
@@ -317,13 +313,8 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
         sa.Column("registration_year", sa.Integer(), nullable=True),
         sa.Column("registration_authority", sa.String(100), nullable=True),
         sa.Column("conditions_treated", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("procedures_performed", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("age_groups_treated", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("sub_specialties", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("areas_of_expertise", sa.JSON(), nullable=False, server_default="[]"),
         sa.Column("languages", sa.JSON(), nullable=False, server_default="[]"),
         sa.Column("achievements", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("publications", sa.JSON(), nullable=False, server_default="[]"),
         sa.Column("practice_locations", sa.JSON(), nullable=False, server_default="[]"),
         sa.Column("external_links", sa.JSON(), nullable=False, server_default="[]"),
         # Onboarding metadata
@@ -341,15 +332,12 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
     )
 
     op.create_index("ix_doctors_id", "doctors", ["id"])
-    op.create_index("ix_doctors_first_name", "doctors", ["first_name"])
-    op.create_index("ix_doctors_last_name", "doctors", ["last_name"])
     op.create_index("ix_doctors_email", "doctors", ["email"], unique=True)
     op.create_index("ix_doctors_phone", "doctors", ["phone"], unique=True)
     op.create_index("ix_doctors_role", "doctors", ["role"])
     op.create_index("ix_doctors_onboarding_status", "doctors", ["onboarding_status"])
     op.create_index("ix_doctors_medical_registration_number", "doctors", ["medical_registration_number"])
     op.create_index("ix_doctors_onboarding_source", "doctors", ["onboarding_source"])
-    op.create_index("ix_doctors_full_name", "doctors", ["first_name", "last_name"])
     op.create_index("ix_doctors_spec_exp", "doctors", ["primary_specialization", "years_of_experience"])
 
     # =======================================================================
@@ -385,9 +373,6 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
         "doctor_identity",
         sa.Column("id", sa.String(36), nullable=False),
         sa.Column("doctor_id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("title", sa.String(20), nullable=True),
-        sa.Column("first_name", sa.String(100), nullable=False),
-        sa.Column("last_name", sa.String(100), nullable=False),
         sa.Column("email", sa.String(255), nullable=False),
         sa.Column("phone_number", sa.String(20), nullable=False),
         sa.Column("onboarding_status", sa.String(20), nullable=False, server_default="pending"),
@@ -633,14 +618,11 @@ def downgrade() -> None:
     op.drop_table("users")
 
     op.drop_index("ix_doctors_spec_exp", table_name="doctors")
-    op.drop_index("ix_doctors_full_name", table_name="doctors")
     op.drop_index("ix_doctors_onboarding_source", table_name="doctors")
     op.drop_index("ix_doctors_medical_registration_number", table_name="doctors")
     op.drop_index("ix_doctors_onboarding_status", table_name="doctors")
     op.drop_index("ix_doctors_role", table_name="doctors")
     op.drop_index("ix_doctors_phone", table_name="doctors")
     op.drop_index("ix_doctors_email", table_name="doctors")
-    op.drop_index("ix_doctors_last_name", table_name="doctors")
-    op.drop_index("ix_doctors_first_name", table_name="doctors")
     op.drop_index("ix_doctors_id", table_name="doctors")
     op.drop_table("doctors")

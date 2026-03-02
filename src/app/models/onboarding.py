@@ -52,17 +52,6 @@ class OnboardingStatus(str, Enum):
     REJECTED = "rejected"
 
 
-class DoctorTitle(str, Enum):
-    """Doctor title enum used by doctor_identity.
-
-    Allowed values: dr, prof, prof.dr.
-    """
-
-    DR = "dr"
-    PROF = "prof"
-    PROF_DR = "prof.dr"
-
-
 class DoctorIdentity(Base):
     """doctor_identity table - basic identification and contact information."""
 
@@ -81,13 +70,6 @@ class DoctorIdentity(Base):
         index=True,
     )
 
-    title: Mapped[DoctorTitle | None] = mapped_column(
-        SQLEnum(DoctorTitle, name="doctor_title_enum", native_enum=False, values_callable=lambda x: [e.value for e in x]),
-        nullable=True,
-    )
-
-    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     phone_number: Mapped[str] = mapped_column(String(20), nullable=False)
 

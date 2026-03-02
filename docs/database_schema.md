@@ -39,9 +39,6 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 |------------|-----------|-------------|---------|-------------|
 | `id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
 | `doctor_id` | `BIGINT` | UNIQUE, NOT NULL | Auto (sequence) | Numeric doctor ID from `doctor_id_seq` |
-| `title` | `ENUM` | NULLABLE | NULL | `'dr'`, `'prof'`, `'prof.dr'` |
-| `first_name` | `VARCHAR(100)` | NOT NULL | — | First name |
-| `last_name` | `VARCHAR(100)` | NOT NULL | — | Last name |
 | `email` | `VARCHAR(255)` | UNIQUE, NOT NULL | — | Email address |
 | `phone_number` | `VARCHAR(20)` | NOT NULL | — | Contact phone number |
 | `onboarding_status` | `ENUM` | NOT NULL | `'pending'` | `pending` \| `submitted` \| `verified` \| `rejected` |
@@ -213,15 +210,11 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 
 **Purpose:** Legacy main doctor entity, also used for bulk CSV uploads and quick profile store.
 
-**Description:** Original doctor table with comprehensive fields including the 6-block questionnaire data. Used alongside the onboarding tables. Linked to the `users` table via an optional reverse relationship. New doctors created via CSV bulk upload or OTP sign-up start here.
+**Description:** Original doctor table. All profile data lives here. Linked to the `users` table via an optional reverse relationship. New doctors created via CSV bulk upload or OTP sign-up start here.
 
 | Column Name | Data Type | Constraints | Default | Description |
 |------------|-----------|-------------|---------|-------------|
 | `id` | `SERIAL` | PRIMARY KEY | Auto-increment | Unique identifier |
-| `title` | `VARCHAR(20)` | NULLABLE | NULL | Dr., Prof., Prof. Dr. |
-| `gender` | `VARCHAR(20)` | NULLABLE | NULL | Gender |
-| `first_name` | `VARCHAR(100)` | NOT NULL | — | First name |
-| `last_name` | `VARCHAR(100)` | NOT NULL | — | Last name |
 | `email` | `VARCHAR(100)` | UNIQUE, NULLABLE | NULL | Email address |
 | `phone` | `VARCHAR(20)` | UNIQUE, NULLABLE | NULL | Phone number |
 | `role` | `VARCHAR(20)` | NOT NULL | `'user'` | `admin` \| `operational` \| `user` |
@@ -273,13 +266,8 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 | `registration_year` | `INTEGER` | NULLABLE | NULL | Registration year |
 | `registration_authority` | `VARCHAR(100)` | NULLABLE | NULL | Registration authority |
 | `conditions_treated` | `JSON` | NOT NULL | `[]` | Conditions treated |
-| `procedures_performed` | `JSON` | NOT NULL | `[]` | Procedures performed |
-| `age_groups_treated` | `JSON` | NOT NULL | `[]` | Age groups treated |
-| `sub_specialties` | `JSON` | NOT NULL | `[]` | Sub-specializations |
-| `areas_of_expertise` | `JSON` | NOT NULL | `[]` | Areas of expertise |
 | `languages` | `JSON` | NOT NULL | `[]` | Languages spoken |
 | `achievements` | `JSON` | NOT NULL | `[]` | Achievements |
-| `publications` | `JSON` | NOT NULL | `[]` | Publications |
 | `practice_locations` | `JSON` | NOT NULL | `[]` | Practice locations |
 | `onboarding_source` | `VARCHAR(50)` | NULLABLE | NULL | How onboarded: `manual`, `resume`, `voice` |
 | `resume_url` | `VARCHAR(500)` | NULLABLE | NULL | Resume file URL |
@@ -295,8 +283,8 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 **Indexes:**
 - Primary Key: `id`
 - Unique: `email`, `phone`
-- Index: `first_name`, `last_name`, `role`, `onboarding_status`, `onboarding_source`, `medical_registration_number`
-- Composite: `(first_name, last_name)`, `(primary_specialization, years_of_experience)`
+- Index: `role`, `onboarding_status`, `onboarding_source`, `medical_registration_number`
+- Composite: `(primary_specialization, years_of_experience)`
 
 **Relationships:**
 - ONE-TO-ONE with `users` (optional, via `users.doctor_id` → `doctors.id`)
@@ -313,12 +301,6 @@ VERIFIED = "verified"    # Admin approved
 REJECTED = "rejected"    # Admin rejected
 ```
 
-### DoctorTitle
-```python
-DR = "dr"               # Doctor
-PROF = "prof"           # Professor
-PROF_DR = "prof.dr"     # Professor Doctor
-```
 
 ### DropdownOptionStatus
 ```python

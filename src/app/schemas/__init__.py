@@ -5,12 +5,10 @@ from .doctor import (
     DoctorSummary,
     DoctorUpdate,
     ExtractionResponse,
-    GenderEnum,
     OnboardingSource,
     PracticeLocationBase,
     QualificationBase,
     ResumeExtractedData,
-    TitleEnum,
 )
 from .onboarding import (
     DoctorIdentityCreate,
@@ -45,12 +43,10 @@ __all__ = [
     "DoctorSummary",
     "DoctorUpdate",
     "ExtractionResponse",
-    "GenderEnum",
     "OnboardingSource",
     "PracticeLocationBase",
     "QualificationBase",
     "ResumeExtractedData",
-    "TitleEnum",
     # Onboarding schemas
     "DoctorIdentityCreate",
     "DoctorIdentityResponse",

@@ -41,8 +41,8 @@ def _doctor_template_vars(
 ) -> dict[str, str]:
     """Build the standard email template variable dict from a Doctor ORM row."""
     return email_svc.build_template_vars(
-        doctor_name=f"Dr. {doctor.first_name} {doctor.last_name}".strip(),
-        first_name=doctor.first_name or "",
+        doctor_name=getattr(doctor, "full_name", None) or doctor.email or "",
+        first_name="",
         medical_registration_number=getattr(doctor, "medical_registration_number", "") or "",
         medical_council=getattr(doctor, "medical_council", "") or "",
         specialization=getattr(doctor, "primary_specialization", "") or "",
@@ -232,8 +232,6 @@ async def submit_profile(
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),
             doctor_id=doctor_id,
-            first_name=doctor.first_name or "",
-            last_name=doctor.last_name or "",
             email=doctor.email or "",
             phone_number=doctor.phone or "",
             onboarding_status=OnboardingStatus.SUBMITTED,
@@ -408,8 +406,6 @@ async def verify_profile(
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),
             doctor_id=doctor_id,
-            first_name=doctor.first_name or "",
-            last_name=doctor.last_name or "",
             email=doctor.email or "",
             phone_number=doctor.phone or "",
             onboarding_status=OnboardingStatus.VERIFIED,
@@ -559,8 +555,6 @@ async def reject_profile(
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),
             doctor_id=doctor_id,
-            first_name=doctor.first_name or "",
-            last_name=doctor.last_name or "",
             email=doctor.email or "",
             phone_number=doctor.phone or "",
             onboarding_status=OnboardingStatus.REJECTED,
