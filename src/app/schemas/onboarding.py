@@ -28,6 +28,7 @@ class OnboardingStatusEnum(str, Enum):
 # ---------------------------------------------------------------------------
 
 class DoctorIdentityBase(BaseModel):
+    full_name: str = Field(min_length=1, max_length=200)
     email: EmailStr
     phone_number: str = Field(min_length=3, max_length=32)
     onboarding_status: OnboardingStatusEnum = Field(default=OnboardingStatusEnum.PENDING)
@@ -44,6 +45,7 @@ class DoctorIdentityResponse(DoctorIdentityBase):
 
     id: str
     doctor_id: int
+    full_name: str = Field(max_length=200, default="")
     email: str = ""
     phone_number: str = Field(max_length=32, default="")
     status_updated_at: datetime | None = None

@@ -232,6 +232,7 @@ async def submit_profile(
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),
             doctor_id=doctor_id,
+            full_name=getattr(doctor, "full_name", None) or "",
             email=doctor.email or "",
             phone_number=doctor.phone or "",
             onboarding_status=OnboardingStatus.SUBMITTED,
@@ -406,6 +407,7 @@ async def verify_profile(
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),
             doctor_id=doctor_id,
+            full_name=getattr(doctor, "full_name", None) or "",
             email=doctor.email or "",
             phone_number=doctor.phone or "",
             onboarding_status=OnboardingStatus.VERIFIED,
@@ -555,6 +557,7 @@ async def reject_profile(
         identity = _DoctorIdentity(
             id=str(_uuid.uuid4()),
             doctor_id=doctor_id,
+            full_name=getattr(doctor, "full_name", None) or "",
             email=doctor.email or "",
             phone_number=doctor.phone or "",
             onboarding_status=OnboardingStatus.REJECTED,

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 def identity_payload() -> dict:
     return {
         "doctor_id": 999,
+        "full_name": "Admin Test",
         "email": "admin.test@example.com",
         "phone_number": "1112223334",
         "onboarding_status": "pending"

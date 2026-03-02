@@ -22,6 +22,7 @@ def synthesise_identity(doctor: Doctor) -> DoctorIdentityResponse:
     return DoctorIdentityResponse(
         id=str(doctor.id),
         doctor_id=doctor.id,
+        full_name=doctor.full_name or "",
         email=doctor.email or "",
         phone_number=doctor.phone or "",
         onboarding_status=(doctor.onboarding_status or "pending").lower(),

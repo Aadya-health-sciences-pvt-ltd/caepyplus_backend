@@ -806,6 +806,7 @@ async def bulk_upload_doctors_csv(
                     if email_val:
                         identity = DoctorIdentity(
                             doctor_id=new_doctor.id,
+                            full_name=new_doctor.full_name or "",
                             email=email_val,
                             phone_number=phone,
                             onboarding_status=OnboardingStatus.PENDING,

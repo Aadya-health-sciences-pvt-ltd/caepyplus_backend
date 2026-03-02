@@ -195,6 +195,8 @@ class OnboardingRepository:
             existing.email = new_email
 
             existing.phone_number = phone_number or existing.phone_number
+            if full_name:
+                existing.full_name = full_name
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
@@ -202,6 +204,7 @@ class OnboardingRepository:
         # Create DoctorIdentity with only its own fields
         identity = DoctorIdentity(
             doctor_id=doctor_id,
+            full_name=full_name or "",
             email=email,
             phone_number=phone_number,
             onboarding_status=status,

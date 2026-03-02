@@ -39,6 +39,7 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 |------------|-----------|-------------|---------|-------------|
 | `id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
 | `doctor_id` | `BIGINT` | UNIQUE, NOT NULL | Auto (sequence) | Numeric doctor ID from `doctor_id_seq` |
+| `full_name` | `VARCHAR(200)` | NOT NULL | — | Doctor's full name |
 | `email` | `VARCHAR(255)` | UNIQUE, NOT NULL | — | Email address |
 | `phone_number` | `VARCHAR(20)` | NOT NULL | — | Contact phone number |
 | `onboarding_status` | `ENUM` | NOT NULL | `'pending'` | `pending` \| `submitted` \| `verified` \| `rejected` |

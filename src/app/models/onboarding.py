@@ -70,6 +70,7 @@ class DoctorIdentity(Base):
         index=True,
     )
 
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     phone_number: Mapped[str] = mapped_column(String(20), nullable=False)
 

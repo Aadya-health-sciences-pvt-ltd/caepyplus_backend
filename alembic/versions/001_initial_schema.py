@@ -373,6 +373,7 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
         "doctor_identity",
         sa.Column("id", sa.String(36), nullable=False),
         sa.Column("doctor_id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("full_name", sa.String(200), nullable=False, server_default=""),
         sa.Column("email", sa.String(255), nullable=False),
         sa.Column("phone_number", sa.String(20), nullable=False),
         sa.Column("onboarding_status", sa.String(20), nullable=False, server_default="pending"),
