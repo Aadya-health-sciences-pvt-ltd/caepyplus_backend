@@ -2,7 +2,6 @@
 
 Exposes administration operations over doctor onboarding data:
   - doctor_identity    : POST /identities, GET /identities
-  - doctor_details     : PUT /details/{doctor_id}, GET /details/{doctor_id}
   - doctor_media       : POST/GET /media/{doctor_id}, DELETE /media/{media_id},
                          POST /media/{doctor_id}/upload
   - doctor_status_history : POST/GET /status-history/{doctor_id}
@@ -30,8 +29,6 @@ from ....core.rbac import AdminOrOperationalUser
 from ....db.session import DbSession
 from ....repositories import OnboardingRepository
 from ....schemas import (
-    DoctorDetailsResponse,
-    DoctorDetailsUpsert,
     DoctorIdentityCreate,
     DoctorIdentityResponse,
     DoctorMediaCreate,
@@ -128,56 +125,6 @@ async def get_identity(
         )
 
     return identity  # type: ignore[return-value]
-
-
-# ---------------------------------------------------------------------------
-# doctor_details
-# ---------------------------------------------------------------------------
-
-
-@router.put(
-    "/details/{doctor_id}",
-    response_model=DoctorDetailsResponse,
-    summary="Upsert doctor details (Admin/Operational only)",
-)
-async def upsert_details(
-    doctor_id: int,
-    payload: DoctorDetailsUpsert,
-    db: DbSession,
-    current_user: AdminOrOperationalUser,
-) -> DoctorDetailsResponse:
-    """Create or update the ``doctor_details`` row for ``doctor_id``.
-
-    Requires Admin or Operational role.
-    """
-    repo = OnboardingRepository(db)
-    log.info("admin_details_upsert", doctor_id=doctor_id, admin_id=current_user.id)
-    details_payload = {k: v for k, v in payload.model_dump().items() if v is not None}
-    return await repo.upsert_details(doctor_id=doctor_id, payload=details_payload)  # type: ignore[return-value]
-
-
-@router.get(
-    "/details/{doctor_id}",
-    response_model=DoctorDetailsResponse,
-    summary="Fetch doctor details (Admin/Operational only)",
-)
-async def get_details(
-    doctor_id: int,
-    db: DbSession,
-    current_user: AdminOrOperationalUser,
-) -> DoctorDetailsResponse:
-    """Fetch the ``doctor_details`` row for ``doctor_id``.
-
-    Requires Admin or Operational role.
-    """
-    repo = OnboardingRepository(db)
-    details = await repo.get_details_by_doctor_id(doctor_id)
-    if not details:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Doctor details not found.",
-        )
-    return details  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------

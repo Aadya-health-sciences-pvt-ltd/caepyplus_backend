@@ -37,7 +37,6 @@ from ....repositories.doctor_repository import DoctorRepository
 from ....repositories.onboarding_repository import OnboardingRepository
 from ....schemas.doctor import DoctorResponse, DoctorUpdate
 from ....schemas.onboarding import (
-    DoctorDetailsResponse,
     DoctorIdentityResponse,
     DoctorMediaResponse,
     DoctorStatusHistoryResponse,
@@ -180,7 +179,6 @@ async def list_doctors(
         data: list[Any] = [
             DoctorWithFullInfoResponse(
                 identity=identity,
-                details=identity.details,
                 media=list(identity.media),
                 status_history=list(identity.status_history),
             )
@@ -279,13 +277,11 @@ async def lookup_doctor(
         assert doctor is not None
         identity_resp = _synthesise_identity(doctor)
 
-    details = await repo.get_details_by_doctor_id(resolved_id)
     media = await repo.list_media(resolved_id)
     status_history = await repo.get_status_history(resolved_id)
 
     return DoctorWithFullInfoResponse(
         identity=identity_resp,
-        details=DoctorDetailsResponse.model_validate(details) if details else None,
         media=[DoctorMediaResponse.model_validate(m) for m in media],
         status_history=[DoctorStatusHistoryResponse.model_validate(h) for h in status_history],
     )

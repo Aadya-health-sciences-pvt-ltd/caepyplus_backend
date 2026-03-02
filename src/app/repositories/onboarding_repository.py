@@ -2,7 +2,6 @@
 
 Async data access helpers for the onboarding tables:
 - doctor_identity
-- doctor_details
 - doctor_media
 - doctor_status_history
 
@@ -19,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models.onboarding import (
-    DoctorDetails,
     DoctorIdentity,
     DoctorMedia,
     DoctorStatusHistory,
@@ -84,7 +82,6 @@ class OnboardingRepository:
 
         if eager_load:
             stmt = stmt.options(
-                selectinload(DoctorIdentity.details),
                 selectinload(DoctorIdentity.media),
                 selectinload(DoctorIdentity.status_history),
             )
@@ -264,8 +261,8 @@ class OnboardingRepository:
 
         Deletes the doctor_identity row for the given doctor_id.
         Database-level cascading and ORM relationships ensure that
-        related rows in doctor_details, doctor_media and
-        doctor_status_history are removed as well.
+        related rows in doctor_media and doctor_status_history are removed
+        as well.
         
         Returns the number of doctor_identity rows deleted (0 or 1).
         """
@@ -305,40 +302,6 @@ class OnboardingRepository:
         await self.session.commit()
         await self.session.refresh(identity)
         return identity
-
-    # ---------------------------------------------------------------------
-    # doctor_details
-    # ---------------------------------------------------------------------
-
-    async def upsert_details(
-        self,
-        *,
-        doctor_id: int,
-        payload: dict[str, Any],
-    ) -> DoctorDetails:
-        """Create or update doctor_details for a given doctor_id.
-
-        `payload` should contain fields matching DoctorDetails columns
-        (except detail_id and doctor_id, which are managed here).
-        """
-        details = await self.get_details_by_doctor_id(doctor_id)
-        if details is None:
-            details = DoctorDetails(doctor_id=doctor_id, **payload)
-            self.session.add(details)
-        else:
-            for key, value in payload.items():
-                if hasattr(details, key):
-                    setattr(details, key, value)
-
-        await self.session.commit()
-        await self.session.refresh(details)
-        return details
-
-    async def get_details_by_doctor_id(self, doctor_id: int) -> DoctorDetails | None:
-        """Fetch doctor_details by doctor_id."""
-        stmt = select(DoctorDetails).where(DoctorDetails.doctor_id == doctor_id)
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
 
     # ---------------------------------------------------------------------
     # doctor_media
@@ -384,14 +347,6 @@ class OnboardingRepository:
                     if hasattr(existing_media, key) and value is not None:
                         setattr(existing_media, key, value)
 
-                # Ensure doctor_details.media_urls points only to this media_id
-                details = await self.get_details_by_doctor_id(doctor_id)
-                if details is not None:
-                    media_urls = dict(details.media_urls or {})
-                    media_urls[effective_field_name] = existing_media.media_id
-                    details.media_urls = media_urls
-                    self.session.add(details)
-
                 await self.session.commit()
                 await self.session.refresh(existing_media)
                 return existing_media
@@ -408,29 +363,6 @@ class OnboardingRepository:
         )
         self.session.add(media)
         await self.session.flush()
-
-        # Update doctor_details.media_urls to track media_ids by field_name
-        if effective_field_name:
-            details = await self.get_details_by_doctor_id(doctor_id)
-            if details is not None:
-                media_urls = dict(details.media_urls or {})
-                current = media_urls.get(effective_field_name)
-                media_id = media.media_id
-                if isinstance(current, list):
-                    if media_id not in current:
-                        current.append(media_id)
-                elif current:
-                    # Preserve existing scalar by turning it into a list
-                    values = [current]
-                    if media_id not in values:
-                        values.append(media_id)
-                    current = values
-                else:
-                    current = [media_id]
-
-                media_urls[effective_field_name] = current
-                details.media_urls = media_urls
-                self.session.add(details)
 
         await self.session.commit()
         await self.session.refresh(media)
@@ -581,86 +513,20 @@ class OnboardingRepository:
     async def get_unique_specialities(self) -> list[str]:
         """Get all unique non-null speciality values for dropdowns.
 
-        Combines values derived from doctor_details.speciality with any
-        manually configured options stored in dropdown_options under
-        field_name="specialisations".
+        Returns values stored in dropdown_options under field_name="specialisations".
         """
-
-        # Values derived from existing doctor_details rows
-        stmt = (
-            select(DoctorDetails.speciality)
-            .where(DoctorDetails.speciality.isnot(None))
-            .where(DoctorDetails.speciality != "")
-            .distinct()
-        )
-        result = await self.session.execute(stmt)
-        derived_values = {row[0] for row in result.fetchall() if row[0]}
-
-        # Manually configured values
-        manual_values = set(await self._get_manual_dropdown_values("specialisations"))
-
-        return sorted(derived_values | manual_values)
+        return sorted(set(await self._get_manual_dropdown_values("specialisations")))
 
     async def get_unique_sub_specialities(self) -> list[str]:
         """Get all unique sub-speciality values for dropdowns.
 
-        Combines values from doctor_details.sub_specialities arrays with
-        manually configured options stored in dropdown_options under
-        field_name="sub_specialisations".
+        Returns values stored in dropdown_options under field_name="sub_specialisations".
         """
-
-        # Get all non-empty sub_specialities arrays
-        stmt = (
-            select(DoctorDetails.sub_specialities)
-            .where(DoctorDetails.sub_specialities.isnot(None))
-        )
-        result = await self.session.execute(stmt)
-
-        # Flatten and deduplicate from doctor data
-        derived_values: set[str] = set()
-        for row in result.fetchall():
-            sub_specs = row[0]
-            if isinstance(sub_specs, list):
-                for spec in sub_specs:
-                    if spec and isinstance(spec, str) and spec.strip():
-                        derived_values.add(spec.strip())
-
-        manual_values = set(
-            await self._get_manual_dropdown_values("sub_specialisations")
-        )
-
-        return sorted(derived_values | manual_values)
+        return sorted(set(await self._get_manual_dropdown_values("sub_specialisations")))
 
     async def get_unique_degrees(self) -> list[str]:
         """Get all unique degree values for dropdowns.
 
-        Combines degree values derived from doctor_details.qualifications
-        with manually configured options stored in dropdown_options under
-        field_name="degrees".
+        Returns values stored in dropdown_options under field_name="degrees".
         """
-
-        # Get all qualifications arrays
-        stmt = (
-            select(DoctorDetails.qualifications)
-            .where(DoctorDetails.qualifications.isnot(None))
-        )
-        result = await self.session.execute(stmt)
-
-        # Extract degree from each qualification object
-        derived_values: set[str] = set()
-        for row in result.fetchall():
-            qualifications = row[0]
-            if isinstance(qualifications, list):
-                for qual in qualifications:
-                    if isinstance(qual, dict):
-                        degree = (
-                            qual.get("degree")
-                            or qual.get("name")
-                            or qual.get("title")
-                        )
-                        if degree and isinstance(degree, str) and degree.strip():
-                            derived_values.add(degree.strip())
-
-        manual_values = set(await self._get_manual_dropdown_values("degrees"))
-
-        return sorted(derived_values | manual_values)
+        return sorted(set(await self._get_manual_dropdown_values("degrees")))

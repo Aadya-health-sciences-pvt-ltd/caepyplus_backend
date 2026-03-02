@@ -13,7 +13,6 @@ Tables created
 - doctors              : Core doctor profile with professional information
 - users                : RBAC user management (admin, operational, user)
 - doctor_identity      : Onboarding identity and status tracking
-- doctor_details       : Comprehensive professional questionnaire data
 - doctor_media         : Uploaded media file references
 - doctor_status_history: Audit trail for status changes
 - dropdown_options     : Dynamic option lists for onboarding form fields
@@ -417,86 +416,7 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
     )
 
     # =======================================================================
-    # 4. DOCTOR_DETAILS TABLE
-    # =======================================================================
-    op.create_table(
-        "doctor_details",
-        sa.Column("detail_id", sa.String(36), nullable=False),
-        sa.Column("doctor_id", sa.BigInteger(), nullable=False),
-        # Block 1: Professional Identity
-        sa.Column("full_name", sa.String(200), nullable=True),
-        sa.Column("specialty", sa.String(100), nullable=True),
-        sa.Column("primary_practice_location", sa.String(100), nullable=True),
-        sa.Column("centres_of_practice", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("years_of_clinical_experience", sa.Integer(), nullable=True),
-        sa.Column("years_post_specialisation", sa.Integer(), nullable=True),
-        # Block 2: Credentials
-        sa.Column("year_of_mbbs", sa.Integer(), nullable=True),
-        sa.Column("year_of_specialisation", sa.Integer(), nullable=True),
-        sa.Column("fellowships", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("qualifications", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("professional_memberships", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("awards_academic_honours", sa.JSON(), nullable=False, server_default="[]"),
-        # Block 3: Clinical Focus
-        sa.Column("areas_of_clinical_interest", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("practice_segments", sa.String(50), nullable=True),
-        sa.Column("conditions_commonly_treated", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("conditions_known_for", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("conditions_want_to_treat_more", sa.JSON(), nullable=False, server_default="[]"),
-        # Block 4: Human Side
-        sa.Column("training_experience", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("motivation_in_practice", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("unwinding_after_work", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("recognition_identity", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("quality_time_interests", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("quality_time_interests_text", sa.Text(), nullable=True),
-        sa.Column("professional_achievement", sa.Text(), nullable=True),
-        sa.Column("personal_achievement", sa.Text(), nullable=True),
-        sa.Column("professional_aspiration", sa.Text(), nullable=True),
-        sa.Column("personal_aspiration", sa.Text(), nullable=True),
-        # Block 5: Patient Value
-        sa.Column("what_patients_value_most", sa.Text(), nullable=True),
-        sa.Column("approach_to_care", sa.Text(), nullable=True),
-        sa.Column("availability_philosophy", sa.Text(), nullable=True),
-        # Block 6: Content Seeds
-        sa.Column("content_seeds", sa.JSON(), nullable=False, server_default="[]"),
-        # Legacy compatibility fields
-        sa.Column("gender", sa.String(20), nullable=True),
-        sa.Column("speciality", sa.String(100), nullable=True),
-        sa.Column("sub_specialities", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("areas_of_expertise", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("registration_number", sa.String(100), nullable=True),
-        sa.Column("medical_council", sa.String(200), nullable=True),
-        sa.Column("registration_year", sa.Integer(), nullable=True),
-        sa.Column("registration_authority", sa.String(100), nullable=True),
-        sa.Column("consultation_fee", sa.Float(), nullable=True),
-        sa.Column("years_of_experience", sa.Integer(), nullable=True),
-        sa.Column("conditions_treated", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("procedures_performed", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("age_groups_treated", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("languages_spoken", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("achievements", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("publications", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("practice_locations", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("external_links", sa.JSON(), nullable=False, server_default="{}"),
-        sa.Column("professional_overview", sa.Text(), nullable=True),
-        sa.Column("about_me", sa.Text(), nullable=True),
-        sa.Column("professional_tagline", sa.Text(), nullable=True),
-        sa.Column("media_urls", sa.JSON(), nullable=False, server_default="{}"),
-        sa.Column("profile_summary", sa.Text(), nullable=True),
-        # Timestamps
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.PrimaryKeyConstraint("detail_id"),
-        sa.ForeignKeyConstraint(["doctor_id"], ["doctor_identity.doctor_id"], ondelete="CASCADE"),
-        sa.UniqueConstraint("doctor_id"),
-        sa.UniqueConstraint("registration_number"),
-    )
-
-    op.create_index("ix_doctor_details_doctor_id", "doctor_details", ["doctor_id"])
-
-    # =======================================================================
-    # 5. DOCTOR_MEDIA TABLE
+    # 4. DOCTOR_MEDIA TABLE
     # =======================================================================
     op.create_table(
         "doctor_media",
@@ -697,9 +617,6 @@ def downgrade() -> None:
 
     op.drop_index("ix_doctor_media_doctor_id", table_name="doctor_media")
     op.drop_table("doctor_media")
-
-    op.drop_index("ix_doctor_details_doctor_id", table_name="doctor_details")
-    op.drop_table("doctor_details")
 
     op.drop_index("ix_doctor_identity_onboarding_status", table_name="doctor_identity")
     op.drop_index("ix_doctor_identity_email", table_name="doctor_identity")

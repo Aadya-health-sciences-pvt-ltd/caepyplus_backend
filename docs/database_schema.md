@@ -3,7 +3,7 @@
 **Project:** Doctor Onboarding Smart-Fill API  
 **Database:** PostgreSQL (Production) / SQLite (Testing via aiosqlite)  
 **ORM:** SQLAlchemy 2.0 (Async)  
-**Last Updated:** 2026-02-28  
+**Last Updated:** 2026-03-02  
 
 ---
 
@@ -18,15 +18,14 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 ## Table of Contents
 
 1. [doctor_identity](#1-doctor_identity)
-2. [doctor_details](#2-doctor_details)
-3. [doctor_media](#3-doctor_media)
-4. [doctor_status_history](#4-doctor_status_history)
-5. [dropdown_options](#5-dropdown_options)
-6. [users](#6-users)
-7. [doctors](#7-doctors) (legacy)
-8. [Enumerations](#enumerations)
-9. [Relationships](#relationships)
-10. [Indexes](#indexes)
+2. [doctor_media](#2-doctor_media)
+3. [doctor_status_history](#3-doctor_status_history)
+4. [dropdown_options](#4-dropdown_options)
+5. [users](#5-users)
+6. [doctors](#6-doctors) (legacy)
+7. [Enumerations](#enumerations)
+8. [Relationships](#relationships)
+9. [Indexes](#indexes)
 
 ---
 
@@ -62,97 +61,12 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 - B-tree: `onboarding_status` (fast filtered listing)
 
 **Relationships:**
-- ONE-TO-ONE with `doctor_details` (via `doctor_id`)
 - ONE-TO-MANY with `doctor_media` (media records)
 - ONE-TO-MANY with `doctor_status_history` (audit trail)
 
 ---
 
-## 2. `doctor_details`
-
-**Purpose:** Comprehensive professional information and credentials.
-
-**Description:** Stores detailed professional data organized into 6 blocks matching the voice onboarding questionnaire, plus legacy fields for backward compatibility. All JSON fields default to empty arrays/objects.
-
-| Column Name | Data Type | Constraints | Default | Description |
-|------------|-----------|-------------|---------|-------------|
-| `detail_id` | `VARCHAR(36)` | PRIMARY KEY | UUID v4 | Unique identifier |
-| `doctor_id` | `BIGINT` | FK, UNIQUE, NOT NULL | — | References `doctor_identity.doctor_id` |
-| **Block 1: Professional Identity** |||||
-| `full_name` | `VARCHAR(200)` | NULLABLE | NULL | Doctor's full name |
-| `specialty` | `VARCHAR(100)` | NULLABLE | NULL | Primary specialty |
-| `primary_practice_location` | `VARCHAR(100)` | NULLABLE | NULL | Primary city/location |
-| `centres_of_practice` | `JSON` | NOT NULL | `[]` | Array of practice centre names |
-| `years_of_clinical_experience` | `INTEGER` | NULLABLE | NULL | Total clinical experience years |
-| `years_post_specialisation` | `INTEGER` | NULLABLE | NULL | Years since specialisation |
-| **Block 2: Credentials & Trust Markers** |||||
-| `year_of_mbbs` | `INTEGER` | NULLABLE | NULL | Year of MBBS completion |
-| `year_of_specialisation` | `INTEGER` | NULLABLE | NULL | Year of specialisation completion |
-| `fellowships` | `JSON` | NOT NULL | `[]` | Array of fellowship details |
-| `qualifications` | `JSON` | NOT NULL | `[]` | Array of qualifications |
-| `professional_memberships` | `JSON` | NOT NULL | `[]` | Array of professional body memberships |
-| `awards_academic_honours` | `JSON` | NOT NULL | `[]` | Array of awards and honours |
-| **Block 3: Clinical Focus & Expertise** |||||
-| `areas_of_clinical_interest` | `JSON` | NOT NULL | `[]` | Array of clinical interest areas |
-| `practice_segments` | `VARCHAR(50)` | NULLABLE | NULL | Practice segment type |
-| `conditions_commonly_treated` | `JSON` | NOT NULL | `[]` | Array of commonly treated conditions |
-| `conditions_known_for` | `JSON` | NOT NULL | `[]` | Array of conditions known for |
-| `conditions_want_to_treat_more` | `JSON` | NOT NULL | `[]` | Array of conditions to treat more |
-| **Block 4: The Human Side** |||||
-| `training_experience` | `JSON` | NOT NULL | `[]` | Array of training experiences |
-| `motivation_in_practice` | `JSON` | NOT NULL | `[]` | Array of practice motivations |
-| `unwinding_after_work` | `JSON` | NOT NULL | `[]` | Array of unwinding activities |
-| `recognition_identity` | `JSON` | NOT NULL | `[]` | Array of recognition/identity items |
-| `quality_time_interests` | `JSON` | NOT NULL | `[]` | Array of quality time interests |
-| `quality_time_interests_text` | `TEXT` | NULLABLE | NULL | Free-text quality time description |
-| `professional_achievement` | `TEXT` | NULLABLE | NULL | Key professional achievement |
-| `personal_achievement` | `TEXT` | NULLABLE | NULL | Key personal achievement |
-| `professional_aspiration` | `TEXT` | NULLABLE | NULL | Professional aspiration |
-| `personal_aspiration` | `TEXT` | NULLABLE | NULL | Personal aspiration |
-| **Block 5: Patient Value & Choice Factors** |||||
-| `what_patients_value_most` | `TEXT` | NULLABLE | NULL | What patients value most |
-| `approach_to_care` | `TEXT` | NULLABLE | NULL | Approach to patient care |
-| `availability_philosophy` | `TEXT` | NULLABLE | NULL | Availability philosophy |
-| **Block 6: Content Seed** |||||
-| `content_seeds` | `JSON` | NOT NULL | `[]` | Array of content seed objects |
-| **Legacy/Compatibility Fields** |||||
-| `gender` | `VARCHAR(20)` | NULLABLE | NULL | Gender identification |
-| `speciality` | `VARCHAR(100)` | NULLABLE | NULL | Primary specialization (legacy) |
-| `sub_specialities` | `JSON` | NOT NULL | `[]` | Array of sub-specializations |
-| `areas_of_expertise` | `JSON` | NOT NULL | `[]` | Array of expertise areas |
-| `registration_number` | `VARCHAR(100)` | UNIQUE, NULLABLE | NULL | Medical registration number |
-| `medical_council` | `VARCHAR(200)` | NULLABLE | NULL | Issuing medical council name |
-| `registration_year` | `INTEGER` | NULLABLE | NULL | Year of medical registration |
-| `registration_authority` | `VARCHAR(100)` | NULLABLE | NULL | Issuing authority |
-| `consultation_fee` | `FLOAT` | NULLABLE | NULL | Default consultation fee |
-| `years_of_experience` | `INTEGER` | NULLABLE | NULL | Total years practicing |
-| `conditions_treated` | `JSON` | NOT NULL | `[]` | Array of conditions treated |
-| `procedures_performed` | `JSON` | NOT NULL | `[]` | Array of procedures performed |
-| `age_groups_treated` | `JSON` | NOT NULL | `[]` | Array of age groups treated |
-| `languages_spoken` | `JSON` | NOT NULL | `[]` | Array of languages |
-| `achievements` | `JSON` | NOT NULL | `[]` | Array of awards and recognitions |
-| `publications` | `JSON` | NOT NULL | `[]` | Array of research publications |
-| `practice_locations` | `JSON` | NOT NULL | `[]` | Array of practice locations (legacy) |
-| `external_links` | `JSON` | NOT NULL | `{}` | Object with social links |
-| `professional_overview` | `TEXT` | NULLABLE | NULL | Professional summary/bio |
-| `about_me` | `TEXT` | NULLABLE | NULL | Personal introduction |
-| `professional_tagline` | `TEXT` | NULLABLE | NULL | Short professional tagline |
-| `media_urls` | `JSON` | NOT NULL | `{}` | Object with media URLs (legacy) |
-| `profile_summary` | `TEXT` | NULLABLE | NULL | Auto-generated profile summary |
-| `created_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Row creation timestamp |
-| `updated_at` | `TIMESTAMP WITH TZ` | NOT NULL | UTC NOW | Row update timestamp |
-
-**Indexes:**
-- Primary Key: `detail_id`
-- Unique: `doctor_id`, `registration_number`
-- Foreign Key: `doctor_id` → `doctor_identity.doctor_id` (CASCADE DELETE)
-
-**Relationships:**
-- ONE-TO-ONE with `doctor_identity`
-
----
-
-## 3. `doctor_media`
+## 2. `doctor_media`
 
 **Purpose:** Media file references for doctor profiles.
 
@@ -183,7 +97,7 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 
 ---
 
-## 4. `doctor_status_history`
+## 3. `doctor_status_history`
 
 **Purpose:** Immutable audit trail for onboarding status changes.
 
@@ -213,7 +127,7 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 
 ---
 
-## 5. `dropdown_options`
+## 4. `dropdown_options`
 
 **Purpose:** Curated dropdown values for onboarding form fields with approval workflow.
 
@@ -264,7 +178,7 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 
 ---
 
-## 6. `users`
+## 5. `users`
 
 **Purpose:** RBAC user accounts for authentication and authorization.
 
@@ -295,7 +209,7 @@ The entire schema is expressed in a **single Alembic migration** (`001_initial_s
 
 ---
 
-## 7. `doctors`
+## 6. `doctors`
 
 **Purpose:** Legacy main doctor entity, also used for bulk CSV uploads and quick profile store.
 
@@ -429,7 +343,7 @@ USER = "user"               # Regular user access
 ### Entity Relationship Diagram
 
 ```
-doctor_identity (1) ────────── (1) doctor_details
+doctor_identity (1)
        │
        │ (1)
        │
@@ -444,10 +358,9 @@ doctors (1) ──────────────── (0..1) users
 
 **Key Relationships:**
 
-1. **doctor_identity ↔ doctor_details**: One-to-One (via `doctor_id`, cascade delete)
-2. **doctor_identity ↔ doctor_media**: One-to-Many (cascade delete)
-3. **doctor_identity ↔ doctor_status_history**: One-to-Many (cascade delete)
-4. **doctors ↔ users**: One-to-One (optional, via `users.doctor_id` → `doctors.id`, SET NULL)
+1. **doctor_identity ↔ doctor_media**: One-to-Many (cascade delete)
+2. **doctor_identity ↔ doctor_status_history**: One-to-Many (cascade delete)
+3. **doctors ↔ users**: One-to-One (optional, via `users.doctor_id` → `doctors.id`, SET NULL)
 
 ---
 
@@ -460,8 +373,6 @@ doctors (1) ──────────────── (0..1) users
 | `doctor_identity` | `doctor_id` | UNIQUE | Lookups |
 | `doctor_identity` | `email` | UNIQUE | Authentication |
 | `doctor_identity` | `onboarding_status` | B-TREE | Fast filtered listing |
-| `doctor_details` | `doctor_id` | UNIQUE | Joins |
-| `doctor_details` | `registration_number` | UNIQUE | Validation |
 | `doctor_media` | `doctor_id` | INDEX | Fetch all media |
 | `doctor_status_history` | `doctor_id` | INDEX | Audit trail |
 | `dropdown_options` | `field_name` | INDEX | Value lookups |
@@ -481,7 +392,7 @@ doctors (1) ──────────────── (0..1) users
 
 ## Design Notes
 
-1. **Cascade Deletes**: Onboarding relationships (`doctor_details`, `doctor_media`, `doctor_status_history`) use `CASCADE DELETE`. The `users.doctor_id` FK uses `SET NULL` on delete.
+1. **Cascade Deletes**: Onboarding relationships (`doctor_media`, `doctor_status_history`) use `CASCADE DELETE`. The `users.doctor_id` FK uses `SET NULL` on delete.
 2. **Soft Deletes**: Tables use `is_active` and/or `deleted_at` for soft deletion.
 3. **Media stored outside DB**: `doctor_media` stores file URIs (local path or S3 key); binary blobs are never stored in the DB.
 4. **Status tracked in two places**: `doctors.onboarding_status` (fast lookup) and `doctor_identity.onboarding_status` (onboarding pipeline) — kept in sync by the status endpoints.
@@ -511,9 +422,9 @@ alembic downgrade base
 
 | Revision | Description |
 |----------|-------------|
-| `001_initial_schema` | Complete schema: 7 tables, all indexes, `doctor_id_seq`, admin user seed, ~205 dropdown seed values across 15 fields |
+| `001_initial_schema` | Complete schema: 6 tables, all indexes, `doctor_id_seq`, admin user seed, ~205 dropdown seed values across 15 fields |
 
 ---
 
-**Last Updated:** 2026-02-28  
-**Schema Version:** 5.0.0
+**Last Updated:** 2026-03-02  
+**Schema Version:** 6.0.0
