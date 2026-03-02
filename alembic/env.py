@@ -92,7 +92,6 @@ from src.app.db.session import Base  # noqa: E402
 # Import all model modules so their tables appear in Base.metadata
 from src.app.models import (  # noqa: E402, F401
     Doctor,
-    DoctorDetails,
     DoctorIdentity,
     DoctorMedia,
     DoctorStatusHistory,

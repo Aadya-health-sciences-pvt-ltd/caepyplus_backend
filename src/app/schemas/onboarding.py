@@ -2,7 +2,6 @@
 
 Pydantic models for CRUD APIs over onboarding tables:
 - doctor_identity
-- doctor_details
 - doctor_media
 - doctor_status_history
 """
@@ -76,93 +75,6 @@ class OnboardingStatusUpdate(BaseModel):
     rejection_reason: str | None = None
 
 # ---------------------------------------------------------------------------
-# doctor_details
-# ---------------------------------------------------------------------------
-
-class DoctorDetailsBase(BaseModel):
-
-    # Block 1: Professional Identity
-    full_name: str | None = None
-    specialty: str | None = None
-    primary_practice_location: str | None = None
-    centres_of_practice: list[str] | None = None
-    years_of_clinical_experience: int | None = None
-    years_post_specialisation: int | None = None
-
-    # Block 2: Credentials & Trust Markers
-    year_of_mbbs: int | None = None
-    year_of_specialisation: int | None = None
-    fellowships: list[str] | None = None
-    qualifications: list[str] | None = None
-    professional_memberships: list[str] | None = None
-    awards_academic_honours: list[str] | None = None
-
-    # Block 3: Clinical Focus & Expertise
-    areas_of_clinical_interest: list[str] | None = None
-    practice_segments: str | None = None
-    conditions_commonly_treated: list[str] | None = None
-    conditions_known_for: list[str] | None = None
-    conditions_want_to_treat_more: list[str] | None = None
-
-    # Block 4: The Human Side
-    training_experience: list[str] | None = None
-    motivation_in_practice: list[str] | None = None
-    unwinding_after_work: list[str] | None = None
-    recognition_identity: list[str] | None = None
-    quality_time_interests: list[str] | None = None
-    quality_time_interests_text: str | None = None
-    professional_achievement: str | None = None
-    personal_achievement: str | None = None
-    professional_aspiration: str | None = None
-    personal_aspiration: str | None = None
-
-    # Block 5: Patient Value & Choice Factors
-    what_patients_value_most: str | None = None
-    approach_to_care: str | None = None
-    availability_philosophy: str | None = None
-
-    # Block 6: Content Seed (repeatable)
-    content_seeds: list[dict[str, Any]] | None = None
-
-    # Existing fields (for compatibility)
-    gender: str | None = Field(default=None, max_length=20)
-    speciality: str | None = Field(default=None, max_length=100)
-    sub_specialities: list[str] | None = None
-    areas_of_expertise: list[str] | None = None
-    registration_number: str | None = Field(default=None, max_length=100)
-    medical_council: str | None = Field(default=None, max_length=200, description="Name of the issuing medical council")
-    registration_year: int | None = None
-    registration_authority: str | None = Field(default=None, max_length=100)
-    consultation_fee: float | None = None
-    years_of_experience: int | None = None
-    conditions_treated: list[str] | None = None
-    procedures_performed: list[str] | None = None
-    age_groups_treated: list[str] | None = None
-    languages_spoken: list[str] | None = None
-    achievements: list[dict[str, Any]] | None = None
-    publications: list[dict[str, Any]] | None = None
-    practice_locations: list[dict[str, Any]] | None = None
-    external_links: dict[str, Any] | None = None
-    professional_overview: str | None = None
-    about_me: str | None = None
-    professional_tagline: str | None = None
-    media_urls: dict[str, Any] | None = None
-    profile_summary: str | None = None
-
-class DoctorDetailsUpsert(DoctorDetailsBase):
-    """Payload for creating/updating doctor_details for a doctor_id."""
-
-class DoctorDetailsResponse(DoctorDetailsBase):
-    """API response model for doctor_details."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    detail_id: str
-    doctor_id: int
-    created_at: datetime
-    updated_at: datetime
-
-# ---------------------------------------------------------------------------
 # doctor_media
 # ---------------------------------------------------------------------------
 
@@ -220,11 +132,10 @@ class DoctorStatusHistoryResponse(BaseModel):
 class DoctorWithFullInfoResponse(BaseModel):
     """Aggregated view of a doctor's onboarding data.
 
-    Includes identity, details, media, and status history.
+    Includes identity, media, and status history.
     """
 
     identity: DoctorIdentityResponse
-    details: DoctorDetailsResponse | None = None
     media: list[DoctorMediaResponse] = []
     status_history: list[DoctorStatusHistoryResponse] = []
 

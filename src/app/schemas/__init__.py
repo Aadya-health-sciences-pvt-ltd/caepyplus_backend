@@ -13,8 +13,6 @@ from .doctor import (
     TitleEnum,
 )
 from .onboarding import (
-    DoctorDetailsResponse,
-    DoctorDetailsUpsert,
     DoctorIdentityCreate,
     DoctorIdentityResponse,
     DoctorMediaCreate,
@@ -56,8 +54,6 @@ __all__ = [
     # Onboarding schemas
     "DoctorIdentityCreate",
     "DoctorIdentityResponse",
-    "DoctorDetailsUpsert",
-    "DoctorDetailsResponse",
     "DoctorMediaCreate",
     "DoctorMediaResponse",
     "DoctorStatusHistoryCreate",
