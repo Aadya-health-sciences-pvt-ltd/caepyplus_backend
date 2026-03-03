@@ -99,7 +99,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # development so the browser can load their inline scripts and styles.
         # All other paths (and all of production) use the strict locked-down policy.
         _settings = get_settings()
-        docs_paths = {"/docs", "/redoc", "/openapi.json"}
+        docs_paths = {
+            f"{_settings.ROOT_PATH}/docs",
+            f"{_settings.ROOT_PATH}/redoc",
+            f"{_settings.ROOT_PATH}/openapi.json",
+        }
         if request.url.path in docs_paths and _settings.APP_ENV != "production":
             # Swagger UI loads JS/CSS from jsdelivr CDN and favicon from fastapi.tiangolo.com
             response.headers["Content-Security-Policy"] = (
@@ -330,6 +334,9 @@ Production-grade REST API for doctor onboarding with AI-powered data extraction.
 All endpoints are versioned under `/api/v1/`.
         """,
         # Docs are only available in non-production environments.
+        # IMPORTANT: When root_path is set, docs/openapi URLs must be
+        # specified *relative* to that root, otherwise the prefix is
+        # applied twice.
         docs_url="/docs" if settings.is_development else None,
         redoc_url="/redoc" if settings.is_development else None,
         openapi_url="/openapi.json" if settings.is_development else None,
@@ -376,7 +383,7 @@ All endpoints are versioned under `/api/v1/`.
     # ------------------------------------------------------------------
     # Routers
     # ------------------------------------------------------------------
-    app.include_router(v1_router)
+    app.include_router(v1_router, prefix=settings.ROOT_PATH)
 
     # Root redirect — not in OpenAPI schema
     @app.get("/", include_in_schema=False)
@@ -388,7 +395,7 @@ All endpoints are versioned under `/api/v1/`.
         }
         # Only advertise the docs URL when they are actually enabled.
         if settings.is_development:
-            payload["docs"] = "/docs"
+            payload["docs"] = f"{settings.ROOT_PATH}/docs"
         return payload
 
     return app

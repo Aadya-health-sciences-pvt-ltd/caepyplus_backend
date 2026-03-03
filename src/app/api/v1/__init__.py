@@ -34,7 +34,7 @@ from .endpoints import (
     voice,
 )
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/v1")
 
 # =========================================================================
 # PUBLIC ENDPOINTS — no auth required
