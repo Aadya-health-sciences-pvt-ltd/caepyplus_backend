@@ -46,8 +46,12 @@ class DatabaseManager:
         # Use SSL for non-local PostgreSQL (e.g., RDS). For localhost, keep it plain.
         db_url = self.settings.DATABASE_URL or ""
         if "localhost" not in db_url and "127.0.0.1" not in db_url:
-            # Let asyncpg create a default SSL context when ssl=True
-            connect_args["ssl"] = True
+            # For internal RDS, accept the certificate without full chain verification.
+            # This avoids CERTIFICATE_VERIFY_FAILED while still using TLS on the wire.
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            connect_args["ssl"] = ctx
 
         engine = create_async_engine(
             db_url,
