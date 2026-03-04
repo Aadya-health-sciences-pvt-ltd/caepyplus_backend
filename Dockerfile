@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy all project files
 COPY . .
 
-# Expose port
-EXPOSE 6555
+# Expose port (must match ECS task/container port)
+EXPOSE 8000
+
 # Default command
-CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "6555"]
+CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
