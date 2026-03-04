@@ -9,6 +9,7 @@ Run `alembic upgrade head` (or `python scripts/migrate.py`) before first deploym
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
+import ssl
 
 import structlog
 from fastapi import Depends
@@ -40,13 +41,22 @@ class DatabaseManager:
 
     def _create_engine(self) -> AsyncEngine:
         """Create the async SQLAlchemy engine."""
+        connect_args: dict[str, object] = {}
+
+        # Use SSL for non-local PostgreSQL (e.g., RDS). For localhost, keep it plain.
+        db_url = self.settings.DATABASE_URL or ""
+        if "localhost" not in db_url and "127.0.0.1" not in db_url:
+            # Let asyncpg create a default SSL context when ssl=True
+            connect_args["ssl"] = True
+
         engine = create_async_engine(
-            self.settings.DATABASE_URL,
+            db_url,
             echo=self.settings.DATABASE_ECHO,
             pool_size=self.settings.DATABASE_POOL_SIZE,
             max_overflow=self.settings.DATABASE_MAX_OVERFLOW,
             pool_timeout=self.settings.DATABASE_POOL_TIMEOUT,
             pool_pre_ping=True,
+            connect_args=connect_args,
         )
         log.info(
             "db_engine_created",
