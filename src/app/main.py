@@ -99,10 +99,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # development so the browser can load their inline scripts and styles.
         # All other paths (and all of production) use the strict locked-down policy.
         _settings = get_settings()
+        root_prefix = (
+            "/" + _settings.ROOT_PATH.strip("/")
+        ) if _settings.ROOT_PATH else ""
         docs_paths = {
-            f"{_settings.ROOT_PATH}/docs",
-            f"{_settings.ROOT_PATH}/redoc",
-            f"{_settings.ROOT_PATH}/openapi.json",
+            f"{root_prefix}/docs",
+            f"{root_prefix}/redoc",
+            f"{root_prefix}/openapi.json",
         }
         if request.url.path in docs_paths and _settings.APP_ENV != "production":
             # Swagger UI loads JS/CSS from jsdelivr CDN and favicon from fastapi.tiangolo.com
@@ -173,7 +176,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     Shutdown:
         1. Cancel background tasks gracefully.
-        2. Close all database connections.
+        2. Close all database connections.caepz
     """
     import asyncio
 
@@ -314,7 +317,6 @@ def create_application() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
-        root_path=settings.ROOT_PATH,
         description="""
 # 🏥 Doctor Onboarding Smart-Fill API
 
@@ -334,12 +336,24 @@ Production-grade REST API for doctor onboarding with AI-powered data extraction.
 All endpoints are versioned under `/api/v1/`.
         """,
         # Docs are only available in non-production environments.
-        # IMPORTANT: When root_path is set, docs/openapi URLs must be
-        # specified *relative* to that root, otherwise the prefix is
-        # applied twice.
-        docs_url="/docs" if settings.is_development else None,
-        redoc_url="/redoc" if settings.is_development else None,
-        openapi_url="/openapi.json" if settings.is_development else None,
+        # When ROOT_PATH is set, serve docs/openapi.json under that base path.
+        docs_url=(
+            f"{settings.ROOT_PATH.rstrip('/')}/docs" if settings.ROOT_PATH else "/docs"
+        )
+        if settings.is_development
+        else None,
+        redoc_url=(
+            f"{settings.ROOT_PATH.rstrip('/')}/redoc" if settings.ROOT_PATH else "/redoc"
+        )
+        if settings.is_development
+        else None,
+        openapi_url=(
+            f"{settings.ROOT_PATH.rstrip('/')}/openapi.json"
+            if settings.ROOT_PATH
+            else "/openapi.json"
+        )
+        if settings.is_development
+        else None,
         default_response_class=JSONResponse,
         lifespan=lifespan,
         openapi_tags=tags_metadata,
@@ -352,6 +366,11 @@ All endpoints are versioned under `/api/v1/`.
         license_info={"name": "MIT License", "url": "https://opensource.org/licenses/MIT"},
         contact={"name": "API Support", "email": "support@linqmd.com"},
     )
+
+    # Normalize ROOT_PATH for mounting: ensure leading slash (e.g. caepyplus/api -> /caepyplus/api).
+    # When set, all API routes are served under this path when running the app
+    # directly (no reverse-proxy path stripping).
+    root_prefix = ("/" + settings.ROOT_PATH.strip("/")) if settings.ROOT_PATH else ""
 
     # ------------------------------------------------------------------
     # Middleware — order matters: first registered = outermost wrapper
@@ -383,19 +402,20 @@ All endpoints are versioned under `/api/v1/`.
     # ------------------------------------------------------------------
     # Routers
     # ------------------------------------------------------------------
-    app.include_router(v1_router, prefix=settings.ROOT_PATH)
+    # Mount API v1 under root_prefix so endpoints live at e.g. /caepyplus/api/v1/health
+    app.include_router(v1_router, prefix=root_prefix)
 
-    # Root redirect — not in OpenAPI schema
+    # Root — not in OpenAPI schema; links must include root_prefix when set
     @app.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:
+        health_path = f"{root_prefix}/v1/health" if root_prefix else "/v1/health"
         payload: dict[str, str] = {
             "service": settings.APP_NAME,
             "version": settings.APP_VERSION,
-            "health": "/api/v1/health",
+            "health": health_path,
         }
-        # Only advertise the docs URL when they are actually enabled.
         if settings.is_development:
-            payload["docs"] = f"{settings.ROOT_PATH}/docs"
+            payload["docs"] = f"{root_prefix}/docs" if root_prefix else "/docs"
         return payload
 
     return app
