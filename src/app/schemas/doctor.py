@@ -152,6 +152,7 @@ class DoctorBase(BaseModel):
     conditions_treated: list[str] = Field(default_factory=list, description="Conditions commonly treated")
     awards_recognition: list[str] = Field(default_factory=list, description="Awards and recognition")
     memberships: list[str] = Field(default_factory=list, description="Professional memberships")
+    profile_photo: str | None = Field(default=None, description="Profile photo URL")
     verbal_intro_file: str | None = Field(default=None, description="Verbal introduction file URL")
     professional_documents: list[str] = Field(default_factory=list, description="Professional document URLs")
     achievement_images: list[str] = Field(default_factory=list, description="Achievement image URLs")
@@ -248,6 +249,7 @@ class DoctorUpdate(BaseModel):
     conditions_treated: list[str] | None = None
     awards_recognition: list[str] | None = None
     memberships: list[str] | None = None
+    profile_photo: str | None = None
     verbal_intro_file: str | None = None
     professional_documents: list[str] | None = None
     achievement_images: list[str] | None = None
@@ -279,6 +281,7 @@ class DoctorResponse(BaseModel):
     conditions_treated: list[str] = Field(default_factory=list)
     awards_recognition: list[str] = Field(default_factory=list)
     memberships: list[str] = Field(default_factory=list)
+    profile_photo: str | None = None
     verbal_intro_file: str | None = None
     professional_documents: list[str] = Field(default_factory=list)
     achievement_images: list[str] = Field(default_factory=list)

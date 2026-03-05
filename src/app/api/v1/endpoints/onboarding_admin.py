@@ -36,7 +36,7 @@ from ....schemas import (
     DoctorStatusHistoryCreate,
     DoctorStatusHistoryResponse,
 )
-from ....services.blob_storage_service import get_blob_storage_service
+from ....services.blob_storage_service import S3BlobStorageService, get_blob_storage_service
 
 log = structlog.get_logger(__name__)
 
@@ -60,6 +60,32 @@ def _build_absolute_uri(request: Request, file_uri: str) -> str:
     if file_uri.startswith("/"):
         return f"{base}{file_uri}"
     return f"{base}/{file_uri}"
+
+async def _sign_media_url(media: DoctorMediaResponse) -> DoctorMediaResponse:
+    """Dynamically generate signed S3 URL for media file_uri."""
+    blob_service = get_blob_storage_service()
+    
+    if not isinstance(blob_service, S3BlobStorageService) or not blob_service.use_signed_urls:
+        return media
+
+    uri = media.file_uri
+    if not uri or "s3" not in uri.lower():
+        return media
+        
+    try:
+        parts = uri.split(".amazonaws.com/")
+        if len(parts) == 2:
+            key = parts[1]
+            async with blob_service.session.client("s3") as s3_client:
+                media.file_uri = str(await s3_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": blob_service.bucket_name, "Key": key},
+                    ExpiresIn=blob_service.signed_url_expiry,
+                ))
+    except Exception as e:
+        log.warning("Failed to sign media URL: %s, error=%s", uri, str(e))
+        
+    return media
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +184,7 @@ async def add_media(
         media_id=media.media_id,
         admin_id=current_user.id,
     )
-    return media  # type: ignore[return-value]
+    return await _sign_media_url(media)
 
 
 @router.get(
@@ -180,7 +206,7 @@ async def list_media(
     media = await repo.list_media(doctor_id)
     for item in media:
         item.file_uri = _build_absolute_uri(request, item.file_uri)
-    return list(media)  # type: ignore[arg-type]
+    return [await _sign_media_url(item) for item in media]
 
 
 @router.delete(
@@ -222,6 +248,7 @@ async def upload_media_file(
     doctor_id: int,
     media_category: str,
     db: DbSession,
+    request: Request,
     current_user: AdminOrOperationalUser,
     field_name: str | None = None,
     file: UploadFile = File(...),
@@ -302,7 +329,9 @@ async def upload_media_file(
         file_uri=upload_result.file_uri,
         admin_id=current_user.id,
     )
-    return media  # type: ignore[return-value]
+    
+    media.file_uri = _build_absolute_uri(request, media.file_uri)
+    return await _sign_media_url(media)
 
 
 # ---------------------------------------------------------------------------

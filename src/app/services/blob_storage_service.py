@@ -136,7 +136,7 @@ class IBlobStorageService(Protocol):
         """Delete a blob from storage."""
         ...
 
-    async def get_blob_uri(self, blob_id: str) -> str:
+    async def get_blob_uri(self, blob_id: str, doctor_id: int = 0, media_category: str = "", extension: str = "", sign: bool | None = None) -> str:
         """Get the URI for accessing a blob."""
         ...
 
@@ -568,8 +568,8 @@ class S3BlobStorageService:
     def __init__(
         self,
         bucket_name: str,
-        access_key_id: str,
-        secret_access_key: str,
+        access_key_id: str = "",
+        secret_access_key: str = "",
         region: str = "us-east-1",
         prefix: str = "doctors",
         use_signed_urls: bool = False,
@@ -595,12 +595,16 @@ class S3BlobStorageService:
         self.use_signed_urls = use_signed_urls
         self.signed_url_expiry = signed_url_expiry
 
+        # Build session kwargs depending on whether explicit keys were provided
+        session_kwargs = {}
+        if access_key_id and secret_access_key:
+            session_kwargs["aws_access_key_id"] = access_key_id
+            session_kwargs["aws_secret_access_key"] = secret_access_key
+        if region:
+            session_kwargs["region_name"] = region
+
         # aioboto3 session
-        self.session = aioboto3.Session(
-            aws_access_key_id=access_key_id,
-            aws_secret_access_key=secret_access_key,
-            region_name=region,
-        )
+        self.session = aioboto3.Session(**session_kwargs)
 
         logger.info("S3 blob storage initialized: bucket=%s, region=%s, prefix=%s", bucket_name, region, prefix)
 
@@ -735,8 +739,8 @@ class S3BlobStorageService:
                     },
                 )
 
-            # Generate URL
-            file_uri = await self.get_blob_uri(blob_id, doctor_id, media_category, extension)
+            # Generate URL (force RAW URL for database storage)
+            file_uri = await self.get_blob_uri(blob_id, doctor_id, media_category, extension, sign=False)
 
             logger.info(
                 "Uploaded to S3: blob_id=%s, key=%s, size=%d",
@@ -822,15 +826,17 @@ class S3BlobStorageService:
             logger.error("S3 deletion failed: %s", str(e))
             return False
 
-    async def get_blob_uri(self, blob_id: str, doctor_id: int = 0, media_category: str = "", extension: str = "") -> str:
+    async def get_blob_uri(self, blob_id: str, doctor_id: int = 0, media_category: str = "", extension: str = "", sign: bool | None = None) -> str:
         """Generate S3 URL (public or signed)."""
         if not doctor_id or not media_category or not extension:
             # For compatibility, return a placeholder
             return f"s3://{self.bucket_name}/{blob_id}"
 
         s3_key = self._get_s3_key(doctor_id, media_category, blob_id, extension)
+        
+        should_sign = self.use_signed_urls if sign is None else sign
 
-        if self.use_signed_urls:
+        if should_sign:
             # Generate signed URL
             async with self.session.client("s3") as s3_client:
                 url = await s3_client.generate_presigned_url(
@@ -909,17 +915,6 @@ class BlobStorageFactory:
                     "AWS_S3_BUCKET is required when STORAGE_BACKEND=s3. "
                     "Set it in your .env file or environment variables."
                 )
-            if not settings.AWS_ACCESS_KEY_ID:
-                raise ValueError(
-                    "AWS_ACCESS_KEY_ID is required when STORAGE_BACKEND=s3. "
-                    "Set it in your .env file or environment variables."
-                )
-            if not settings.AWS_SECRET_ACCESS_KEY:
-                raise ValueError(
-                    "AWS_SECRET_ACCESS_KEY is required when STORAGE_BACKEND=s3. "
-                    "Set it in your .env file or environment variables."
-                )
-
             logger.info("Initializing S3 blob storage: bucket=%s, region=%s", settings.AWS_S3_BUCKET, settings.AWS_REGION)
             return S3BlobStorageService(
                 bucket_name=settings.AWS_S3_BUCKET,
