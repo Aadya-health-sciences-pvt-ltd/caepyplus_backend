@@ -10,11 +10,11 @@ class UserRole(str, Enum):
     
     Attributes:
         ADMIN: Full system access, can manage all resources
-        OPERATIONAL: Limited admin access for operational tasks
+        OPERATION: Limited admin access for operation tasks
         USER: Regular doctor/user access (default for doctors)
     """
     ADMIN = "admin"
-    OPERATIONAL = "operational"
+    OPERATION = "operation"
     USER = "user"
 
     @classmethod

@@ -104,7 +104,7 @@ class Doctor(Base):
         default="user",
         server_default="user",
         index=True,
-        comment="User role: admin, operational, or user (default)",
+        comment="User role: admin, operation, or user (default)",
     )
 
     onboarding_status: Mapped[str] = mapped_column(

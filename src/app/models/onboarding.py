@@ -186,7 +186,7 @@ class DropdownOption(Base):
     --------
     * Seed / admin-added rows start with ``status = APPROVED``.
     * Doctor/user-submitted rows start with ``status = PENDING`` and are
-      hidden from public dropdowns until an Admin or Operational user
+      hidden from public dropdowns until an Admin or Operation user
       approves them.
     * The unique constraint on (field_name, value) makes inserts idempotent.
 
@@ -225,7 +225,7 @@ class DropdownOption(Base):
     submitted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     submitted_by_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # Who reviewed this option (admin/operational user)
+    # Who reviewed this option (admin/operation user)
     reviewed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reviewed_by_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

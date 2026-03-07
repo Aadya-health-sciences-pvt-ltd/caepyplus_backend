@@ -39,7 +39,7 @@ from ....services.otp_service import OTPService, get_otp_service
 logger = structlog.get_logger(__name__)
 
 # Roles permitted to use the admin OTP endpoint
-_ADMIN_ROLES: frozenset[str] = frozenset({UserRole.ADMIN.value, UserRole.OPERATIONAL.value})
+_ADMIN_ROLES: frozenset[str] = frozenset({UserRole.ADMIN.value, UserRole.OPERATION.value})
 
 
 # ---------------------------------------------------------------------------
@@ -324,8 +324,8 @@ async def resend_otp(
     status_code=status.HTTP_200_OK,
     summary="Verify Admin OTP",
     description=(
-        "Verify OTP for admin/operational users. "
-        "Strict RBAC: user must already exist with admin or operational role. "
+        "Verify OTP for admin/operation users. "
+        "Strict RBAC: user must already exist with admin or operation role. "
         "New users are NEVER auto-created via this endpoint."
     ),
     responses={
@@ -340,10 +340,10 @@ async def verify_admin_otp(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> OTPVerifyResponse:
-    """Verify OTP and authenticate a pre-registered admin or operational user.
+    """Verify OTP and authenticate a pre-registered admin or operation user.
 
     No user creation occurs here — the user must already exist in the ``users``
-    table with ``admin`` or ``operational`` role.
+    table with ``admin`` or ``operation`` role.
     """
     logger.info("Admin OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
 
@@ -379,7 +379,7 @@ async def verify_admin_otp(
             },
         )
 
-    # 3. RBAC — only admin and operational roles are permitted
+    # 3. RBAC — only admin and operation roles are permitted
     if user.role not in _ADMIN_ROLES:
         logger.warning(
             "Admin login failed: insufficient role",

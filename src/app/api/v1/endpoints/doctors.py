@@ -7,7 +7,7 @@ Exposed routes (all under /api/v1/doctors):
   GET    /                         - Paginated doctor list; ?status= filter returns full onboarding info
   GET    /lookup                   - Full admin view by id / email / phone
   GET    /{doctor_id}              - Fetch single doctor profile
-  PUT    /{doctor_id}              - Update doctor profile (admin/operational only)
+  PUT    /{doctor_id}              - Update doctor profile (admin/operation only)
   GET    /bulk-upload/csv/template  - Download the official CSV template with sample rows
   POST   /bulk-upload/csv/validate - Phase 1: validate CSV, return row errors, no DB writes
   POST   /bulk-upload/csv          - Phase 2: validate + persist; creates PENDING doctor_identity rows
@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ....core.doctor_utils import synthesise_identity as _synthesise_identity
-from ....core.rbac import CurrentUser, AdminOrOperationalUser
+from ....core.rbac import AdminOrOperationUser, CurrentUser
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
 from ....db.session import DbSession
 from ....models.doctor import Doctor as DoctorModel
@@ -65,9 +65,9 @@ def _get_doctor_repo(db: DbSession) -> DoctorRepository:
 async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorResponse:
     """Dynamically generate signed S3 URLs for any file_uri fields."""
     blob_service = get_blob_storage_service()
-    
+
     response = doctor if isinstance(doctor, DoctorResponse) else DoctorResponse.model_validate(doctor)
-    
+
     if not isinstance(blob_service, S3BlobStorageService) or not blob_service.use_signed_urls:
         return response
 
@@ -93,20 +93,20 @@ async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorRespo
 
     response.profile_photo = await _sign(response.profile_photo)
     response.verbal_intro_file = await _sign(response.verbal_intro_file)
-    
+
     response.professional_documents = [
-        signed for doc in response.professional_documents 
+        signed for doc in response.professional_documents
         if (signed := await _sign(doc))
     ]
     response.achievement_images = [
-        signed for img in response.achievement_images 
+        signed for img in response.achievement_images
         if (signed := await _sign(img))
     ]
     response.external_links = [
-        signed for link in response.external_links 
+        signed for link in response.external_links
         if (signed := await _sign(link))
     ]
-    
+
     return response
 
 
@@ -239,6 +239,20 @@ async def list_doctors(
         all_doctors = await repo.get_all(skip=skip, limit=page_size, specialization=specialization)
         total = await repo.count(specialization=specialization)
         data = [await _sign_doctor_urls(d) for d in all_doctors]
+
+        # Enrich with verification fields from doctor_identity table
+        if data:
+            onboarding_repo = OnboardingRepository(db)
+            doctor_ids = [d.id for d in data]
+            identity_map = await onboarding_repo.get_identities_by_doctor_ids(doctor_ids)
+            for doctor_resp in data:
+                identity = identity_map.get(doctor_resp.id)
+                if identity:
+                    doctor_resp.rejection_reason = identity.rejection_reason
+                    doctor_resp.verified_at = identity.verified_at
+                    doctor_resp.status_updated_at = identity.status_updated_at
+                    doctor_resp.status_updated_by = identity.status_updated_by
+
         message = "Doctors retrieved successfully"
 
     return PaginatedResponse(
@@ -319,6 +333,9 @@ async def lookup_doctor(
 
     assert resolved_id is not None
 
+    if doctor is None:
+        doctor = await doctor_repo.get_by_id(resolved_id)
+
     if identity:
         identity_resp = DoctorIdentityResponse.model_validate(identity)
     else:
@@ -328,8 +345,11 @@ async def lookup_doctor(
     media = await repo.list_media(resolved_id)
     status_history = await repo.get_status_history(resolved_id)
 
+    doctor_resp = await _sign_doctor_urls(doctor) if doctor else None
+
     return DoctorWithFullInfoResponse(
         identity=identity_resp,
+        doctor=doctor_resp,
         media=[DoctorMediaResponse.model_validate(m) for m in media],
         status_history=[DoctorStatusHistoryResponse.model_validate(h) for h in status_history],
     )
@@ -374,7 +394,7 @@ async def update_doctor(
     repo: DoctorRepoDep,
     current_user: CurrentUser,
 ) -> GenericResponse[DoctorResponse]:
-    """Update a doctor's profile by ID. Requires admin/operational role OR self-update."""
+    """Update a doctor's profile by ID. Requires admin/operation role OR self-update."""
     if not current_user.can_access_admin and current_user.doctor_id != doctor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -396,7 +416,7 @@ async def update_doctor(
     "/{doctor_id}/profile-photo",
     response_model=GenericResponse[DoctorResponse],
     summary="Upload profile photo",
-    description="Upload a profile photo for the doctor. Only self-update or admin/operational role allowed.",
+    description="Upload a profile photo for the doctor. Only self-update or admin/operation role allowed.",
 )
 async def upload_profile_photo(
     doctor_id: int,
@@ -411,13 +431,13 @@ async def upload_profile_photo(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to upload a photo for this doctor profile.",
         )
-    
+
     doctor = await repo.get_by_id_or_raise(doctor_id)
     blob_service = get_blob_storage_service()
-    
+
     file_content = await file.read()
     file_name = file.filename or "profile_photo"
-    
+
     logger.info(
         "doctor_profile_photo_upload_start",
         doctor_id=doctor_id,
@@ -425,14 +445,14 @@ async def upload_profile_photo(
         size_bytes=len(file_content),
         user_id=current_user.id,
     )
-    
+
     upload_result = await blob_service.upload_from_bytes(
         content=file_content,
         file_name=file_name,
         doctor_id=doctor_id,
         media_category="profile_photo",
     )
-    
+
     if not upload_result.success:
         logger.error(
             "doctor_profile_photo_upload_failed",
@@ -443,17 +463,17 @@ async def upload_profile_photo(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File upload failed: {upload_result.error_message}",
         )
-        
+
     doctor.profile_photo = upload_result.file_uri
     await repo.session.commit()
     await repo.session.refresh(doctor)
-    
+
     # Update doctor_media table for Admin view compatibility
     onboarding_repo = OnboardingRepository(db)
     identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
-    
+
     if not identity:
-        # Lazy initialization: If a doctor is uploading a profile photo outside the formal 
+        # Lazy initialization: If a doctor is uploading a profile photo outside the formal
         # onboarding flow, we bootstrap a basic identity so the media tracking doesn't fail.
         # This keeps the User App and Admin Dashboard in sync.
         identity = await onboarding_repo.create_identity(
@@ -462,14 +482,14 @@ async def upload_profile_photo(
             phone_number=doctor.phone or f"UNKNOWN_{doctor_id}",
             full_name=doctor.name or f"Doctor {doctor_id}",
         )
-        
+
     media_category = "profile_photo"
     media_type = (
         "image"
         if (file.content_type and file.content_type.startswith("image/"))
         else "document"
     )
-    
+
     await onboarding_repo.add_media(
         doctor_id=doctor_id,
         media_type=media_type,
@@ -480,15 +500,15 @@ async def upload_profile_photo(
         file_size=len(file_content),
         mime_type=file.content_type,
     )
-    
+
     logger.info(
         "doctor_profile_photo_upload_complete",
         doctor_id=doctor_id,
         file_uri=upload_result.file_uri,
     )
-    
+
     signed_doctor = await _sign_doctor_urls(doctor)
-    
+
     return GenericResponse(
         message="Profile photo uploaded successfully",
         data=signed_doctor,
@@ -693,7 +713,7 @@ _TEMPLATE_CSV_PATH: Path = (
     },
 )
 async def download_bulk_upload_template(
-    _current_user: AdminOrOperationalUser,
+    _current_user: AdminOrOperationUser,
 ) -> FileResponse:
     """Return the doctor bulk-upload CSV template as a file download."""
     if not _TEMPLATE_CSV_PATH.exists():
@@ -745,7 +765,7 @@ Maximum **500 rows** per upload.
     },
 )
 async def validate_bulk_upload_csv(
-    _: AdminOrOperationalUser,
+    _: AdminOrOperationUser,
     file: UploadFile = File(
         ...,
         description="CSV file using the doctor onboarding template (UTF-8, max 500 rows)",
@@ -827,7 +847,7 @@ back so the database is never left in a partial state.
 )
 async def bulk_upload_doctors_csv(
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     file: UploadFile = File(
         ...,
         description="CSV file using the doctor onboarding template (UTF-8, max 500 rows)",
