@@ -293,6 +293,13 @@ class DoctorResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
+    # Verification / onboarding status fields
+    onboarding_status: str | None = Field(default=None, description="Onboarding status: pending, submitted, verified, rejected")
+    rejection_reason: str | None = Field(default=None, description="Reason for rejection (if status is rejected)")
+    verified_at: datetime | None = Field(default=None, description="Timestamp when the doctor was verified")
+    status_updated_at: datetime | None = Field(default=None, description="Timestamp of most recent status change")
+    status_updated_by: str | None = Field(default=None, description="ID of user who last updated the status")
+
     # Block 1: Professional Identity
     full_name: str | None = None
     specialty: str | None = None

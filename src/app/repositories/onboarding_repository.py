@@ -244,6 +244,20 @@ class OnboardingRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_identities_by_doctor_ids(
+        self, doctor_ids: Sequence[int],
+    ) -> dict[int, DoctorIdentity]:
+        """Batch-fetch doctor_identity rows for a list of doctor IDs.
+
+        Returns a dict mapping ``doctor_id`` → ``DoctorIdentity``.
+        Missing entries (doctors without an identity row) are simply omitted.
+        """
+        if not doctor_ids:
+            return {}
+        stmt = select(DoctorIdentity).where(DoctorIdentity.doctor_id.in_(doctor_ids))
+        result = await self.session.execute(stmt)
+        return {identity.doctor_id: identity for identity in result.scalars().all()}
+
     # ---------------------------------------------------------------------
     # Hard delete operations
     # ---------------------------------------------------------------------
