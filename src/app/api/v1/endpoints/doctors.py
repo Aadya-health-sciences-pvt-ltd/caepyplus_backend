@@ -7,7 +7,7 @@ Exposed routes (all under /api/v1/doctors):
   GET    /                         - Paginated doctor list; ?status= filter returns full onboarding info
   GET    /lookup                   - Full admin view by id / email / phone
   GET    /{doctor_id}              - Fetch single doctor profile
-  PUT    /{doctor_id}              - Update doctor profile (admin/operational only)
+  PUT    /{doctor_id}              - Update doctor profile (admin/operation only)
   GET    /bulk-upload/csv/template  - Download the official CSV template with sample rows
   POST   /bulk-upload/csv/validate - Phase 1: validate CSV, return row errors, no DB writes
   POST   /bulk-upload/csv          - Phase 2: validate + persist; creates PENDING doctor_identity rows
@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ....core.doctor_utils import synthesise_identity as _synthesise_identity
-from ....core.rbac import CurrentUser, AdminOrOperationalUser
+from ....core.rbac import CurrentUser, AdminOrOperationUser
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
 from ....db.session import DbSession
 from ....models.doctor import Doctor as DoctorModel
@@ -374,7 +374,7 @@ async def update_doctor(
     repo: DoctorRepoDep,
     current_user: CurrentUser,
 ) -> GenericResponse[DoctorResponse]:
-    """Update a doctor's profile by ID. Requires admin/operational role OR self-update."""
+    """Update a doctor's profile by ID. Requires admin/operation role OR self-update."""
     if not current_user.can_access_admin and current_user.doctor_id != doctor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -396,7 +396,7 @@ async def update_doctor(
     "/{doctor_id}/profile-photo",
     response_model=GenericResponse[DoctorResponse],
     summary="Upload profile photo",
-    description="Upload a profile photo for the doctor. Only self-update or admin/operational role allowed.",
+    description="Upload a profile photo for the doctor. Only self-update or admin/operation role allowed.",
 )
 async def upload_profile_photo(
     doctor_id: int,
@@ -693,7 +693,7 @@ _TEMPLATE_CSV_PATH: Path = (
     },
 )
 async def download_bulk_upload_template(
-    _current_user: AdminOrOperationalUser,
+    _current_user: AdminOrOperationUser,
 ) -> FileResponse:
     """Return the doctor bulk-upload CSV template as a file download."""
     if not _TEMPLATE_CSV_PATH.exists():
@@ -745,7 +745,7 @@ Maximum **500 rows** per upload.
     },
 )
 async def validate_bulk_upload_csv(
-    _: AdminOrOperationalUser,
+    _: AdminOrOperationUser,
     file: UploadFile = File(
         ...,
         description="CSV file using the doctor onboarding template (UTF-8, max 500 rows)",
@@ -827,7 +827,7 @@ back so the database is never left in a partial state.
 )
 async def bulk_upload_doctors_csv(
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     file: UploadFile = File(
         ...,
         description="CSV file using the doctor onboarding template (UTF-8, max 500 rows)",

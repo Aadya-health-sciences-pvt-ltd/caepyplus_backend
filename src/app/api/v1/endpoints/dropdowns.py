@@ -192,7 +192,7 @@ Allow a **logged-in doctor / user** to propose a new value for any
 supported dropdown field.
 
 The submitted option is stored with `status = pending` and will **not**
-appear in public-facing dropdowns until an Admin or Operational user
+appear in public-facing dropdowns until an Admin or Operation user
 approves it via the admin API.
 
 **Behaviour when value already exists:**
@@ -200,7 +200,7 @@ approves it via the admin API.
   rather than creating a duplicate.
 - The response `status` field reflects the current state of that record.
 
-**Requires:** Any valid JWT (doctor, admin, or operational user).
+**Requires:** Any valid JWT (doctor, admin, or operation user).
     """,
     tags=["Dropdowns"],
 )

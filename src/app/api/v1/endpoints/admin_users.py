@@ -3,7 +3,7 @@ Admin User Management API Endpoints.
 
 Provides endpoints for managing users in the RBAC system:
 - List users with filtering
-- Create admin/operational users
+- Create admin/operation users
 - Update user roles
 - Activate/deactivate users
 
@@ -17,7 +17,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ....core.rbac import AdminOrOperationalUser, AdminUser
+from ....core.rbac import AdminOrOperationUser, AdminUser
 from ....db.session import get_db
 from ....models.enums import UserRole
 from ....repositories.user_repository import UserRepository
@@ -63,11 +63,11 @@ async def get_user_repo(
     description="Get paginated list of users with optional filtering by role and status.",
 )
 async def list_users(
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     repo: UserRepository = Depends(get_user_repo),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(50, ge=1, le=100, description="Number of records to return"),
-    role: list[str] | None = Query(None, description="Filter by role (admin, operational, user)"),
+    role: list[str] | None = Query(None, description="Filter by role (admin, operation, user)"),
     is_active: bool | None = Query(None, description="Filter by active status"),
 ) -> UserListResponse:
     """List all users with pagination and optional filtering."""
@@ -117,7 +117,7 @@ async def list_admins(
 )
 async def get_user(
     user_id: int,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     repo: UserRepository = Depends(get_user_repo),
 ) -> UserResponse:
     """Get a specific user by ID."""
@@ -199,6 +199,7 @@ async def seed_admin_user(
     user = await repo.create(
         phone=payload.phone,
         email=payload.email,
+        full_name=payload.full_name,
         role=UserRole.ADMIN.value,  # Always admin for seed
         is_active=True,
         doctor_id=payload.doctor_id,
@@ -254,6 +255,7 @@ async def create_user(
     user = await repo.create(
         phone=payload.phone,
         email=payload.email,
+        full_name=payload.full_name,
         role=payload.role,
         is_active=payload.is_active,
         doctor_id=payload.doctor_id,
@@ -317,6 +319,7 @@ async def update_user(
     # left in a partially-updated state (e.g. role changed but is_active not).
     user = await repo.update_fields(
         user_id,
+        full_name=payload.full_name,
         role=payload.role,
         is_active=payload.is_active,
         doctor_id=payload.doctor_id,
@@ -335,7 +338,7 @@ async def update_user(
     "/{user_id}/role",
     response_model=UserUpdateResponse,
     summary="Update user role",
-    description="Change a user's role (admin, operational, user).",
+    description="Change a user's role (admin, operation, user).",
 )
 async def update_user_role(
     user_id: int,

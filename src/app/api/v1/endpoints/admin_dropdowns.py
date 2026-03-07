@@ -1,7 +1,7 @@
 """
 Admin Dropdown Options Endpoints.
 
-All endpoints in this module require Admin or Operational role.
+All endpoints in this module require Admin or Operation role.
 
 Routes
 ------
@@ -23,7 +23,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, HTTPException, Query, status
 
-from ....core.rbac import AdminOrOperationalUser
+from ....core.rbac import AdminOrOperationUser
 from ....core.responses import GenericResponse
 from ....db.session import DbSession
 from ....models.onboarding import DropdownOptionStatus
@@ -59,11 +59,11 @@ def _to_response(row: object) -> DropdownOptionResponse:
 @router.get(
     "/fields",
     response_model=GenericResponse[dict[str, Any]],
-    summary="List all supported dropdown field names (Admin/Operational)",
+    summary="List all supported dropdown field names (Admin/Operation)",
     tags=["Admin - Dropdowns"],
 )
 async def list_supported_fields(
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[dict[str, Any]]:
     """Return the canonical list of dropdown field names and their descriptions."""
     return GenericResponse(
@@ -85,7 +85,7 @@ async def list_supported_fields(
 @router.get(
     "",
     response_model=GenericResponse[DropdownListResponse],
-    summary="List all dropdown options with optional filters (Admin/Operational)",
+    summary="List all dropdown options with optional filters (Admin/Operation)",
     description="""
 Return all dropdown options across all fields, with optional filtering.
 
@@ -102,7 +102,7 @@ a badge/counter in the admin UI.
 )
 async def list_all_options(
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     field_name: str | None = Query(default=None, description="Filter by field name"),
     status_filter: DropdownOptionStatus | None = Query(
         default=None,
@@ -144,12 +144,12 @@ async def list_all_options(
 @router.get(
     "/pending",
     response_model=GenericResponse[DropdownListResponse],
-    summary="List all PENDING dropdown options awaiting review (Admin/Operational)",
+    summary="List all PENDING dropdown options awaiting review (Admin/Operation)",
     tags=["Admin - Dropdowns"],
 )
 async def list_pending_options(
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     field_name: str | None = Query(default=None, description="Filter by field name"),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
@@ -184,13 +184,13 @@ async def list_pending_options(
 @router.get(
     "/{option_id}",
     response_model=GenericResponse[DropdownOptionResponse],
-    summary="Get a single dropdown option by ID (Admin/Operational)",
+    summary="Get a single dropdown option by ID (Admin/Operation)",
     tags=["Admin - Dropdowns"],
 )
 async def get_option(
     option_id: int,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[DropdownOptionResponse]:
     repo = DropdownRepository(db)
     option = await repo.get_by_id(option_id)
@@ -214,13 +214,13 @@ async def get_option(
     "",
     response_model=GenericResponse[DropdownOptionResponse],
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new dropdown option (Admin/Operational — approved immediately)",
+    summary="Create a new dropdown option (Admin/Operation — approved immediately)",
     tags=["Admin - Dropdowns"],
 )
 async def create_option(
     payload: DropdownCreateRequest,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[DropdownOptionResponse]:
     """Create and immediately approve a new dropdown option.
 
@@ -271,14 +271,14 @@ async def create_option(
 @router.patch(
     "/{option_id}",
     response_model=GenericResponse[DropdownOptionResponse],
-    summary="Update a dropdown option's label / display order (Admin/Operational)",
+    summary="Update a dropdown option's label / display order (Admin/Operation)",
     tags=["Admin - Dropdowns"],
 )
 async def update_option(
     option_id: int,
     payload: DropdownUpdateRequest,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[DropdownOptionResponse]:
     repo = DropdownRepository(db)
     option = await repo.update(
@@ -308,13 +308,13 @@ async def update_option(
 @router.delete(
     "/{option_id}",
     response_model=GenericResponse[dict[str, Any]],
-    summary="Delete a dropdown option (Admin/Operational — system rows protected)",
+    summary="Delete a dropdown option (Admin/Operation — system rows protected)",
     tags=["Admin - Dropdowns"],
 )
 async def delete_option(
     option_id: int,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[dict[str, Any]]:
     """Delete a dropdown option.
 
@@ -355,7 +355,7 @@ async def delete_option(
 @router.post(
     "/{option_id}/approve",
     response_model=GenericResponse[DropdownOptionResponse],
-    summary="Approve a PENDING dropdown option (Admin/Operational)",
+    summary="Approve a PENDING dropdown option (Admin/Operation)",
     description="""
 Approve a user-submitted dropdown option.
 
@@ -368,7 +368,7 @@ async def approve_option(
     option_id: int,
     payload: DropdownReviewRequest,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[DropdownOptionResponse]:
     repo = DropdownRepository(db)
     option = await repo.approve(
@@ -407,7 +407,7 @@ async def approve_option(
 @router.post(
     "/{option_id}/reject",
     response_model=GenericResponse[DropdownOptionResponse],
-    summary="Reject a PENDING dropdown option (Admin/Operational)",
+    summary="Reject a PENDING dropdown option (Admin/Operation)",
     description="""
 Reject a user-submitted dropdown option.
 
@@ -421,7 +421,7 @@ async def reject_option(
     option_id: int,
     payload: DropdownReviewRequest,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[DropdownOptionResponse]:
     repo = DropdownRepository(db)
     option = await repo.reject(
@@ -460,13 +460,13 @@ async def reject_option(
 @router.post(
     "/bulk-approve",
     response_model=GenericResponse[DropdownBulkReviewResponse],
-    summary="Bulk-approve multiple PENDING options (Admin/Operational)",
+    summary="Bulk-approve multiple PENDING options (Admin/Operation)",
     tags=["Admin - Dropdowns"],
 )
 async def bulk_approve(
     payload: DropdownBulkReviewRequest,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[DropdownBulkReviewResponse]:
     """Approve multiple pending dropdown options at once (max 200 per request)."""
     repo = DropdownRepository(db)
@@ -496,13 +496,13 @@ async def bulk_approve(
 @router.post(
     "/bulk-reject",
     response_model=GenericResponse[DropdownBulkReviewResponse],
-    summary="Bulk-reject multiple PENDING options (Admin/Operational)",
+    summary="Bulk-reject multiple PENDING options (Admin/Operation)",
     tags=["Admin - Dropdowns"],
 )
 async def bulk_reject(
     payload: DropdownBulkReviewRequest,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> GenericResponse[DropdownBulkReviewResponse]:
     """Reject multiple pending dropdown options at once (max 200 per request)."""
     repo = DropdownRepository(db)

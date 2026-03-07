@@ -13,8 +13,8 @@ have been consolidated into the main /doctors endpoint:
   GET /doctors          (add ?status= for full onboarding info)
   GET /doctors/lookup
 
-All routes require Admin or Operational role (enforced at each endpoint
-via ``AdminOrOperationalUser`` in addition to the router-level
+All routes require Admin or Operation role (enforced at each endpoint
+via ``AdminOrOperationUser`` in addition to the router-level
 ``require_authentication`` dependency set in ``v1/__init__.py``).
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ import structlog
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi import status as http_status
 
-from ....core.rbac import AdminOrOperationalUser
+from ....core.rbac import AdminOrOperationUser
 from ....db.session import DbSession
 from ....repositories import OnboardingRepository
 from ....schemas import (
@@ -97,16 +97,16 @@ async def _sign_media_url(media: DoctorMediaResponse) -> DoctorMediaResponse:
     "/identities",
     response_model=DoctorIdentityResponse,
     status_code=http_status.HTTP_201_CREATED,
-    summary="Create doctor identity record (Admin/Operational only)",
+    summary="Create doctor identity record (Admin/Operation only)",
 )
 async def create_identity(
     payload: DoctorIdentityCreate,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> DoctorIdentityResponse:
     """Create a new ``doctor_identity`` row.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     """
     repo = OnboardingRepository(db)
     log.info(
@@ -120,17 +120,17 @@ async def create_identity(
 @router.get(
     "/identities",
     response_model=DoctorIdentityResponse,
-    summary="Fetch doctor identity by doctor_id or email (Admin/Operational only)",
+    summary="Fetch doctor identity by doctor_id or email (Admin/Operation only)",
 )
 async def get_identity(
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     doctor_id: int | None = Query(None, description="Lookup by doctor ID"),
     email: str | None = Query(None, description="Lookup by email"),
 ) -> DoctorIdentityResponse:
     """Return the ``doctor_identity`` row for a given ``doctor_id`` or ``email``.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     """
     repo = OnboardingRepository(db)
 
@@ -162,18 +162,18 @@ async def get_identity(
     "/media/{doctor_id}",
     response_model=DoctorMediaResponse,
     status_code=http_status.HTTP_201_CREATED,
-    summary="Add media record for a doctor (Admin/Operational only)",
+    summary="Add media record for a doctor (Admin/Operation only)",
 )
 async def add_media(
     doctor_id: int,
     payload: DoctorMediaCreate,
     db: DbSession,
     request: Request,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> DoctorMediaResponse:
     """Insert a ``doctor_media`` row and return the absolute file URI.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     """
     repo = OnboardingRepository(db)
     media = await repo.add_media(doctor_id=doctor_id, **payload.model_dump())
@@ -190,17 +190,17 @@ async def add_media(
 @router.get(
     "/media/{doctor_id}",
     response_model=list[DoctorMediaResponse],
-    summary="List media for a doctor (Admin/Operational only)",
+    summary="List media for a doctor (Admin/Operation only)",
 )
 async def list_media(
     doctor_id: int,
     db: DbSession,
     request: Request,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> Sequence[DoctorMediaResponse]:
     """Return all ``doctor_media`` rows for ``doctor_id`` with absolute URIs.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     """
     repo = OnboardingRepository(db)
     media = await repo.list_media(doctor_id)
@@ -212,16 +212,16 @@ async def list_media(
 @router.delete(
     "/media/{media_id}",
     status_code=http_status.HTTP_204_NO_CONTENT,
-    summary="Delete a media record (Admin/Operational only)",
+    summary="Delete a media record (Admin/Operation only)",
 )
 async def delete_media(
     media_id: str,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> None:
     """Delete a ``doctor_media`` row by its UUID ``media_id``.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     """
     repo = OnboardingRepository(db)
     deleted = await repo.delete_media(media_id)
@@ -237,7 +237,7 @@ async def delete_media(
     "/media/{doctor_id}/upload",
     response_model=DoctorMediaResponse,
     status_code=http_status.HTTP_201_CREATED,
-    summary="Upload a file for a doctor profile (Admin/Operational only)",
+    summary="Upload a file for a doctor profile (Admin/Operation only)",
     description=(
         "Upload a file directly to blob storage and register its metadata in "
         "``doctor_media``. Supported: images (JPG, PNG, GIF) and documents (PDF). "
@@ -249,13 +249,13 @@ async def upload_media_file(
     media_category: str,
     db: DbSession,
     request: Request,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     field_name: str | None = None,
     file: UploadFile = File(...),
 ) -> DoctorMediaResponse:
     """Upload a file to blob storage and register it in the database.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
 
     Args:
         doctor_id:      Numeric doctor identifier.
@@ -343,17 +343,17 @@ async def upload_media_file(
     "/status-history/{doctor_id}",
     response_model=DoctorStatusHistoryResponse,
     status_code=http_status.HTTP_201_CREATED,
-    summary="Log a status change for a doctor (Admin/Operational only)",
+    summary="Log a status change for a doctor (Admin/Operation only)",
 )
 async def log_status_history(
     doctor_id: int,
     payload: DoctorStatusHistoryCreate,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> DoctorStatusHistoryResponse:
     """Append a status-change entry to ``doctor_status_history``.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     """
     repo = OnboardingRepository(db)
     log.info(
@@ -367,16 +367,16 @@ async def log_status_history(
 @router.get(
     "/status-history/{doctor_id}",
     response_model=list[DoctorStatusHistoryResponse],
-    summary="Fetch status history for a doctor (Admin/Operational only)",
+    summary="Fetch status history for a doctor (Admin/Operation only)",
 )
 async def get_status_history(
     doctor_id: int,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
 ) -> Sequence[DoctorStatusHistoryResponse]:
     """Return all status-history entries for ``doctor_id``.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     """
     repo = OnboardingRepository(db)
     return list(await repo.get_status_history(doctor_id))  # type: ignore[arg-type]

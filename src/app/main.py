@@ -296,7 +296,7 @@ def create_application() -> FastAPI:
         },
         {
             "name": "Admin - User Management",
-            "description": "👥 Manage admin and operational user accounts (RBAC).",
+            "description": "👥 Manage admin and operation user accounts (RBAC).",
         },
         {
             "name": "Dropdowns",

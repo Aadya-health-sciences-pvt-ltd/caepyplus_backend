@@ -31,6 +31,11 @@ def _validate_user_role(v: str) -> str:
 class UserCreate(BaseModel):
     """Schema for creating a new user."""
 
+    full_name: str | None = Field(
+        None,
+        description="Full name of the user",
+        examples=["John Doe"],
+    )
     phone: str = Field(
         ...,
         description="Phone number (10 digits or with +91 prefix)",
@@ -43,7 +48,7 @@ class UserCreate(BaseModel):
     )
     role: str = Field(
         default=UserRole.USER.value,
-        description="User role: admin, operational, user",
+        description="User role: admin, operation, user",
         examples=["user", "admin"],
     )
     is_active: bool = Field(
@@ -80,13 +85,17 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     """Schema for updating a user."""
 
+    full_name: str | None = Field(
+        None,
+        description="Updated full name",
+    )
     email: str | None = Field(
         None,
         description="Updated email address",
     )
     role: str | None = Field(
         None,
-        description="Updated role: admin, operational, user",
+        description="Updated role: admin, operation, user",
     )
     is_active: bool | None = Field(
         None,
@@ -117,7 +126,7 @@ class UserRoleUpdate(BaseModel):
 
     role: str = Field(
         ...,
-        description="New role: admin, operational, user",
+        description="New role: admin, operation, user",
         examples=["admin"],
     )
 
@@ -147,6 +156,7 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="User ID")
+    full_name: str | None = Field(None, description="Full name")
     phone: str = Field(..., description="Phone number")
     email: str | None = Field(None, description="Email address")
     role: str = Field(..., description="User role")

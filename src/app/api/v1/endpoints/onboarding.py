@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from ....core.config import Settings, get_settings
 from ....core.exceptions import FileValidationError
-from ....core.rbac import AdminOrOperationalUser, CurrentUser
+from ....core.rbac import AdminOrOperationUser, CurrentUser
 from ....core.responses import GenericResponse
 from ....db.session import DbSession
 from ....models.enums import UserRole
@@ -208,8 +208,8 @@ async def submit_profile(
         )
 
     # Ownership guard: a regular user may only submit their own profile.
-    # Admin and operational users may submit on behalf of any doctor.
-    _elevated = current_user.role in (UserRole.ADMIN.value, UserRole.OPERATIONAL.value)
+    # Admin and operation users may submit on behalf of any doctor.
+    _elevated = current_user.role in (UserRole.ADMIN.value, UserRole.OPERATION.value)
     if not _elevated and current_user.doctor_id != doctor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -283,7 +283,7 @@ class EmailTemplateResponse(BaseModel):
 @router.get(
     "/email-template/{doctor_id}",
     response_model=GenericResponse[EmailTemplateResponse],
-    summary="Get pre-filled email template for admin popup (Admin/Operational only)",
+    summary="Get pre-filled email template for admin popup (Admin/Operation only)",
     description="""
 Fetch the pre-rendered email subject and body that will be shown to the admin
 in the verification/rejection popup.
@@ -297,7 +297,7 @@ The admin can then edit these fields before clicking **Send** — the final
 async def get_email_template(
     doctor_id: int,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
     action: Literal["verified", "rejected"] = Query(
         ...,
@@ -366,19 +366,19 @@ class VerifyProfilePayload(BaseModel):
 @router.post(
     "/verify/{doctor_id}",
     response_model=GenericResponse[dict[str, Any]],
-    summary="Verify a doctor profile (Admin/Operational only)",
+    summary="Verify a doctor profile (Admin/Operation only)",
 )
 async def verify_profile(
     doctor_id: int,
     payload: VerifyProfilePayload,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
 ) -> GenericResponse[dict[str, Any]]:
     """
     Mark a doctor profile as verified.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     Optionally send a verification notification email to the doctor by setting
     ``send_email=true`` in the request body.
     """
@@ -516,19 +516,19 @@ class RejectProfilePayload(BaseModel):
 @router.post(
     "/reject/{doctor_id}",
     response_model=GenericResponse[dict[str, Any]],
-    summary="Reject a doctor profile (Admin/Operational only)",
+    summary="Reject a doctor profile (Admin/Operation only)",
 )
 async def reject_profile(
     doctor_id: int,
     payload: RejectProfilePayload,
     db: DbSession,
-    current_user: AdminOrOperationalUser,
+    current_user: AdminOrOperationUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
 ) -> GenericResponse[dict[str, Any]]:
     """
     Mark a doctor profile as rejected.
 
-    Requires Admin or Operational role.
+    Requires Admin or Operation role.
     Optionally provide a rejection reason and send a notification email to the
     doctor by setting ``send_email=true`` in the request body.
     """
