@@ -28,6 +28,7 @@ from .endpoints import (
     doctors,
     dropdowns,
     health,
+    lead_doctors,
     onboarding,
     onboarding_admin,
     otp,
@@ -83,13 +84,13 @@ router.include_router(
     dependencies=[Depends(require_authentication)],
 )
 
-# Admin user management: list / create / update admin & operational users.
+# Admin user management: list / create / update admin & operation users.
 #
 # !! NO router-level auth dependency here — intentional !!
 # The /admin/users/seed endpoint is a public bootstrap route (self-disabling
 # once an admin exists) and cannot carry a router-level auth dependency.
 # Every other endpoint in admin_users.router MUST individually declare an
-# AdminUser or AdminOrOperationalUser dependency — code-review this invariant
+# AdminUser or AdminOrOperationUser dependency — code-review this invariant
 # on every future change to that module.
 router.include_router(
     admin_users.router,
@@ -97,9 +98,17 @@ router.include_router(
 )
 
 # Admin dropdown management: CRUD + approve / reject user submissions.
-# All endpoints in admin_dropdowns declare AdminOrOperationalUser dependency.
+# All endpoints in admin_dropdowns declare AdminOrOperationUser dependency.
 router.include_router(
     admin_dropdowns.router,
     dependencies=[Depends(require_authentication)],
     tags=["Admin - Dropdowns"],
+)
+
+# Lead doctor data: paginated listing (read-only) for admin / operation users.
+# All endpoints in lead_doctors declare AdminOrOperationUser dependency.
+router.include_router(
+    lead_doctors.router,
+    dependencies=[Depends(require_authentication)],
+    tags=["Lead Doctors"],
 )

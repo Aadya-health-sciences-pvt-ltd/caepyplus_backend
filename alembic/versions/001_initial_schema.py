@@ -11,7 +11,7 @@ entire schema in one step.
 Tables created
 --------------
 - doctors              : Core doctor profile with professional information
-- users                : RBAC user management (admin, operational, user)
+- users                : RBAC user management (admin, operation, user)
 - doctor_identity      : Onboarding identity and status tracking
 - doctor_media         : Uploaded media file references
 - doctor_status_history: Audit trail for status changes
@@ -264,7 +264,7 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
         sa.Column("email", sa.String(100), nullable=True, comment="NULL for phone-only signups; filled during onboarding"),
         sa.Column("phone", sa.String(20), nullable=True, comment="International format with + prefix"),
         # Authorization
-        sa.Column("role", sa.String(20), nullable=False, server_default="user", comment="admin, operational, user"),
+        sa.Column("role", sa.String(20), nullable=False, server_default="user", comment="admin, operation, user"),
         sa.Column("onboarding_status", sa.String(20), nullable=False, server_default="pending", comment="pending, submitted, verified, rejected"),
         # Block 1: Professional Identity
         sa.Column("full_name", sa.String(200), nullable=True),
@@ -348,7 +348,8 @@ def upgrade() -> None:  # noqa: PLR0915 (too-many-statements)
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("phone", sa.String(20), nullable=False, comment="Phone number with country code"),
         sa.Column("email", sa.String(255), nullable=True),
-        sa.Column("role", sa.String(20), nullable=False, server_default="user", comment="admin, operational, user"),
+        sa.Column("full_name", sa.String(length=200), nullable=True, comment="Full name of the user"),
+        sa.Column("role", sa.String(20), nullable=False, server_default="user", comment="admin, operation, user"),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("doctor_id", sa.Integer(), nullable=True, comment="Optional link to doctor record"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),

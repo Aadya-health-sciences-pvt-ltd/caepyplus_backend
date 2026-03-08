@@ -52,6 +52,7 @@ async def test_request_otp(client: AsyncClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
+    assert data["data"]["success"] is True
 
 @pytest.mark.asyncio
 async def test_verify_otp(client: AsyncClient) -> None:
@@ -65,7 +66,8 @@ async def test_verify_otp(client: AsyncClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert "access_token" in data
+    assert data["data"]["success"] is True
+    assert "access_token" in data["data"]
 
 @pytest.mark.asyncio
 async def test_resend_otp(client: AsyncClient) -> None:
@@ -78,6 +80,7 @@ async def test_resend_otp(client: AsyncClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
+    assert data["data"]["success"] is True
 
 @pytest.mark.asyncio
 async def test_verify_admin_otp(client: AsyncClient) -> None:
@@ -89,7 +92,7 @@ async def test_verify_admin_otp(client: AsyncClient) -> None:
         response = await client.post("/api/v1/auth/admin/otp/verify", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert data["role"] == "admin"
+    assert data["data"]["role"] == "admin"
 
 @pytest.mark.asyncio
 async def test_google_verify(client: AsyncClient, mock_firebase) -> None:
@@ -100,6 +103,7 @@ async def test_google_verify(client: AsyncClient, mock_firebase) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert "access_token" in data
+    assert data["data"]["success"] is True
+    assert "access_token" in data["data"]
     # The default mock_firebase email is test@example.com
-    assert data["role"] == "user"
+    assert data["data"]["role"] == "user"

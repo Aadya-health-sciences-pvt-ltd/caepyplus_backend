@@ -113,6 +113,7 @@ class UserRepository:
         self,
         phone: str | None,
         email: str | None = None,
+        full_name: str | None = None,
         role: str = UserRole.USER.value,
         is_active: bool = True,
         doctor_id: int | None = None,
@@ -123,6 +124,7 @@ class UserRepository:
         user = User(
             phone=normalized_phone,
             email=email.lower() if email else None,
+            full_name=full_name,
             role=role,
             is_active=is_active,
             doctor_id=doctor_id,
@@ -140,12 +142,14 @@ class UserRepository:
         doctor_id: int,
         phone: str | None,
         email: str | None = None,
+        full_name: str | None = None,
         role: str = UserRole.USER.value,
     ) -> User:
         """Create a user linked to an existing doctor."""
         return await self.create(
             phone=phone,
             email=email,
+            full_name=full_name,
             role=role,
             is_active=True,
             doctor_id=doctor_id,
@@ -155,6 +159,7 @@ class UserRepository:
         self,
         phone: str | None,
         email: str | None = None,
+        full_name: str | None = None,
         doctor_id: int | None = None,
     ) -> tuple[User, bool]:
         """
@@ -177,6 +182,7 @@ class UserRepository:
         new_user = await self.create(
             phone=phone,
             email=email,
+            full_name=full_name,
             role=UserRole.USER.value,
             is_active=True,
             doctor_id=doctor_id,
@@ -191,6 +197,7 @@ class UserRepository:
         self,
         user_id: int,
         *,
+        full_name: str | None = None,
         role: str | None = None,
         is_active: bool | None = None,
         doctor_id: int | None = None,
@@ -209,6 +216,9 @@ class UserRepository:
             return None
 
         now = datetime.now(UTC)
+        if full_name is not None:
+            user.full_name = full_name
+            log.info("user_full_name_staged", user_id=user_id, full_name=full_name)
         if role is not None:
             old_role = user.role
             user.role = role
@@ -313,11 +323,11 @@ class UserRepository:
         return user is not None and user.role == UserRole.ADMIN.value
 
     async def can_access_admin(self, phone: str) -> bool:
-        """Check if user can access admin endpoints (admin or operational)."""
+        """Check if user can access admin endpoints (admin or operation)."""
         user = await self.get_active_by_phone(phone)
         if not user:
             return False
-        return user.role in (UserRole.ADMIN.value, UserRole.OPERATIONAL.value)
+        return user.role in (UserRole.ADMIN.value, UserRole.OPERATION.value)
 
     # =========================================================================
     # HELPERS

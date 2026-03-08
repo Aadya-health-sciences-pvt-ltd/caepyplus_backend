@@ -120,10 +120,11 @@ class DoctorStatusHistoryResponse(BaseModel):
 class DoctorWithFullInfoResponse(BaseModel):
     """Aggregated view of a doctor's onboarding data.
 
-    Includes identity, media, and status history.
+    Includes identity, doctor profile, media, and status history.
     """
 
     identity: DoctorIdentityResponse
+    doctor: Any | None = None
     media: list[DoctorMediaResponse] = []
     status_history: list[DoctorStatusHistoryResponse] = []
 

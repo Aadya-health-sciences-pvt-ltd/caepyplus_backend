@@ -5,8 +5,8 @@ Usage:
     async def admin_endpoint(admin: AdminUser):
         ...
 
-    @router.get("/operational/endpoint")
-    async def operational_endpoint(user: AdminOrOperationalUser):
+    @router.get("/operation/endpoint")
+    async def operation_endpoint(user: AdminOrOperationUser):
         ...
 """
 from __future__ import annotations
@@ -91,11 +91,11 @@ async def require_admin(current_user: Annotated[User, Depends(get_current_user)]
     return current_user
 
 
-async def require_admin_or_operational(
+async def require_admin_or_operation(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    """Require Admin or Operational role. Raises ForbiddenError otherwise."""
-    allowed_roles = (UserRole.ADMIN.value, UserRole.OPERATIONAL.value)
+    """Require Admin or Operation role. Raises ForbiddenError otherwise."""
+    allowed_roles = (UserRole.ADMIN.value, UserRole.OPERATION.value)
     if current_user.role not in allowed_roles:
         logger.warning(
             "Insufficient role access attempt",
@@ -103,7 +103,7 @@ async def require_admin_or_operational(
             role=current_user.role,
         )
         raise ForbiddenError(
-            message="Admin or operational access required",
+            message="Admin or operation access required",
             error_code="INSUFFICIENT_PERMISSIONS",
         )
     return current_user
@@ -114,4 +114,4 @@ async def require_admin_or_operational(
 # ---------------------------------------------------------------------------
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_admin)]
-AdminOrOperationalUser = Annotated[User, Depends(require_admin_or_operational)]
+AdminOrOperationUser = Annotated[User, Depends(require_admin_or_operation)]

@@ -4,8 +4,8 @@ User Model for RBAC (Role-Based Access Control).
 SQLAlchemy 2.0 ORM model for system users with role management.
 
 Design:
-    - Separate from Doctor table: Users can be admins, operational staff, etc.
-    - Role-based: ADMIN, OPERATIONAL, USER
+    - Separate from Doctor table: Users can be admins, operation staff, etc.
+    - Role-based: ADMIN, OPERATION, USER
     - Soft delete: is_active flag for deactivation without data loss
     - Linked to Doctor: Optional foreign key for doctor-users
 """
@@ -43,7 +43,7 @@ class User(Base):
         id: Primary key
         phone: Unique phone number (primary identifier for auth)
         email: Optional email address
-        role: User role (admin, operational, user)
+        role: User role (admin, operation, user)
         is_active: Soft delete flag (inactive users cannot authenticate)
         doctor_id: Optional link to doctor record (for doctor-users)
         created_at: Record creation timestamp
@@ -52,7 +52,7 @@ class User(Base):
         
     Access Control:
         - ADMIN: Full access to all admin endpoints
-        - OPERATIONAL: Limited admin access (configurable)
+        - OPERATION: Limited admin access (configurable)
         - USER: Regular access (no admin endpoints)
         
     Note:
@@ -66,6 +66,11 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Identification
+    full_name: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Full name of the user"
+    )
     phone: Mapped[str | None] = mapped_column(
         String(20),
         unique=True,
@@ -87,7 +92,7 @@ class User(Base):
         nullable=False,
         default=UserRole.USER.value,
         index=True,
-        comment="User role: admin, operational, user"
+        comment="User role: admin, operation, user"
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
@@ -145,11 +150,11 @@ class User(Base):
         return self.role == UserRole.ADMIN.value and self.is_active
 
     @property
-    def is_operational(self) -> bool:
-        """Check if user has operational role."""
-        return self.role == UserRole.OPERATIONAL.value and self.is_active
+    def is_operation(self) -> bool:
+        """Check if user has operation role."""
+        return self.role == UserRole.OPERATION.value and self.is_active
 
     @property
     def can_access_admin(self) -> bool:
         """Check if user can access admin endpoints."""
-        return self.is_active and self.role in (UserRole.ADMIN.value, UserRole.OPERATIONAL.value)
+        return self.is_active and self.role in (UserRole.ADMIN.value, UserRole.OPERATION.value)

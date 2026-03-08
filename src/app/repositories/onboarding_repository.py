@@ -244,6 +244,20 @@ class OnboardingRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_identities_by_doctor_ids(
+        self, doctor_ids: Sequence[int],
+    ) -> dict[int, DoctorIdentity]:
+        """Batch-fetch doctor_identity rows for a list of doctor IDs.
+
+        Returns a dict mapping ``doctor_id`` → ``DoctorIdentity``.
+        Missing entries (doctors without an identity row) are simply omitted.
+        """
+        if not doctor_ids:
+            return {}
+        stmt = select(DoctorIdentity).where(DoctorIdentity.doctor_id.in_(doctor_ids))
+        result = await self.session.execute(stmt)
+        return {identity.doctor_id: identity for identity in result.scalars().all()}
+
     # ---------------------------------------------------------------------
     # Hard delete operations
     # ---------------------------------------------------------------------
@@ -390,6 +404,8 @@ class OnboardingRepository:
         changed_by_email: str | None = None,
         rejection_reason: str | None = None,
         notes: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> DoctorStatusHistory:
         """Stage a new doctor_status_history row within the current transaction.
 
@@ -420,6 +436,8 @@ class OnboardingRepository:
             changed_by_email=changed_by_email,
             rejection_reason=rejection_reason,
             notes=notes,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
         self.session.add(history)
         await self.session.flush()  # stage; caller issues the final commit()
