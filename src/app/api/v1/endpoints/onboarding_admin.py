@@ -19,13 +19,12 @@ via ``AdminOrOperationUser`` in addition to the router-level
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import structlog
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi import status as http_status
 
 from ....core.rbac import AdminOrOperationUser
+from ....core.responses import GenericResponse
 from ....db.session import DbSession
 from ....repositories import OnboardingRepository
 from ....schemas import (
@@ -95,7 +94,7 @@ async def _sign_media_url(media: DoctorMediaResponse) -> DoctorMediaResponse:
 
 @router.post(
     "/identities",
-    response_model=DoctorIdentityResponse,
+    response_model=GenericResponse[DoctorIdentityResponse],
     status_code=http_status.HTTP_201_CREATED,
     summary="Create doctor identity record (Admin/Operation only)",
 )
@@ -103,7 +102,7 @@ async def create_identity(
     payload: DoctorIdentityCreate,
     db: DbSession,
     current_user: AdminOrOperationUser,
-) -> DoctorIdentityResponse:
+) -> GenericResponse[DoctorIdentityResponse]:
     """Create a new ``doctor_identity`` row.
 
     Requires Admin or Operation role.
@@ -114,12 +113,16 @@ async def create_identity(
         admin_id=current_user.id,
         email=payload.email,
     )
-    return await repo.create_identity(**payload.model_dump())  # type: ignore[return-value]
+    identity = await repo.create_identity(**payload.model_dump())
+    return GenericResponse(
+        message="Doctor identity created successfully",
+        data=identity,  # type: ignore[arg-type]
+    )
 
 
 @router.get(
     "/identities",
-    response_model=DoctorIdentityResponse,
+    response_model=GenericResponse[DoctorIdentityResponse],
     summary="Fetch doctor identity by doctor_id or email (Admin/Operation only)",
 )
 async def get_identity(
@@ -127,7 +130,7 @@ async def get_identity(
     current_user: AdminOrOperationUser,
     doctor_id: int | None = Query(None, description="Lookup by doctor ID"),
     email: str | None = Query(None, description="Lookup by email"),
-) -> DoctorIdentityResponse:
+) -> GenericResponse[DoctorIdentityResponse]:
     """Return the ``doctor_identity`` row for a given ``doctor_id`` or ``email``.
 
     Requires Admin or Operation role.
@@ -150,7 +153,10 @@ async def get_identity(
             detail="Doctor identity not found.",
         )
 
-    return identity  # type: ignore[return-value]
+    return GenericResponse(
+        message="Doctor identity retrieved successfully",
+        data=identity,  # type: ignore[arg-type]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +166,7 @@ async def get_identity(
 
 @router.post(
     "/media/{doctor_id}",
-    response_model=DoctorMediaResponse,
+    response_model=GenericResponse[DoctorMediaResponse],
     status_code=http_status.HTTP_201_CREATED,
     summary="Add media record for a doctor (Admin/Operation only)",
 )
@@ -170,7 +176,7 @@ async def add_media(
     db: DbSession,
     request: Request,
     current_user: AdminOrOperationUser,
-) -> DoctorMediaResponse:
+) -> GenericResponse[DoctorMediaResponse]:
     """Insert a ``doctor_media`` row and return the absolute file URI.
 
     Requires Admin or Operation role.
@@ -184,12 +190,16 @@ async def add_media(
         media_id=media.media_id,
         admin_id=current_user.id,
     )
-    return await _sign_media_url(media)
+    signed_media = await _sign_media_url(media)
+    return GenericResponse(
+        message="Media added successfully",
+        data=signed_media,
+    )
 
 
 @router.get(
     "/media/{doctor_id}",
-    response_model=list[DoctorMediaResponse],
+    response_model=GenericResponse[list[DoctorMediaResponse]],
     summary="List media for a doctor (Admin/Operation only)",
 )
 async def list_media(
@@ -197,7 +207,7 @@ async def list_media(
     db: DbSession,
     request: Request,
     current_user: AdminOrOperationUser,
-) -> Sequence[DoctorMediaResponse]:
+) -> GenericResponse[list[DoctorMediaResponse]]:
     """Return all ``doctor_media`` rows for ``doctor_id`` with absolute URIs.
 
     Requires Admin or Operation role.
@@ -206,7 +216,11 @@ async def list_media(
     media = await repo.list_media(doctor_id)
     for item in media:
         item.file_uri = _build_absolute_uri(request, item.file_uri)
-    return [await _sign_media_url(item) for item in media]
+    signed_media = [await _sign_media_url(item) for item in media]
+    return GenericResponse(
+        message=f"Found {len(signed_media)} media item(s)",
+        data=signed_media,
+    )
 
 
 @router.delete(
@@ -235,7 +249,7 @@ async def delete_media(
 
 @router.post(
     "/media/{doctor_id}/upload",
-    response_model=DoctorMediaResponse,
+    response_model=GenericResponse[DoctorMediaResponse],
     status_code=http_status.HTTP_201_CREATED,
     summary="Upload a file for a doctor profile (Admin/Operation only)",
     description=(
@@ -252,7 +266,7 @@ async def upload_media_file(
     current_user: AdminOrOperationUser,
     field_name: str | None = None,
     file: UploadFile = File(...),
-) -> DoctorMediaResponse:
+) -> GenericResponse[DoctorMediaResponse]:
     """Upload a file to blob storage and register it in the database.
 
     Requires Admin or Operation role.
@@ -331,7 +345,11 @@ async def upload_media_file(
     )
     
     media.file_uri = _build_absolute_uri(request, media.file_uri)
-    return await _sign_media_url(media)
+    signed_media = await _sign_media_url(media)
+    return GenericResponse(
+        message="File uploaded successfully",
+        data=signed_media,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -341,16 +359,17 @@ async def upload_media_file(
 
 @router.post(
     "/status-history/{doctor_id}",
-    response_model=DoctorStatusHistoryResponse,
+    response_model=GenericResponse[DoctorStatusHistoryResponse],
     status_code=http_status.HTTP_201_CREATED,
     summary="Log a status change for a doctor (Admin/Operation only)",
 )
 async def log_status_history(
     doctor_id: int,
     payload: DoctorStatusHistoryCreate,
+    request: Request,
     db: DbSession,
     current_user: AdminOrOperationUser,
-) -> DoctorStatusHistoryResponse:
+) -> GenericResponse[DoctorStatusHistoryResponse]:
     """Append a status-change entry to ``doctor_status_history``.
 
     Requires Admin or Operation role.
@@ -361,28 +380,80 @@ async def log_status_history(
         doctor_id=doctor_id,
         admin_id=current_user.id,
     )
-    return await repo.log_status_change(doctor_id=doctor_id, **payload.model_dump())  # type: ignore[return-value]
+    result = await repo.log_status_change(
+        doctor_id=doctor_id,
+        **payload.model_dump(),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return GenericResponse(
+        message="Status change logged successfully",
+        data=result,  # type: ignore[arg-type]
+    )
 
 
 @router.get(
     "/status-history/{doctor_id}",
-    response_model=list[DoctorStatusHistoryResponse],
+    response_model=GenericResponse[list[DoctorStatusHistoryResponse]],
     summary="Fetch status history for a doctor (Admin/Operation only)",
 )
 async def get_status_history(
     doctor_id: int,
     db: DbSession,
     current_user: AdminOrOperationUser,
-) -> Sequence[DoctorStatusHistoryResponse]:
+) -> GenericResponse[list[DoctorStatusHistoryResponse]]:
     """Return all status-history entries for ``doctor_id``.
 
     Requires Admin or Operation role.
     """
     repo = OnboardingRepository(db)
-    return list(await repo.get_status_history(doctor_id))  # type: ignore[arg-type]
+    history = list(await repo.get_status_history(doctor_id))
+    return GenericResponse(
+        message=f"Found {len(history)} status history entries",
+        data=history,  # type: ignore[arg-type]
+    )
 
 
 # NOTE: The aggregated list and lookup routes that were previously here
 # (GET /onboarding-admin/doctors and GET /onboarding-admin/doctors/lookup)
 # have been consolidated into GET /doctors and GET /doctors/lookup
 # in src/app/api/v1/endpoints/doctors.py to reduce API surface duplication.
+
+
+# ---------------------------------------------------------------------------
+# linqmd_sync
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/linqmd-sync/{doctor_id}",
+    response_model=GenericResponse[dict],
+    summary="Sync doctor profile to LinQMD (Admin/Operation only)",
+)
+async def sync_doctor_to_linqmd(
+    doctor_id: int,
+    db: DbSession,
+    current_user: AdminOrOperationUser,
+) -> GenericResponse[dict]:
+    """Trigger a sync of a doctor's profile to the LinQMD platform.
+
+    Requires Admin or Operation role.
+    """
+    from ....services.linqmd_sync_service import get_linqmd_sync_service
+    
+    sync_service = get_linqmd_sync_service()
+    result = await sync_service.sync_doctor_by_id(doctor_id, db)
+    
+    if not result.success:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=result.error_message or "LinQMD sync failed.",
+        )
+        
+    return GenericResponse(
+        message="Sync successful",
+        data={
+            "doctor_id": result.doctor_id,
+            "linqmd_response": result.linqmd_response,
+        },
+    )
