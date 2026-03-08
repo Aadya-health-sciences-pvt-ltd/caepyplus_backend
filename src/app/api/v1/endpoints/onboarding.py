@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from ....core.config import Settings, get_settings
@@ -193,6 +193,7 @@ async def extract_resume(
 )
 async def submit_profile(
     doctor_id: int,
+    request: Request,
     db: DbSession,
     current_user: CurrentUser,
 ) -> GenericResponse[dict[str, Any]]:
@@ -250,6 +251,8 @@ async def submit_profile(
         previous_status=previous_status,
         new_status=OnboardingStatus.SUBMITTED,
         changed_by=str(current_user.id),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
     )
 
     await db.commit()
@@ -371,6 +374,7 @@ class VerifyProfilePayload(BaseModel):
 async def verify_profile(
     doctor_id: int,
     payload: VerifyProfilePayload,
+    request: Request,
     db: DbSession,
     current_user: AdminOrOperationUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
@@ -431,6 +435,8 @@ async def verify_profile(
         new_status=OnboardingStatus.VERIFIED,
         changed_by=str(current_user.id),
         changed_by_email=getattr(current_user, "email", None),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
     )
 
     await db.commit()
@@ -521,6 +527,7 @@ class RejectProfilePayload(BaseModel):
 async def reject_profile(
     doctor_id: int,
     payload: RejectProfilePayload,
+    request: Request,
     db: DbSession,
     current_user: AdminOrOperationUser,
     email_svc: Annotated[EmailService, Depends(get_email_service)],
@@ -582,6 +589,8 @@ async def reject_profile(
         changed_by=str(current_user.id),
         changed_by_email=getattr(current_user, "email", None),
         rejection_reason=payload.reason,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
     )
 
     await db.commit()

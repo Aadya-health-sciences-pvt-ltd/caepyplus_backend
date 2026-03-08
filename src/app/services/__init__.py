@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from .gemini_service import GeminiService
     from .prompt_session_service import PromptSessionService
     from .voice_service import VoiceOnboardingService
+    from .linqmd_sync_service import LinQMDsyncService
 
 
 def get_extraction_service() -> ResumeExtractionService:
@@ -40,6 +41,12 @@ def get_prompt_session_service() -> PromptSessionService:
     from .prompt_session_service import get_prompt_session_service as _get
     return _get()
 
+def get_linqmd_sync_service():
+    """Get the global LinQMD sync service instance."""
+    from .linqmd_sync_service import get_linqmd_sync_service as _get
+    return _get()
+
+
 
 __all__ = [
     "get_extraction_service",
@@ -47,4 +54,5 @@ __all__ = [
     "get_voice_service",
     "get_blob_storage_service",
     "get_prompt_session_service",
+    "get_linqmd_sync_service",
 ]

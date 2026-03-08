@@ -404,6 +404,8 @@ class OnboardingRepository:
         changed_by_email: str | None = None,
         rejection_reason: str | None = None,
         notes: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> DoctorStatusHistory:
         """Stage a new doctor_status_history row within the current transaction.
 
@@ -434,6 +436,8 @@ class OnboardingRepository:
             changed_by_email=changed_by_email,
             rejection_reason=rejection_reason,
             notes=notes,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
         self.session.add(history)
         await self.session.flush()  # stage; caller issues the final commit()

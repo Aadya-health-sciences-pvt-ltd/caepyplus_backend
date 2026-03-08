@@ -94,9 +94,8 @@ services:
       - ALLOWED_EXTENSIONS=${ALLOWED_EXTENSIONS:-pdf,png,jpg,jpeg,gif}
 
       # ── LinQMD Sync ───────────────────────
-      - LINQMD_SYNC_ENABLED=${LINQMD_SYNC_ENABLED:-false}
-      - LINQMD_BASE_URL=${LINQMD_BASE_URL:-}
-      - LINQMD_API_KEY=${LINQMD_API_KEY:-}
+      - LINQMD_DEFAULT_PASSWORD=${LINQMD_DEFAULT_PASSWORD:-}
+      - LINQMD_API_TIMEOUT=${LINQMD_API_TIMEOUT:-30}
 
       # ── uvicorn worker count (see Dockerfile comment) ──
       - UVICORN_WORKERS=1
