@@ -28,6 +28,7 @@ from .endpoints import (
     doctors,
     dropdowns,
     health,
+    lead_doctors,
     onboarding,
     onboarding_admin,
     otp,
@@ -102,4 +103,12 @@ router.include_router(
     admin_dropdowns.router,
     dependencies=[Depends(require_authentication)],
     tags=["Admin - Dropdowns"],
+)
+
+# Lead doctor data: paginated listing (read-only) for admin / operation users.
+# All endpoints in lead_doctors declare AdminOrOperationUser dependency.
+router.include_router(
+    lead_doctors.router,
+    dependencies=[Depends(require_authentication)],
+    tags=["Lead Doctors"],
 )

@@ -96,6 +96,7 @@ from src.app.models import (  # noqa: E402, F401
     DoctorMedia,
     DoctorStatusHistory,
     DropdownOption,
+    LeadDoctor,
     User,
 )
 
