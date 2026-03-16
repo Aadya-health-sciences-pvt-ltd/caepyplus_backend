@@ -225,6 +225,16 @@ class OTPService:
         Returns:
             (True, success_message) on success, (False, error_message) on failure.
         """
+        # ------------------------------------------------------------------
+        # SKIP_VERIFY bypass — development / testing mode only
+        # ------------------------------------------------------------------
+        if self.settings.SKIP_VERIFY:
+            logger.warning(
+                "SKIP_VERIFY is enabled — SMS sending bypassed (dev/test mode only)",
+                mobile=self.mask_mobile(mobile_number),
+            )
+            return True, "OTP bypassed (SKIP_VERIFY mode). Use any OTP to verify."
+
         try:
             if not self.settings.SMS_USER_ID or not self.settings.SMS_USER_PASS:
                 logger.error("SMS credentials missing")

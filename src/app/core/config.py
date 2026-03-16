@@ -452,6 +452,18 @@ class Settings(BaseSettings):
         description="Maximum OTP verification attempts before expiry"
     )
 
+    # -----------------------------------------------------------------------
+    # Development / Testing Bypass
+    # -----------------------------------------------------------------------
+    SKIP_VERIFY: bool = Field(
+        default=False,
+        description=(
+            "When True, bypasses real SMS sending (OTP request always succeeds) "
+            "and accepts any OTP value during verification. "
+            "MUST be False (or absent) in production."
+        ),
+    )
+
 
     # ========================================
     # Redis Configuration (for OTP storage)
@@ -574,6 +586,11 @@ class Settings(BaseSettings):
             if not os.environ.get("FIREBASE_WEB_API_KEY"):
                 raise ValueError(
                     "FIREBASE_WEB_API_KEY must be set in production for Google Sign-In"
+                )
+            if self.SKIP_VERIFY:
+                raise ValueError(
+                    "SKIP_VERIFY must be False in production. "
+                    "This flag is only for development/testing."
                 )
         return self
 

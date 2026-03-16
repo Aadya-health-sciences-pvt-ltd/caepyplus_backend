@@ -191,27 +191,33 @@ async def verify_otp(
     """Verify OTP and return a JWT for the doctor."""
     logger.info("OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    # 1. Verify OTP — always enforce real OTP check
-    is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
-
-    if not is_valid:
-        error_code = "INVALID_OTP"
-        if "expired" in message.lower():
-            error_code = "OTP_EXPIRED"
-        elif "attempts" in message.lower():
-            error_code = "MAX_ATTEMPTS_EXCEEDED"
-        elif "not found" in message.lower():
-            error_code = "OTP_NOT_FOUND"
-
+    # 1. Verify OTP (skipped when SKIP_VERIFY is enabled)
+    if settings.SKIP_VERIFY:
         logger.warning(
-            "OTP verification failed",
+            "SKIP_VERIFY is enabled — OTP check bypassed (dev/test mode only)",
             mobile=otp_service.mask_mobile(request.mobile_number),
-            reason=message,
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"success": False, "message": message, "error_code": error_code},
-        )
+    else:
+        is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
+
+        if not is_valid:
+            error_code = "INVALID_OTP"
+            if "expired" in message.lower():
+                error_code = "OTP_EXPIRED"
+            elif "attempts" in message.lower():
+                error_code = "MAX_ATTEMPTS_EXCEEDED"
+            elif "not found" in message.lower():
+                error_code = "OTP_NOT_FOUND"
+
+            logger.warning(
+                "OTP verification failed",
+                mobile=otp_service.mask_mobile(request.mobile_number),
+                reason=message,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"success": False, "message": message, "error_code": error_code},
+            )
 
     # 2. Find or auto-create doctor
     doctor_repo = DoctorRepository(db)
@@ -358,19 +364,25 @@ async def verify_admin_otp(
     """
     logger.info("Admin OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    # 1. Verify OTP — no bypass, always enforce real OTP verification
-    is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
-
-    if not is_valid:
+    # 1. Verify OTP (skipped when SKIP_VERIFY is enabled)
+    if settings.SKIP_VERIFY:
         logger.warning(
-            "Admin OTP verification failed",
+            "SKIP_VERIFY is enabled — Admin OTP check bypassed (dev/test mode only)",
             mobile=otp_service.mask_mobile(request.mobile_number),
-            reason=message,
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "message": message, "error_code": "INVALID_OTP"},
-        )
+    else:
+        is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
+
+        if not is_valid:
+            logger.warning(
+                "Admin OTP verification failed",
+                mobile=otp_service.mask_mobile(request.mobile_number),
+                reason=message,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"success": False, "message": message, "error_code": "INVALID_OTP"},
+            )
 
     # 2. Strict user existence check — admins must be pre-provisioned
     user_repo = UserRepository(db)
