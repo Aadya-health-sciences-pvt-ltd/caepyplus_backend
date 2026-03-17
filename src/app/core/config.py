@@ -379,17 +379,17 @@ class Settings(BaseSettings):
         ge=5,
         description="Timeout for LinQMD API requests (seconds)"
     )
-    LINQMD_API_URL: str = Field(
+    LINQMD_PRACTICE_HUB_API_URL: str = Field(
         default="",
-        description="LinQMD API base URL for user creation"
+        description="LinQMD Practice Hub API base URL for user creation"
     )
-    LINQMD_AUTH_TOKEN: str = Field(
+    LINQMD_PRACTICE_HUB_AUTH_TOKEN: str = Field(
         default="",
-        description="Basic Authentication token for LinQMD API"
+        description="Basic Authentication token for LinQMD Practice Hub API"
     )
-    LINQMD_COOKIE: str = Field(
+    LINQMD_PRACTICE_HUB_COOKIE: str = Field(
         default="",
-        description="Pre-authenticated cookie for LinQMD API if necessary"
+        description="Pre-authenticated cookie for LinQMD Practice Hub API if necessary"
     )
 
     # ========================================
