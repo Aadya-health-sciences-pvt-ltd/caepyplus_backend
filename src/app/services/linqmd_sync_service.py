@@ -143,11 +143,11 @@ class LinQMDSyncService:
         }
         
         # Auth token already includes "Basic " prefix from config
-        if self.settings.LINQMD_AUTH_TOKEN:
-            headers['Authorization'] = self.settings.LINQMD_AUTH_TOKEN
+        if self.settings.LINQMD_PRACTICE_HUB_AUTH_TOKEN:
+            headers['Authorization'] = self.settings.LINQMD_PRACTICE_HUB_AUTH_TOKEN
         
-        if self.settings.LINQMD_COOKIE:
-            headers['Cookie'] = self.settings.LINQMD_COOKIE
+        if self.settings.LINQMD_PRACTICE_HUB_COOKIE:
+            headers['Cookie'] = self.settings.LINQMD_PRACTICE_HUB_COOKIE
         
         return headers
     
@@ -343,11 +343,11 @@ class LinQMDSyncService:
         headers = self._get_headers()
         
         logger.info(f"Sending user to LinQMD: {payload.mail}")
-        logger.debug(f"LinQMD API URL: {self.settings.LINQMD_API_URL}")
+        logger.debug(f"LinQMD API URL: {self.settings.LINQMD_PRACTICE_HUB_API_URL}")
         logger.debug(f"Request data: {form_data}")
         
         response = await self.client.post(
-            self.settings.LINQMD_API_URL,
+            self.settings.LINQMD_PRACTICE_HUB_API_URL,
             data=form_data,
             headers=headers,
         )
