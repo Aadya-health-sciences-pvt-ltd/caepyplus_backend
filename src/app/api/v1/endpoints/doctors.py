@@ -480,7 +480,7 @@ async def upload_profile_photo(
             doctor_id=doctor_id,
             email=doctor.email or f"placeholder_{doctor_id}@caepy.com",
             phone_number=doctor.phone or f"UNKNOWN_{doctor_id}",
-            full_name=doctor.name or f"Doctor {doctor_id}",
+            full_name=doctor.full_name or f"Doctor {doctor_id}",
         )
 
     media_category = "profile_photo"
