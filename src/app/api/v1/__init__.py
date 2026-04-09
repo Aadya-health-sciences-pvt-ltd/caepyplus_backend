@@ -33,6 +33,7 @@ from .endpoints import (
     onboarding_admin,
     otp,
     voice,
+    blogs,
 )
 
 router = APIRouter(prefix="/v1")
@@ -111,4 +112,17 @@ router.include_router(
     lead_doctors.router,
     dependencies=[Depends(require_authentication)],
     tags=["Lead Doctors"],
+)
+
+# Blogs and Comments for Practice Hub
+# Handled via user role + doctor context
+router.include_router(
+    blogs.router,
+    prefix="/blogs",
+)
+
+# Webhooks from external systems (Drupal)
+router.include_router(
+    blogs.webhook_router,
+    prefix="/webhooks",
 )

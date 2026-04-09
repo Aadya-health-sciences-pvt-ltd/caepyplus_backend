@@ -390,6 +390,32 @@ class PromptManager:
 
         return result
 
+    def get_blog_topics_prompt(self) -> str:
+        """Get the combined prompt for generating blog topics."""
+        system = self.get("blog_studio.topics.system_prompt")
+        schema = self.get("blog_studio.topics.response_schema")
+
+        return f"{system}\n\n## REQUIRED OUTPUT FORMAT\n{schema}"
+
+    def get_blog_keywords_prompt(self, topic: str) -> str:
+        """Get the combined prompt for generating blog keywords for a topic."""
+        system = self.get("blog_studio.keywords.system_prompt")
+        schema = self.get("blog_studio.keywords.response_schema")
+
+        # Format topic into system prompt
+        formatted_system = system.format(topic=topic)
+
+        return f"{formatted_system}\n\n## REQUIRED OUTPUT FORMAT\n{schema}"
+
+    def get_blog_content_prompt(self, topic: str, keywords: list[str]) -> str:
+        """Get the combined prompt for generating blog content."""
+        system = self.get("blog_studio.content.system_prompt")
+        schema = self.get("blog_studio.content.response_schema")
+
+        # Format topic and keywords into system prompt
+        formatted_system = system.format(topic=topic, keywords=", ".join(keywords))
+
+        return f"{formatted_system}\n\n## REQUIRED OUTPUT FORMAT\n{schema}"
 # -----------------------------------------------------------------------------
 # Singleton Pattern with Lazy Initialization
 # -----------------------------------------------------------------------------
