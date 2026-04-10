@@ -368,6 +368,31 @@ class Settings(BaseSettings):
     )
 
     # ========================================
+    # LinQMD Integration Configuration
+    # ========================================
+    LINQMD_DEFAULT_PASSWORD: str = Field(
+        default="",
+        description="Default password for temporarily created LinQMD users"
+    )
+    LINQMD_API_TIMEOUT: int = Field(
+        default=30,
+        ge=5,
+        description="Timeout for LinQMD API requests (seconds)"
+    )
+    LINQMD_PRACTICE_HUB_API_URL: str = Field(
+        default="",
+        description="LinQMD Practice Hub API base URL for user creation"
+    )
+    LINQMD_PRACTICE_HUB_AUTH_TOKEN: str = Field(
+        default="",
+        description="Basic Authentication token for LinQMD Practice Hub API"
+    )
+    LINQMD_PRACTICE_HUB_COOKIE: str = Field(
+        default="",
+        description="Pre-authenticated cookie for LinQMD Practice Hub API if necessary"
+    )
+
+    # ========================================
     # SMS/OTP Configuration (onlysms.co.in)
     # ========================================
 
@@ -425,6 +450,18 @@ class Settings(BaseSettings):
         ge=1,
         le=5,
         description="Maximum OTP verification attempts before expiry"
+    )
+
+    # -----------------------------------------------------------------------
+    # Development / Testing Bypass
+    # -----------------------------------------------------------------------
+    SKIP_VERIFY: bool = Field(
+        default=False,
+        description=(
+            "When True, bypasses real SMS sending (OTP request always succeeds) "
+            "and accepts any OTP value during verification. "
+            "MUST be False (or absent) in production."
+        ),
     )
 
 
@@ -549,6 +586,11 @@ class Settings(BaseSettings):
             if not os.environ.get("FIREBASE_WEB_API_KEY"):
                 raise ValueError(
                     "FIREBASE_WEB_API_KEY must be set in production for Google Sign-In"
+                )
+            if self.SKIP_VERIFY:
+                raise ValueError(
+                    "SKIP_VERIFY must be False in production. "
+                    "This flag is only for development/testing."
                 )
         return self
 

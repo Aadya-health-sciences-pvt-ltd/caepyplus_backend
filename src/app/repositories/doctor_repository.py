@@ -267,7 +267,7 @@ class DoctorRepository:
         
         Args:
             phone_number: Verified phone number (will be normalized)
-            role: User role (admin, operational, user). Defaults to 'user'.
+            role: User role (admin, operation, user). Defaults to 'user'.
             
         Returns:
             Created doctor entity with ID

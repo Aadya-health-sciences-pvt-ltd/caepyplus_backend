@@ -118,7 +118,7 @@ class OTPVerifyResponse(BaseModel):
     mobile_number: str = Field(..., description="Verified mobile number")
     role: str | None = Field(
         default="user",
-        description="User role: admin, operational, or user",
+        description="User role: admin, operation, or user",
     )
 
     access_token: str | None = Field(

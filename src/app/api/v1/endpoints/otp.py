@@ -18,6 +18,8 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
+
+from ....core.responses import GenericResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +41,7 @@ from ....services.otp_service import OTPService, get_otp_service
 logger = structlog.get_logger(__name__)
 
 # Roles permitted to use the admin OTP endpoint
-_ADMIN_ROLES: frozenset[str] = frozenset({UserRole.ADMIN.value, UserRole.OPERATIONAL.value})
+_ADMIN_ROLES: frozenset[str] = frozenset({UserRole.ADMIN.value, UserRole.OPERATION.value})
 
 
 # ---------------------------------------------------------------------------
@@ -118,19 +120,19 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post(
     "/otp/request",
-    response_model=OTPRequestResponse,
+    response_model=GenericResponse[OTPRequestResponse],
     status_code=status.HTTP_200_OK,
     summary="Request OTP",
     description="Send a 6-digit OTP to the provided mobile number for authentication.",
     responses={
-        200: {"description": "OTP sent successfully", "model": OTPRequestResponse},
+        200: {"description": "OTP sent successfully"},
         500: {"description": "Failed to send OTP", "model": OTPErrorResponse},
     },
 )
 async def request_otp(
     request: OTPRequestSchema,
     otp_service: OTPService = Depends(get_otp_service),
-) -> OTPRequestResponse:
+) -> GenericResponse[OTPRequestResponse]:
     """Send OTP to mobile number.
 
     Sends a 6-digit OTP via SMS. OTP is valid for the duration
@@ -151,11 +153,14 @@ async def request_otp(
             },
         )
 
-    return OTPRequestResponse(
-        success=True,
-        message=message,
-        mobile_number=otp_service.mask_mobile(request.mobile_number),
-        expires_in_seconds=otp_service.settings.OTP_EXPIRY_SECONDS,
+    return GenericResponse(
+        message="OTP sent successfully",
+        data=OTPRequestResponse(
+            success=True,
+            message=message,
+            mobile_number=otp_service.mask_mobile(request.mobile_number),
+            expires_in_seconds=otp_service.settings.OTP_EXPIRY_SECONDS,
+        ),
     )
 
 
@@ -165,7 +170,7 @@ async def request_otp(
 
 @router.post(
     "/otp/verify",
-    response_model=OTPVerifyResponse,
+    response_model=GenericResponse[OTPVerifyResponse],
     status_code=status.HTTP_200_OK,
     summary="Verify OTP (Doctor)",
     description=(
@@ -173,7 +178,7 @@ async def request_otp(
         "if the mobile number is not yet registered."
     ),
     responses={
-        200: {"description": "OTP verified successfully", "model": OTPVerifyResponse},
+        200: {"description": "OTP verified successfully"},
         401: {"description": "Invalid or expired OTP", "model": OTPErrorResponse},
     },
 )
@@ -182,31 +187,37 @@ async def verify_otp(
     otp_service: OTPService = Depends(get_otp_service),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> OTPVerifyResponse:
+) -> GenericResponse[OTPVerifyResponse]:
     """Verify OTP and return a JWT for the doctor."""
     logger.info("OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    # 1. Verify OTP — always enforce real OTP check
-    is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
-
-    if not is_valid:
-        error_code = "INVALID_OTP"
-        if "expired" in message.lower():
-            error_code = "OTP_EXPIRED"
-        elif "attempts" in message.lower():
-            error_code = "MAX_ATTEMPTS_EXCEEDED"
-        elif "not found" in message.lower():
-            error_code = "OTP_NOT_FOUND"
-
+    # 1. Verify OTP (skipped when SKIP_VERIFY is enabled)
+    if settings.SKIP_VERIFY:
         logger.warning(
-            "OTP verification failed",
+            "SKIP_VERIFY is enabled — OTP check bypassed (dev/test mode only)",
             mobile=otp_service.mask_mobile(request.mobile_number),
-            reason=message,
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"success": False, "message": message, "error_code": error_code},
-        )
+    else:
+        is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
+
+        if not is_valid:
+            error_code = "INVALID_OTP"
+            if "expired" in message.lower():
+                error_code = "OTP_EXPIRED"
+            elif "attempts" in message.lower():
+                error_code = "MAX_ATTEMPTS_EXCEEDED"
+            elif "not found" in message.lower():
+                error_code = "OTP_NOT_FOUND"
+
+            logger.warning(
+                "OTP verification failed",
+                mobile=otp_service.mask_mobile(request.mobile_number),
+                reason=message,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"success": False, "message": message, "error_code": error_code},
+            )
 
     # 2. Find or auto-create doctor
     doctor_repo = DoctorRepository(db)
@@ -263,16 +274,19 @@ async def verify_otp(
         role=user_role,
     )
 
-    return OTPVerifyResponse(
-        success=True,
+    return GenericResponse(
         message="OTP verified successfully",
-        doctor_id=doctor_id,
-        is_new_user=is_new_user,
-        mobile_number=request.mobile_number,
-        role=user_role,
-        access_token=token.access_token,
-        token_type=token.token_type,
-        expires_in=token.expires_in,
+        data=OTPVerifyResponse(
+            success=True,
+            message="OTP verified successfully",
+            doctor_id=doctor_id,
+            is_new_user=is_new_user,
+            mobile_number=request.mobile_number,
+            role=user_role,
+            access_token=token.access_token,
+            token_type=token.token_type,
+            expires_in=token.expires_in,
+        ),
     )
 
 
@@ -282,19 +296,19 @@ async def verify_otp(
 
 @router.post(
     "/otp/resend",
-    response_model=OTPRequestResponse,
+    response_model=GenericResponse[OTPRequestResponse],
     status_code=status.HTTP_200_OK,
     summary="Resend OTP",
     description="Generate a new OTP and resend it. Invalidates any previously issued OTP.",
     responses={
-        200: {"description": "OTP resent successfully", "model": OTPRequestResponse},
+        200: {"description": "OTP resent successfully"},
         500: {"description": "Failed to resend OTP", "model": OTPErrorResponse},
     },
 )
 async def resend_otp(
     request: OTPRequestSchema,
     otp_service: OTPService = Depends(get_otp_service),
-) -> OTPRequestResponse:
+) -> GenericResponse[OTPRequestResponse]:
     """Resend (regenerate) OTP to the same mobile number."""
     logger.info("OTP resend request", mobile=otp_service.mask_mobile(request.mobile_number))
 
@@ -306,11 +320,14 @@ async def resend_otp(
             detail={"success": False, "message": message, "error_code": "OTP_SEND_FAILED"},
         )
 
-    return OTPRequestResponse(
-        success=True,
+    return GenericResponse(
         message="OTP resent successfully",
-        mobile_number=otp_service.mask_mobile(request.mobile_number),
-        expires_in_seconds=otp_service.settings.OTP_EXPIRY_SECONDS,
+        data=OTPRequestResponse(
+            success=True,
+            message="OTP resent successfully",
+            mobile_number=otp_service.mask_mobile(request.mobile_number),
+            expires_in_seconds=otp_service.settings.OTP_EXPIRY_SECONDS,
+        ),
     )
 
 
@@ -320,16 +337,16 @@ async def resend_otp(
 
 @router.post(
     "/admin/otp/verify",
-    response_model=OTPVerifyResponse,
+    response_model=GenericResponse[OTPVerifyResponse],
     status_code=status.HTTP_200_OK,
     summary="Verify Admin OTP",
     description=(
-        "Verify OTP for admin/operational users. "
-        "Strict RBAC: user must already exist with admin or operational role. "
+        "Verify OTP for admin/operation users. "
+        "Strict RBAC: user must already exist with admin or operation role. "
         "New users are NEVER auto-created via this endpoint."
     ),
     responses={
-        200: {"description": "Admin OTP verified successfully", "model": OTPVerifyResponse},
+        200: {"description": "Admin OTP verified successfully"},
         400: {"description": "Invalid / Expired OTP", "model": OTPErrorResponse},
         403: {"description": "Access denied (user not found or insufficient role)", "model": OTPErrorResponse},
     },
@@ -339,27 +356,33 @@ async def verify_admin_otp(
     otp_service: OTPService = Depends(get_otp_service),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> OTPVerifyResponse:
-    """Verify OTP and authenticate a pre-registered admin or operational user.
+) -> GenericResponse[OTPVerifyResponse]:
+    """Verify OTP and authenticate a pre-registered admin or operation user.
 
     No user creation occurs here — the user must already exist in the ``users``
-    table with ``admin`` or ``operational`` role.
+    table with ``admin`` or ``operation`` role.
     """
     logger.info("Admin OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    # 1. Verify OTP — no bypass, always enforce real OTP verification
-    is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
-
-    if not is_valid:
+    # 1. Verify OTP (skipped when SKIP_VERIFY is enabled)
+    if settings.SKIP_VERIFY:
         logger.warning(
-            "Admin OTP verification failed",
+            "SKIP_VERIFY is enabled — Admin OTP check bypassed (dev/test mode only)",
             mobile=otp_service.mask_mobile(request.mobile_number),
-            reason=message,
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "message": message, "error_code": "INVALID_OTP"},
-        )
+    else:
+        is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
+
+        if not is_valid:
+            logger.warning(
+                "Admin OTP verification failed",
+                mobile=otp_service.mask_mobile(request.mobile_number),
+                reason=message,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"success": False, "message": message, "error_code": "INVALID_OTP"},
+            )
 
     # 2. Strict user existence check — admins must be pre-provisioned
     user_repo = UserRepository(db)
@@ -379,7 +402,7 @@ async def verify_admin_otp(
             },
         )
 
-    # 3. RBAC — only admin and operational roles are permitted
+    # 3. RBAC — only admin and operation roles are permitted
     if user.role not in _ADMIN_ROLES:
         logger.warning(
             "Admin login failed: insufficient role",
@@ -417,16 +440,19 @@ async def verify_admin_otp(
 
     logger.info("Admin OTP verified successfully", user_id=user.id, role=user.role)
 
-    return OTPVerifyResponse(
-        success=True,
+    return GenericResponse(
         message="Admin verified successfully",
-        doctor_id=user.doctor_id,  # May be None if not linked to a doctor record
-        is_new_user=False,
-        mobile_number=user.phone,
-        role=user.role,
-        access_token=token.access_token,
-        token_type=token.token_type,
-        expires_in=token.expires_in,
+        data=OTPVerifyResponse(
+            success=True,
+            message="Admin verified successfully",
+            doctor_id=user.doctor_id,
+            is_new_user=False,
+            mobile_number=user.phone,
+            role=user.role,
+            access_token=token.access_token,
+            token_type=token.token_type,
+            expires_in=token.expires_in,
+        ),
     )
 
 
@@ -436,7 +462,7 @@ async def verify_admin_otp(
 
 @router.post(
     "/google/verify",
-    response_model=OTPVerifyResponse,
+    response_model=GenericResponse[OTPVerifyResponse],
     status_code=status.HTTP_200_OK,
     summary="Google Sign-In",
     description=(
@@ -444,7 +470,7 @@ async def verify_admin_otp(
         "Finds or creates the doctor record by email. No OTP step is required."
     ),
     responses={
-        200: {"description": "Google Sign-In successful", "model": OTPVerifyResponse},
+        200: {"description": "Google Sign-In successful"},
         400: {"description": "No email in Google account", "model": OTPErrorResponse},
         401: {"description": "Invalid Firebase token", "model": OTPErrorResponse},
     },
@@ -453,7 +479,7 @@ async def google_verify(
     request: GoogleAuthSchema,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> OTPVerifyResponse:
+) -> GenericResponse[OTPVerifyResponse]:
     """Verify Google Sign-In Firebase token and return a JWT.
 
     Flow:
@@ -552,14 +578,17 @@ async def google_verify(
         doctor_id=doctor_id,
     )
 
-    return OTPVerifyResponse(
-        success=True,
+    return GenericResponse(
         message="Google Sign-In successful",
-        doctor_id=doctor_id,
-        is_new_user=is_new_user,
-        mobile_number=doctor_phone or "",
-        role=user_role,
-        access_token=token.access_token,
-        token_type=token.token_type,
-        expires_in=token.expires_in,
+        data=OTPVerifyResponse(
+            success=True,
+            message="Google Sign-In successful",
+            doctor_id=doctor_id,
+            is_new_user=is_new_user,
+            mobile_number=doctor_phone or "",
+            role=user_role,
+            access_token=token.access_token,
+            token_type=token.token_type,
+            expires_in=token.expires_in,
+        ),
     )
