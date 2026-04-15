@@ -14,7 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -292,7 +292,11 @@ class Settings(BaseSettings):
     )
     AWS_REGION: str = Field(
         default="us-east-1",
-        description="AWS region for S3 bucket"
+        description=(
+            "AWS region for S3 client and SigV4 presigned URLs; must match the bucket region or GET returns 403. "
+            "ECS injects AWS_S3_REGION from Secrets Manager — we accept it as an alias so it is not ignored."
+        ),
+        validation_alias=AliasChoices("AWS_REGION", "AWS_S3_REGION"),
     )
     AWS_S3_BUCKET: str = Field(
         default="",
