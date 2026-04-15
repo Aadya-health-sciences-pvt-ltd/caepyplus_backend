@@ -578,7 +578,11 @@ class Settings(BaseSettings):
             if "change-me" in self.SECRET_KEY.lower():
                 raise ValueError("SECRET_KEY must be changed in production")
             if not self.GOOGLE_API_KEY:
-                raise ValueError("GOOGLE_API_KEY is required in production")
+                warnings.warn(
+                    "GOOGLE_API_KEY is not set in production; Gemini/AI features are disabled.",
+                    UserWarning,
+                    stacklevel=2,
+                )
             if not self.DATABASE_URL:
                 raise ValueError("DATABASE_URL must be set in production")
             if "localhost" in self.DATABASE_URL or "127.0.0.1" in self.DATABASE_URL:
@@ -589,12 +593,16 @@ class Settings(BaseSettings):
                     "for OTP functionality"
                 )
             if not os.environ.get("FIREBASE_PROJECT_ID"):
-                raise ValueError(
-                    "FIREBASE_PROJECT_ID must be set in production for Google Sign-In"
+                warnings.warn(
+                    "FIREBASE_PROJECT_ID is not set in production; Google Sign-In will not work.",
+                    UserWarning,
+                    stacklevel=2,
                 )
             if not os.environ.get("FIREBASE_WEB_API_KEY"):
-                raise ValueError(
-                    "FIREBASE_WEB_API_KEY must be set in production for Google Sign-In"
+                warnings.warn(
+                    "FIREBASE_WEB_API_KEY is not set in production; Google Sign-In will not work.",
+                    UserWarning,
+                    stacklevel=2,
                 )
             if self.SKIP_VERIFY:
                 raise ValueError(
