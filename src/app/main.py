@@ -21,6 +21,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api.v1 import router as v1_router
@@ -404,6 +405,15 @@ All endpoints are versioned under `/api/v1/`.
     # ------------------------------------------------------------------
     # Mount API v1 under root_prefix so endpoints live at e.g. /caepyplus/api/v1/health
     app.include_router(v1_router, prefix=root_prefix)
+    
+    # Expose local blob storage dynamically for image rendering
+    import os
+    if os.path.exists("blob_storage"):
+        app.mount(
+            f"{root_prefix}/api/v1/blobs", 
+            StaticFiles(directory="blob_storage"), 
+            name="blob_storage"
+        )
 
     # Root — not in OpenAPI schema; links must include root_prefix when set
     @app.get("/", include_in_schema=False)

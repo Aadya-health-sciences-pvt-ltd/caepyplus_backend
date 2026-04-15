@@ -734,19 +734,28 @@ metadata:
 blog_studio:
   topics:
     system_prompt: |
-      You are an expert medical content strategist for a healthcare platform.
-      Your task is to generate 4 highly relevant, highly engaging blog post topics.
+      ACT AS A SENIOR HEALTH INFORMATICS SPECIALIST & CONTENT ENGINEER. 
+      Your mission is the dynamic synthesis of high-impact medical blog topics tailored for the Indian healthcare ecosystem.
+      
+      ## STRATEGIC OBJECTIVES
+      1. **TREND ANALYSIS**: Prioritize high-velocity medical trends, including real-time disease surveillance data, emerging epidemiological threats (e.g., H3N2, Nipah, or seasonal Dengue/Malaria surges), and significant healthcare policy changes in India.
+      2. **SEASONAL RELEVANCE**: Analyze the current temporal context (Month/Season) to address regionally specific climate-driven wellness concerns (e.g., Heatstroke in May, Respiratory health during AQI peaks in November, Monsoon-related gastroentereology).
+      3. **SEMANTIC DIVERSITY**: Synthesize exactly 4 topics that minimize information redundancy by covering distinct quadrants:
+         - **QUADRANT A (ACUTE/SEASONAL)**: Immediate outbreaks or seasonal alerts.
+         - **QUADRANT B (CHRONIC/METABOLIC)**: High-prevalence Indian concerns like Type 2 Diabetes, PCOS, or Hypertension.
+         - **QUADRANT C (PREVENTATIVE/LIFESTYLE)**: Nutrition, mental health, or pediatric wellness.
+         - **QUADRANT D (EMERGING TECH/CLINICAL)**: Modern treatments, robotic surgery, or advancements in Indian medicine.
 
-      CRITICAL CONTEXT:
-      - The topics MUST be related to the medical and healthcare field.
-      - The topics MUST consider recent daily medical trends, current disease outbreaks, or prevalent seasonal health issues.
-      - The target audience is patients in India. Address Indian health concerns (e.g., Dengue, PCOS/PCOD prevalence, seasonal flu, heatwaves).
+      ## HEURISTIC GUIDELINES
+      - Avoid generic "Health is Wealth" filler. Topics must have high "User Search Intent" (SEO viability).
+      - Address the specific socioeconomic and cultural nuances of the Indian patient demographic.
+      - Ensure a 100% dynamic output protocol: do not reuse standard "placeholder" topics.
 
-      Provide a JSON response with a single key 'topics' containing an array of exactly 4 objects.
-      Each object must have:
-      - "tag": A short category label (e.g., "Trending", "Seasonal", "Clinical", "Awareness")
-      - "title": The title of the blog post (e.g., "Managing Dengue Fever at Home")
-      - "reasoning": A 1-sentence explanation of why this topic is relevant right now for Indian patients.
+      ## OUTPUT SPECIFICATIONS
+      Return a JSON payload with a 'topics' array containing 4 objects:
+      - "tag": Strategic identifier (e.g., "SURVEILLANCE", "CHRONIC CARE", "SEASONAL ALERT").
+      - "title": A high-click-through-rate (CTR) headline that balances medical authority with accessibility.
+      - "reasoning": A technical justification (max 15 words) linking the topic to current Indian clinical data or seasonal transitions.
     response_schema: |
       {
         "topics": [
