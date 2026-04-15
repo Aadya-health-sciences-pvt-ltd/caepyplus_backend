@@ -2,7 +2,7 @@
 
 Handles generic CRUD for Blogs, Comments, and AI/Drupal stubs.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File
 from typing import Any
 from datetime import datetime
 import re
@@ -32,6 +32,46 @@ from ....models.enums import BlogStatus, CommentStatus, CommentAuthorType
 # We will create two routers: one for authenticated user actions, one for webhooks
 router = APIRouter(tags=["Blogs"], dependencies=[Depends(require_authentication)])
 webhook_router = APIRouter(tags=["Webhooks"])
+
+
+async def _resolve_image_urls(image_urls: list | None) -> list[str]:
+    """Convert stored S3 keys into fresh presigned URLs.
+    
+    When STORAGE_BACKEND=s3 and the bucket is private, we store the raw S3 key
+    in the DB (not a URL). This helper generates a fresh signed URL for each key
+    so the browser can load images immediately.
+    
+    For local storage (keys starting with /api/v1/blobs) or already-absolute HTTPS
+    URLs, the value is returned unchanged.
+    """
+    if not image_urls:
+        return []
+    
+    from ....services.blob_storage_service import get_blob_storage_service, S3BlobStorageService
+    
+    blob_service = get_blob_storage_service()
+    resolved = []
+    
+    for path in image_urls:
+        if not path:
+            continue
+        # Already an absolute URL — pass through unchanged
+        if path.startswith("http://") or path.startswith("https://"):
+            resolved.append(path)
+        # Local blob storage path — also pass through unchanged
+        elif path.startswith("/"):
+            resolved.append(path)
+        # Otherwise treat as raw S3 key and generate a presigned URL
+        elif isinstance(blob_service, S3BlobStorageService):
+            try:
+                signed_url = await blob_service.generate_presigned_url(path)
+                resolved.append(signed_url)
+            except Exception:
+                resolved.append(path)  # fall back to raw key on error
+        else:
+            resolved.append(path)
+    
+    return resolved
 
 # ---------------------------------------------------------------------------
 # AI Suggestions (Static Paths First)
@@ -163,7 +203,14 @@ async def get_blogs(
         query = query.where(Blog.status == status)
         
     result = await db.execute(query)
-    return list(result.scalars().all())
+    blogs = list(result.scalars().all())
+    
+    # Hydrate image_urls with fresh presigned URLs so the browser can render them
+    for blog in blogs:
+        if blog.image_urls:
+            blog.image_urls = await _resolve_image_urls(blog.image_urls)
+    
+    return blogs
 
 
 @router.post("", response_model=BlogResponse, status_code=status.HTTP_201_CREATED)
@@ -245,8 +292,8 @@ async def update_blog(
 
     await db.commit()
     await db.refresh(blog)
+    
     return blog
-
 
 @router.post("/{blog_id}/publish")
 async def publish_blog(
@@ -276,11 +323,91 @@ async def publish_blog(
         "drupal_node_id": None,
     }
 
-@router.post("/{blog_id}/images")
-async def upload_blog_image(blog_id: int) -> dict[str, str]:
-    """[STUB] Upload an image."""
+@router.delete("/{blog_id}")
+async def delete_blog(
+    blog_id: int,
+    db: DbSession,
+    doctor_id_str: str = Depends(require_authentication),
+) -> dict[str, Any]:
+    """Delete a blog (draft or published)."""
+    doctor_id = int(doctor_id_str)
+
+    result = await db.execute(
+        select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
+    )
+    blog = result.scalar_one_or_none()
+    
+    if blog is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
+
+    # Delete keywords first due to foreign key constraints if not handled by cascade
+    await db.execute(delete(BlogKeyword).where(BlogKeyword.blog_id == blog_id))
+    
+    # Delete the blog
+    await db.delete(blog)
+    await db.commit()
+
     return {
-        "url": "https://dummyimage.com/600x400/000/fff",
+        "status": "success",
+        "message": "Blog deleted successfully",
+        "blog_id": blog_id
+    }
+
+@router.post("/{blog_id}/images")
+async def upload_blog_image(
+    blog_id: int,
+    db: DbSession,
+    file: UploadFile = File(...),
+    doctor_id_str: str = Depends(require_authentication),
+) -> dict[str, str]:
+    """Upload an image for a blog post and store it in blob storage."""
+    from fastapi import HTTPException
+    import os
+    import uuid
+    import mimetypes
+    from ....services.blob_storage_service import get_blob_storage_service
+
+    doctor_id = int(doctor_id_str)
+    
+    # Verify ownership
+    result = await db.execute(
+        select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
+    )
+    blog = result.scalar_one_or_none()
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+
+    blob_service = get_blob_storage_service()
+    
+    file_bytes = await file.read()
+    original_filename = file.filename or "image.jpg"
+    
+    # The BlobStorageService automatically detects extension and mime_type from filename,
+    # generates a safe UUID for the blob_id, and builds the path using doctor_id and category.
+    upload_result = await blob_service.upload_from_bytes(
+        content=file_bytes,
+        file_name=original_filename,
+        doctor_id=doctor_id,
+        media_category="blogs"
+    )
+    
+    if not upload_result.success:
+        raise HTTPException(status_code=500, detail=f"Image upload failed: {upload_result.error_message}")
+        
+    s3_key = upload_result.file_uri  # This is the raw S3 key (not a URL)
+    
+    # Store the permanent S3 key in the blog table (NOT a signed URL which would expire)
+    current_images = list(blog.image_urls) if blog.image_urls else []
+    current_images.append(s3_key)
+    blog.image_urls = current_images
+    
+    await db.commit()
+
+    # Generate a fresh signed URL for the immediate frontend response
+    viewable_url = (await _resolve_image_urls([s3_key]))[0]
+
+    return {
+        "url": viewable_url,
         "message": "Image uploaded successfully"
     }
 

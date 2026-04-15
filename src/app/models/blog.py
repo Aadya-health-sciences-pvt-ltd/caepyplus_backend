@@ -58,6 +58,7 @@ class Blog(Base):
     estimated_read_time: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="In minutes")
     drupal_node_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     seo_schema_markup: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    image_urls: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
