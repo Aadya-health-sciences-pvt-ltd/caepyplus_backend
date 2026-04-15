@@ -72,19 +72,29 @@ async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorRespo
         return response
 
     async def _sign(uri: str | None) -> str | None:
-        if not uri or "s3" not in uri.lower():
+        """Sign a URI that is either:
+          - a full S3 HTTPS URL: https://{bucket}.s3.{region}.amazonaws.com/{key}
+          - a bare S3 key as stored by upload_from_bytes: {prefix}/{doctor_id}/{category}/{blob_id}{ext}
+        """
+        if not uri:
             return uri
         try:
-            # Extract bucket and key from "https://{bucket}.s3.{region}.amazonaws.com/{key}"
-            # This simplistic split assumes standard AWS S3 Virtual Hosted-Style URLs
-            parts = uri.split(".amazonaws.com/")
-            if len(parts) == 2:
-                key = parts[1]
-                # Re-sign the raw key (bypass full parse; inject into boto3)
+            # Case 1: full virtual-hosted-style S3 URL
+            if ".amazonaws.com/" in uri:
+                key = uri.split(".amazonaws.com/", 1)[1]
                 async with blob_service.session.client("s3") as s3_client:
                     return str(await s3_client.generate_presigned_url(
                         "get_object",
                         Params={"Bucket": blob_service.bucket_name, "Key": key},
+                        ExpiresIn=blob_service.signed_url_expiry,
+                    ))
+            # Case 2: bare S3 key (no scheme, no hostname) stored by upload_from_bytes
+            # Heuristic: does NOT start with http and contains at least one slash.
+            if not uri.startswith("http") and "/" in uri:
+                async with blob_service.session.client("s3") as s3_client:
+                    return str(await s3_client.generate_presigned_url(
+                        "get_object",
+                        Params={"Bucket": blob_service.bucket_name, "Key": uri},
                         ExpiresIn=blob_service.signed_url_expiry,
                     ))
         except Exception as e:
@@ -409,8 +419,95 @@ async def update_doctor(
 
 
 # ---------------------------------------------------------------------------
+# GET /doctors/{doctor_id}/profile-photo/signed-url
+# ---------------------------------------------------------------------------
+
+class ProfilePhotoSignedUrlResponse(BaseModel):
+    """Response containing a fresh presigned S3 URL for the doctor's profile photo."""
+    signed_url: str
+    expires_in: int
+
+
+@router.get(
+    "/{doctor_id}/profile-photo/signed-url",
+    response_model=GenericResponse[ProfilePhotoSignedUrlResponse],
+    summary="Get signed URL for profile photo",
+    description=(
+        "Generate and return a fresh presigned S3 URL for the doctor's profile photo. "
+        "Use this endpoint to render the profile photo in the UI instead of storing "
+        "the raw S3 key. The URL is valid for the configured signed URL expiry window "
+        "(default: 1 hour)."
+    ),
+    responses={
+        200: {"description": "Signed URL generated successfully"},
+        404: {"description": "Doctor not found or no profile photo uploaded"},
+        400: {"description": "Storage backend does not support signed URLs"},
+    },
+)
+async def get_profile_photo_signed_url(
+    doctor_id: int,
+    repo: DoctorRepoDep,
+    current_user: CurrentUser,
+) -> GenericResponse[ProfilePhotoSignedUrlResponse]:
+    """Return a fresh presigned S3 URL for the doctor's profile photo.
+
+    Works with both storage backends:
+    - S3: generates a presigned URL from the stored S3 key.
+    - Local: returns the stored file URI directly (no signing needed).
+    """
+    if not current_user.can_access_admin and current_user.doctor_id != doctor_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this doctor's profile photo.",
+        )
+
+    doctor = await repo.get_by_id_or_raise(doctor_id)
+
+    if not doctor.profile_photo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No profile photo has been uploaded for this doctor.",
+        )
+
+    blob_service = get_blob_storage_service()
+
+    if isinstance(blob_service, S3BlobStorageService) and blob_service.use_signed_urls:
+        # Generate a fresh presigned URL from whatever is stored in the DB:
+        # could be a full S3 URL or a bare S3 key.
+        stored_uri = doctor.profile_photo
+        if ".amazonaws.com/" in stored_uri:
+            # Full URL — extract the key
+            s3_key = stored_uri.split(".amazonaws.com/", 1)[1]
+        else:
+            # Bare key as stored by upload_from_bytes
+            s3_key = stored_uri
+
+        signed_url = await blob_service.generate_presigned_url(
+            s3_key=s3_key,
+            expiry=blob_service.signed_url_expiry,
+        )
+        return GenericResponse(
+            message="Signed URL generated successfully",
+            data=ProfilePhotoSignedUrlResponse(
+                signed_url=signed_url,
+                expires_in=blob_service.signed_url_expiry,
+            ),
+        )
+
+    # Local storage or S3 without signed URLs — return the URI as-is
+    return GenericResponse(
+        message="Photo URL retrieved",
+        data=ProfilePhotoSignedUrlResponse(
+            signed_url=doctor.profile_photo,
+            expires_in=0,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # POST /doctors/{doctor_id}/profile-photo
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/{doctor_id}/profile-photo",

@@ -219,8 +219,8 @@ class OTPService:
             return f"{mobile_number[:2]}****{mobile_number[-4:]}"
         return "****"
 
-    async def send_otp(self, mobile_number: str) -> tuple[bool, str]:
-        """Generate and send an OTP via SMS.
+    async def send_otp(self, mobile_number: str, delivery_method: str = "sms") -> tuple[bool, str]:
+        """Generate and send an OTP via SMS or WhatsApp.
 
         Returns:
             (True, success_message) on success, (False, error_message) on failure.
@@ -230,18 +230,83 @@ class OTPService:
         # ------------------------------------------------------------------
         if self.settings.SKIP_VERIFY:
             logger.warning(
-                "SKIP_VERIFY is enabled — SMS sending bypassed (dev/test mode only)",
+                "SKIP_VERIFY is enabled — OTP sending bypassed (dev/test mode only)",
                 mobile=self.mask_mobile(mobile_number),
+                delivery_method=delivery_method,
             )
             return True, "OTP bypassed (SKIP_VERIFY mode). Use any OTP to verify."
 
         try:
+            store = await self._get_store()
+            otp = self.generate_otp(length=self.settings.OTP_LENGTH)
+            
+            if delivery_method.lower() == "whatsapp":
+                logger.info(
+                    "Sending OTP via WhatsApp",
+                    mobile=self.mask_mobile(mobile_number),
+                    storage_type="redis" if isinstance(store, RedisOTPStore) else "memory",
+                )
+                
+                payload = {
+                    "communication_type": "whatsapp",
+                    "message_type": "template",
+                    "to": mobile_number,
+                    "template_name": "otp_linqmd",
+                    "template_params": {
+                        "components": [
+                            {
+                                "type": "body",
+                                "parameters": [
+                                    {
+                                        "type": "text",
+                                        "text": otp
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "button",
+                                "sub_type": "url",
+                                "index": "0",
+                                "parameters": [
+                                    {
+                                        "type": "payload",
+                                        "payload": otp
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+                
+                response = await self.http_client.post(
+                    self.settings.LINQMD_COMMUNICATION_SERVICE_URL,
+                    json=payload
+                )
+                
+                # Log the raw response from communication service
+                logger.info("WhatsApp API response", status_code=response.status_code, body=response.text[:200])
+                
+                response_data = response.json()
+                
+                if response.status_code != 201 or response_data.get("status_code") != 201:
+                    logger.error("WhatsApp API error", status_code=response.status_code, response=response_data)
+                    return False, "Failed to send OTP via WhatsApp. Please try again."
+                
+                # Parse the success response format
+                response_message = response_data.get("message", "OTP sent successfully via WhatsApp")
+                message_id = response_data.get("data", {}).get("message_id")
+                
+                await store.store_otp(mobile_number, otp)
+                
+                logger.info("OTP sent successfully via WhatsApp", 
+                            mobile=self.mask_mobile(mobile_number),
+                            message_id=message_id)
+                return True, response_message
+
+            # SMS delivery flow
             if not self.settings.SMS_USER_ID or not self.settings.SMS_USER_PASS:
                 logger.error("SMS credentials missing")
                 return False, "SMS service configuration error. Please check environment variables."
-
-            store = await self._get_store()
-            otp = self.generate_otp(length=self.settings.OTP_LENGTH)
 
             try:
                 sms_message = self.settings.SMS_OTP_MESSAGE_TEMPLATE.format(otp=otp)
@@ -262,7 +327,7 @@ class OTPService:
             )
 
             logger.info(
-                "Sending OTP",
+                "Sending OTP via SMS",
                 mobile=self.mask_mobile(mobile_number),
                 storage_type="redis" if isinstance(store, RedisOTPStore) else "memory",
             )
@@ -281,7 +346,7 @@ class OTPService:
                 return False, f"SMS API error: {response_text[:100]}"
 
             await store.store_otp(mobile_number, otp)
-            logger.info("OTP sent successfully", mobile=self.mask_mobile(mobile_number))
+            logger.info("OTP sent successfully via SMS", mobile=self.mask_mobile(mobile_number))
             return True, "OTP sent successfully"
 
         except httpx.TimeoutException:

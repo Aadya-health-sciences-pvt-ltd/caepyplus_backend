@@ -436,6 +436,11 @@ class Settings(BaseSettings):
         ),
     )
 
+    LINQMD_COMMUNICATION_SERVICE_URL: str = Field(
+        default="https://communication-service-61gl.onrender.com/communication",
+        description="URL for the external communication service for WhatsApp delivery"
+    )
+
     # OTP Settings
     OTP_LENGTH: int = Field(
         default=6,

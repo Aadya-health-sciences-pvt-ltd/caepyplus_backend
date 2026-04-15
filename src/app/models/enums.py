@@ -21,3 +21,26 @@ class UserRole(str, Enum):
     def default(cls) -> "UserRole":
         """Return the default role for new users."""
         return cls.USER
+
+
+class BlogStatus(str, Enum):
+    """Status of a blog post."""
+    DRAFT = "draft"
+    PENDING_REVIEW = "pending_review"
+    PUBLISHED = "published"
+    REJECTED = "rejected"
+
+
+class CommentStatus(str, Enum):
+    """Status of a blog comment."""
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    REPLIED = "replied"
+
+
+class CommentAuthorType(str, Enum):
+    """Type of author for a comment."""
+    PATIENT = "patient"
+    ANONYMOUS = "anonymous"
+    SUSPICIOUS = "suspicious"

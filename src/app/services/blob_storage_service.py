@@ -739,9 +739,6 @@ class S3BlobStorageService:
                     },
                 )
 
-            # Generate URL (force RAW URL for database storage)
-            file_uri = await self.get_blob_uri(blob_id, doctor_id, media_category, extension, sign=False)
-
             logger.info(
                 "Uploaded to S3: blob_id=%s, key=%s, size=%d",
                 blob_id,
@@ -749,10 +746,12 @@ class S3BlobStorageService:
                 file_size,
             )
 
+            # Store the S3 key as file_uri — not a URL — so it never expires in DB.
+            # Callers that need a viewable URL should call generate_presigned_url(s3_key).
             return UploadResult(
                 success=True,
                 blob_id=blob_id,
-                file_uri=file_uri,
+                file_uri=s3_key,   # persistent S3 key, not a signed URL
                 file_size=file_size,
                 mime_type=mime_type,
                 content_hash=content_hash,
@@ -851,6 +850,25 @@ class S3BlobStorageService:
         else:
             # Return public URL
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{s3_key}"
+
+    async def generate_presigned_url(self, s3_key: str, expiry: int | None = None) -> str:
+        """Generate a fresh presigned URL for any S3 key on-demand.
+        
+        Args:
+            s3_key: The raw S3 object key (as stored in the DB).
+            expiry: Override signed URL expiry in seconds, defaults to instance setting.
+        
+        Returns:
+            A temporary presigned HTTPS URL valid for `expiry` seconds.
+        """
+        expiry_seconds = expiry if expiry is not None else self.signed_url_expiry
+        async with self.session.client("s3") as s3_client:
+            url = await s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket_name, "Key": s3_key},
+                ExpiresIn=expiry_seconds,
+            )
+        return str(url)
 
     async def blob_exists(self, blob_id: str, doctor_id: int, media_category: str, extension: str) -> bool:
         """Check if blob exists in S3."""

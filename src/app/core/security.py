@@ -113,6 +113,12 @@ async def require_authentication(
 
     payload = _decode_jwt(token, settings=settings)
 
+    # Prefer internal doctor_id if present (as it is the DB primary key)
+    # Default to 'sub' for backward compatibility or other users
+    doc_id = payload.get("doctor_id")
+    if doc_id is not None:
+        return str(doc_id)
+
     subject = payload.get("sub")
     if not isinstance(subject, str) or not subject:
         raise UnauthorizedError(

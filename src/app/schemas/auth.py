@@ -45,12 +45,26 @@ class OTPRequestSchema(BaseModel):
         description="10-digit Indian mobile number",
         examples=["9876543210"],
     )
+    delivery_method: str = Field(
+        default="sms",
+        description="Method to deliver the OTP: 'sms' or 'whatsapp'",
+        examples=["sms", "whatsapp"],
+    )
 
     @field_validator("mobile_number")
     @classmethod
     def validate_mobile_number(cls, v: str) -> str:
         """Validate Indian mobile number format."""
         return _normalise_indian_mobile(v)
+
+    @field_validator("delivery_method")
+    @classmethod
+    def validate_delivery_method(cls, v: str) -> str:
+        """Validate delivery method."""
+        v = v.lower()
+        if v not in ("sms", "whatsapp"):
+            raise ValueError("Delivery method must be 'sms' or 'whatsapp'")
+        return v
 
 class OTPRequestResponse(BaseModel):
     """Response schema after OTP is sent."""

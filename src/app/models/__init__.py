@@ -8,6 +8,7 @@ from .onboarding import (
     DropdownOption,
 )
 from .user import User
+from .blog import Blog, BlogKeyword, BlogComment
 
 __all__ = [
     "Doctor",
@@ -17,4 +18,7 @@ __all__ = [
     "DoctorMedia",
     "DoctorStatusHistory",
     "DropdownOption",
+    "Blog",
+    "BlogKeyword",
+    "BlogComment",
 ]
