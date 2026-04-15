@@ -129,7 +129,14 @@ class OTPVerifyResponse(BaseModel):
         default=True,
         description="Whether this is a new user (first time login)",
     )
-    mobile_number: str = Field(..., description="Verified mobile number")
+    mobile_number: str = Field(
+        default="",
+        description="Verified mobile (phone login); empty string for email-first / Google until onboarding",
+    )
+    email: str | None = Field(
+        default=None,
+        description="Verified email when present (e.g. Google sign-in or doctor record email)",
+    )
     role: str | None = Field(
         default="user",
         description="User role: admin, operation, or user",
@@ -155,6 +162,7 @@ class OTPVerifyResponse(BaseModel):
             "doctor_id": 123,
             "is_new_user": False,
             "mobile_number": "9876543210",
+            "email": None,
             "role": "user",
             "access_token": "<jwt-token-with-claims>",
             "token_type": "bearer",

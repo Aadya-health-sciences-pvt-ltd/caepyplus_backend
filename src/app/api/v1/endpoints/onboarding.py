@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from ....core.config import Settings, get_settings
 from ....core.exceptions import FileValidationError
 from ....core.rbac import AdminOrOperationUser, CurrentUser
+from ....core.security import decode_bearer_jwt_from_request, subject_effective_doctor_id
 from ....core.responses import GenericResponse
 from ....db.session import DbSession
 from ....models.enums import UserRole
@@ -196,6 +197,7 @@ async def submit_profile(
     request: Request,
     db: DbSession,
     current_user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> GenericResponse[dict[str, Any]]:
     doctor_repo = DoctorRepository(db)
     repo = OnboardingRepository(db)
@@ -211,7 +213,9 @@ async def submit_profile(
     # Ownership guard: a regular user may only submit their own profile.
     # Admin and operation users may submit on behalf of any doctor.
     _elevated = current_user.role in (UserRole.ADMIN.value, UserRole.OPERATION.value)
-    if not _elevated and current_user.doctor_id != doctor_id:
+    token_payload = decode_bearer_jwt_from_request(request, settings=settings)
+    effective_id = subject_effective_doctor_id(current_user.doctor_id, token_payload)
+    if not _elevated and effective_id != doctor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You may only submit your own profile.",

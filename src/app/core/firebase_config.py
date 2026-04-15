@@ -12,6 +12,9 @@ Required environment variables:
 import asyncio
 import functools
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from typing import Any
 

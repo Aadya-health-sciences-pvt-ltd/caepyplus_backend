@@ -23,12 +23,14 @@ from pathlib import Path
 from typing import Annotated, Any, Union
 
 import structlog
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from ....core.config import Settings, get_settings
 from ....core.doctor_utils import synthesise_identity as _synthesise_identity
 from ....core.rbac import AdminOrOperationUser, CurrentUser
+from ....core.security import decode_bearer_jwt_from_request, subject_effective_doctor_id
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
 from ....db.session import DbSession
 from ....models.doctor import Doctor as DoctorModel
@@ -402,10 +404,14 @@ async def update_doctor(
     doctor_id: int,
     data: DoctorUpdate,
     repo: DoctorRepoDep,
+    request: Request,
     current_user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> GenericResponse[DoctorResponse]:
     """Update a doctor's profile by ID. Requires admin/operation role OR self-update."""
-    if not current_user.can_access_admin and current_user.doctor_id != doctor_id:
+    token_payload = decode_bearer_jwt_from_request(request, settings=settings)
+    effective_id = subject_effective_doctor_id(current_user.doctor_id, token_payload)
+    if not current_user.can_access_admin and effective_id != doctor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to update this doctor profile.",
@@ -447,7 +453,9 @@ class ProfilePhotoSignedUrlResponse(BaseModel):
 async def get_profile_photo_signed_url(
     doctor_id: int,
     repo: DoctorRepoDep,
+    request: Request,
     current_user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> GenericResponse[ProfilePhotoSignedUrlResponse]:
     """Return a fresh presigned S3 URL for the doctor's profile photo.
 
@@ -455,7 +463,9 @@ async def get_profile_photo_signed_url(
     - S3: generates a presigned URL from the stored S3 key.
     - Local: returns the stored file URI directly (no signing needed).
     """
-    if not current_user.can_access_admin and current_user.doctor_id != doctor_id:
+    token_payload = decode_bearer_jwt_from_request(request, settings=settings)
+    effective_id = subject_effective_doctor_id(current_user.doctor_id, token_payload)
+    if not current_user.can_access_admin and effective_id != doctor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to access this doctor's profile photo.",
@@ -519,11 +529,15 @@ async def upload_profile_photo(
     doctor_id: int,
     repo: DoctorRepoDep,
     db: DbSession,
+    request: Request,
     current_user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
     file: UploadFile = File(...),
 ) -> GenericResponse[DoctorResponse]:
     """Upload and set the doctor's profile photo."""
-    if not current_user.can_access_admin and current_user.doctor_id != doctor_id:
+    token_payload = decode_bearer_jwt_from_request(request, settings=settings)
+    effective_id = subject_effective_doctor_id(current_user.doctor_id, token_payload)
+    if not current_user.can_access_admin and effective_id != doctor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to upload a photo for this doctor profile.",

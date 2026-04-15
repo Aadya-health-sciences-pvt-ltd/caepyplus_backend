@@ -127,3 +127,44 @@ async def require_authentication(
         )
 
     return subject
+
+
+def decode_bearer_jwt_from_request(request: Request, *, settings: Settings) -> dict[str, Any]:
+    """Decode and validate the Bearer JWT from ``request`` (same rules as RBAC)."""
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        raise UnauthorizedError(
+            message="Missing or invalid Authorization header",
+            error_code="UNAUTHORIZED",
+        )
+
+    token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        raise UnauthorizedError(message="Missing access token", error_code="UNAUTHORIZED")
+
+    return _decode_jwt(token, settings=settings)
+
+
+def subject_effective_doctor_id(
+    user_doctor_id: int | None,
+    token_payload: dict[str, Any],
+) -> int | None:
+    """Doctor id for self-service ownership checks.
+
+    Prefer ``users.doctor_id``; if unset (legacy / partial rows), use the signed
+    ``doctor_id`` claim from the JWT (Google / email-first login).
+    """
+
+    if user_doctor_id is not None:
+        return user_doctor_id
+
+    raw = token_payload.get("doctor_id")
+    if isinstance(raw, int) and raw > 0:
+        return raw
+    if isinstance(raw, str):
+        s = raw.strip()
+        if s.isdigit():
+            n = int(s)
+            return n if n > 0 else None
+    return None
