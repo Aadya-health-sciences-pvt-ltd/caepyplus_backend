@@ -140,7 +140,10 @@ async def request_otp(
     """
     logger.info("OTP request received", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    success, message = await otp_service.send_otp(request.mobile_number)
+    success, message = await otp_service.send_otp(
+        request.mobile_number,
+        delivery_method=request.delivery_method
+    )
 
     if not success:
         logger.warning("OTP send failed", mobile=otp_service.mask_mobile(request.mobile_number))
@@ -154,7 +157,7 @@ async def request_otp(
         )
 
     return GenericResponse(
-        message="OTP sent successfully",
+        message=message,
         data=OTPRequestResponse(
             success=True,
             message=message,
@@ -312,7 +315,10 @@ async def resend_otp(
     """Resend (regenerate) OTP to the same mobile number."""
     logger.info("OTP resend request", mobile=otp_service.mask_mobile(request.mobile_number))
 
-    success, message = await otp_service.send_otp(request.mobile_number)
+    success, message = await otp_service.send_otp(
+        request.mobile_number,
+        delivery_method=request.delivery_method
+    )
 
     if not success:
         raise HTTPException(
@@ -321,10 +327,10 @@ async def resend_otp(
         )
 
     return GenericResponse(
-        message="OTP resent successfully",
+        message=message,
         data=OTPRequestResponse(
             success=True,
-            message="OTP resent successfully",
+            message=message,
             mobile_number=otp_service.mask_mobile(request.mobile_number),
             expires_in_seconds=otp_service.settings.OTP_EXPIRY_SECONDS,
         ),

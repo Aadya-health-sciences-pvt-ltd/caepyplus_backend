@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .user import User
+    from .blog import Blog
 
 # Use JSON type - SQLAlchemy handles dialect differences automatically
 # PostgreSQL: Uses JSONB, SQLite: Uses JSON
@@ -319,6 +320,14 @@ class Doctor(Base):
         back_populates="doctor",
         uselist=False,
         lazy="selectin",
+    )
+
+    # One-to-many with Blog
+    blogs: Mapped[list[Blog]] = relationship(
+        "Blog",
+        back_populates="doctor",
+        lazy="selectin",
+        cascade="all, delete-orphan",
     )
 
     # ==========================================================================
