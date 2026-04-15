@@ -44,6 +44,17 @@ class UserRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_by_doctor_id(self, doctor_id: int) -> User | None:
+        """Resolve the app user linked to a doctor (Google / phone flows set ``doctor_id``)."""
+        query = (
+            select(User)
+            .where(User.doctor_id == doctor_id)
+            .order_by(User.id.asc())
+            .limit(1)
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_active_by_phone(self, phone: str) -> User | None:
         """Get active user by phone number."""
         normalized = self._normalize_phone(phone)
@@ -296,6 +307,43 @@ class UserRepository:
 
         log.info("user_doctor_linked", user_id=user_id, doctor_id=doctor_id)
         return user
+
+    async def sync_phone_for_doctor(
+        self,
+        doctor_id: int,
+        doctor_email: str | None,
+        phone_raw: str | None,
+    ) -> None:
+        """Set RBAC ``users.phone`` when the doctor's contact phone is updated.
+
+        Called inside the same SQLAlchemy transaction as ``Doctor`` updates
+        (e.g. onboarding after Google sign-in). Uses ``flush`` only — caller commits.
+
+        Skips when ``phone_raw`` is empty or no matching user row exists.
+        """
+        if phone_raw is None:
+            return
+        stripped = str(phone_raw).strip()
+        if not stripped:
+            return
+        normalized = self._normalize_phone(stripped)
+        if not normalized:
+            return
+
+        user = await self.get_by_doctor_id(doctor_id)
+        if user is None and doctor_email:
+            user = await self.get_by_email(doctor_email.strip().lower())
+        if user is None:
+            log.debug("sync_phone_skipped_no_user", doctor_id=doctor_id)
+            return
+
+        if user.phone == normalized:
+            return
+
+        user.phone = normalized
+        user.updated_at = datetime.now(UTC)
+        await self.session.flush()
+        log.info("user_phone_synced_from_doctor", user_id=user.id, doctor_id=doctor_id)
 
     # =========================================================================
     # DELETE OPERATIONS

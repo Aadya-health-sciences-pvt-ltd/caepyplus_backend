@@ -246,6 +246,15 @@ class DoctorRepository:
             if hasattr(doctor, model_field):
                 setattr(doctor, model_field, value)
 
+        if "phone_number" in update_data and doctor.phone:
+            from .user_repository import UserRepository
+
+            await UserRepository(self.session).sync_phone_for_doctor(
+                doctor_id=doctor.id,
+                doctor_email=doctor.email,
+                phone_raw=doctor.phone,
+            )
+
         await self.session.commit()
         await self.session.refresh(doctor)
 

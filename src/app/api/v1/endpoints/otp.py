@@ -86,9 +86,14 @@ def _create_access_token(
     settings: Settings,
     doctor_id: int | None = None,
     email: str | None = None,
+    phone: str | None = None,
     role: str = "user",
 ) -> TokenResponse:
-    """Create a signed JWT access token with user claims."""
+    """Create a signed JWT access token with user claims.
+
+    ``subject`` is the login identifier (E.164 / 10-digit phone for OTP, or email for Google).
+    ``phone`` is the doctor's phone when known (may be empty for email-first / Google users).
+    """
     now = datetime.now(UTC)
     expire_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     expire = now + expire_delta
@@ -98,8 +103,8 @@ def _create_access_token(
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
         "doctor_id": doctor_id,
-        "phone": subject,
-        "email": email,
+        "phone": phone or "",
+        "email": email or "",
         "role": role,
     }
 
@@ -260,12 +265,13 @@ async def verify_otp(
             # Tolerate race-condition duplicates; role is already "user"
             logger.warning("User record creation skipped (may already exist)", error=str(exc))
 
-    # 4. Issue JWT
+    # 4. Issue JWT (subject stays the verified phone key used at login)
     token = _create_access_token(
         subject=request.mobile_number,
         settings=settings,
         doctor_id=doctor_id,
         email=doctor_email,
+        phone=doctor.phone,
         role=user_role,
     )
 
@@ -285,6 +291,7 @@ async def verify_otp(
             doctor_id=doctor_id,
             is_new_user=is_new_user,
             mobile_number=request.mobile_number,
+            email=doctor_email,
             role=user_role,
             access_token=token.access_token,
             token_type=token.token_type,
@@ -436,11 +443,13 @@ async def verify_admin_otp(
         )
 
     # 5. Issue JWT
+    admin_subject = user.phone or user.email or ""
     token = _create_access_token(
-        subject=user.phone,
+        subject=admin_subject,
         settings=settings,
         doctor_id=user.doctor_id,
         email=user.email,
+        phone=user.phone or "",
         role=user.role,
     )
 
@@ -453,7 +462,8 @@ async def verify_admin_otp(
             message="Admin verified successfully",
             doctor_id=user.doctor_id,
             is_new_user=False,
-            mobile_number=user.phone,
+            mobile_number=user.phone or "",
+            email=user.email,
             role=user.role,
             access_token=token.access_token,
             token_type=token.token_type,
@@ -514,10 +524,10 @@ async def google_verify(
         )
 
     # 2. Extract claims
-    google_email: str | None = decoded_token.get("email")
+    google_email_raw: str | None = decoded_token.get("email")
     google_name: str = decoded_token.get("name", "")
 
-    if not google_email:
+    if not google_email_raw:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -526,6 +536,8 @@ async def google_verify(
                 "error_code": "NO_EMAIL",
             },
         )
+
+    google_email = google_email_raw.strip().lower()
 
     logger.info("Google Sign-In: token decoded", email=google_email, name=google_name)
 
@@ -559,7 +571,7 @@ async def google_verify(
         try:
             await user_repo.create(
                 phone=doctor_phone,
-                email=google_email,
+                email=google_email.lower(),
                 role=user_role,
                 is_active=True,
                 doctor_id=doctor_id,
@@ -567,13 +579,20 @@ async def google_verify(
         except Exception as exc:
             # Tolerate duplicate-key races; role resolved above remains "user"
             logger.warning("User record creation skipped (may already exist)", error=str(exc))
+            await db.rollback()
 
-    # 5. Issue JWT — use email as subject for Google users
+    # 4b. Prefer role from persisted user (covers create races / email vs row drift)
+    persisted_user = await user_repo.get_by_email(google_email) or await user_repo.get_by_doctor_id(doctor_id)
+    if persisted_user is not None:
+        user_role = persisted_user.role or "user"
+
+    # 5. Issue JWT — email is ``sub`` so RBAC can resolve the user before phone is collected in onboarding
     token = _create_access_token(
         subject=google_email,
         settings=settings,
         doctor_id=doctor_id,
         email=google_email,
+        phone=doctor_phone or "",
         role=user_role,
     )
 
@@ -592,6 +611,7 @@ async def google_verify(
             doctor_id=doctor_id,
             is_new_user=is_new_user,
             mobile_number=doctor_phone or "",
+            email=google_email,
             role=user_role,
             access_token=token.access_token,
             token_type=token.token_type,
