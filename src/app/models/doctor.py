@@ -135,7 +135,7 @@ class Doctor(Base):
 
     # Block 3: Clinical Focus & Expertise
     areas_of_clinical_interest: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
-    practice_segments: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    practice_segments: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     conditions_commonly_treated: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     conditions_known_for: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     conditions_want_to_treat_more: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)

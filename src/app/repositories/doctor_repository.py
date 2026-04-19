@@ -68,7 +68,7 @@ class DoctorRepository:
             awards_academic_honours=data.awards_academic_honours or [],
             # Block 3
             areas_of_clinical_interest=data.areas_of_clinical_interest or [],
-            practice_segments=data.practice_segments,
+            practice_segments=data.practice_segments or [],
             conditions_commonly_treated=data.conditions_commonly_treated or [],
             conditions_known_for=data.conditions_known_for or [],
             conditions_want_to_treat_more=data.conditions_want_to_treat_more or [],

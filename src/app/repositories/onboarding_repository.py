@@ -140,7 +140,7 @@ class OnboardingRepository:
         awards_academic_honours: list[str] | None = None,
         # Block 3
         areas_of_clinical_interest: list[str] | None = None,
-        practice_segments: str | None = None,
+        practice_segments: list[str] | None = None,
         conditions_commonly_treated: list[str] | None = None,
         conditions_known_for: list[str] | None = None,
         conditions_want_to_treat_more: list[str] | None = None,

@@ -83,7 +83,7 @@ class DoctorBase(BaseModel):
 
     # Block 3: Clinical Focus & Expertise
     areas_of_clinical_interest: list[str] | None = None
-    practice_segments: str | None = None
+    practice_segments: list[str] | None = None
     conditions_commonly_treated: list[str] | None = None
     conditions_known_for: list[str] | None = None
     conditions_want_to_treat_more: list[str] | None = None
@@ -210,7 +210,7 @@ class DoctorUpdate(BaseModel):
 
     # Block 3: Clinical Focus & Expertise
     areas_of_clinical_interest: list[str] | None = None
-    practice_segments: str | None = None
+    practice_segments: list[str] | None = None
     conditions_commonly_treated: list[str] | None = None
     conditions_known_for: list[str] | None = None
     conditions_want_to_treat_more: list[str] | None = None
@@ -317,7 +317,7 @@ class DoctorResponse(BaseModel):
 
     # Block 3: Clinical Focus & Expertise
     areas_of_clinical_interest: list[str] = Field(default_factory=list)
-    practice_segments: str | None = None
+    practice_segments: list[str] = Field(default_factory=list)
     conditions_commonly_treated: list[str] = Field(default_factory=list)
     conditions_known_for: list[str] = Field(default_factory=list)
     conditions_want_to_treat_more: list[str] = Field(default_factory=list)
