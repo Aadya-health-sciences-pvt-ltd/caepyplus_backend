@@ -29,6 +29,25 @@ from .security import _decode_jwt
 logger = structlog.get_logger(__name__)
 
 
+def _parse_jwt_doctor_id(raw: object) -> int | None:
+    """Normalise ``doctor_id`` from JWT JSON (int, numeric str, or legacy float)."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int) and raw > 0:
+        return raw
+    if isinstance(raw, str):
+        s = raw.strip()
+        if s.isdigit():
+            n = int(s)
+            return n if n > 0 else None
+    if isinstance(raw, float) and not isinstance(raw, bool):
+        if raw > 0 and raw == int(raw):
+            return int(raw)
+    return None
+
+
 async def get_current_user(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -68,19 +87,24 @@ async def get_current_user(
     # Google sign-in (and some migrations): JWT may carry email in ``sub`` while the ``users``
     # row is still keyed by ``doctor_id`` only, or email casing drifted. ``doctor_id`` is always set.
     if user is None:
-        raw_did = payload.get("doctor_id")
-        if isinstance(raw_did, int) and raw_did > 0:
-            user = await user_repo.get_by_doctor_id(raw_did)
+        parsed_did = _parse_jwt_doctor_id(payload.get("doctor_id"))
+        if parsed_did is not None:
+            user = await user_repo.get_by_doctor_id(parsed_did)
             if user is not None:
                 logger.debug(
                     "user_resolved_via_doctor_id",
                     user_id=user.id,
-                    doctor_id=raw_did,
+                    doctor_id=parsed_did,
                 )
 
     if not user:
         _sub_hash = hashlib.sha256(subject.encode()).hexdigest()[:12]
-        logger.warning("User not found in users table", subject_hash=_sub_hash)
+        logger.warning(
+            "user_not_found_for_jwt",
+            subject_hash=_sub_hash,
+            path=str(request.url.path),
+            has_doctor_id_claim=payload.get("doctor_id") is not None,
+        )
         raise UnauthorizedError(
             message="User not found. Please contact administrator.",
             error_code="USER_NOT_FOUND",
