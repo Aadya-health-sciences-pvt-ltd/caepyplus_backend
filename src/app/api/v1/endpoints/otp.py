@@ -14,17 +14,16 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
-from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
-
-from ....core.responses import GenericResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ....core.config import Settings, get_settings
+from ....core.responses import GenericResponse
 from ....db.session import get_db
 from ....models.enums import UserRole
 from ....models.user import User
@@ -38,7 +37,7 @@ from ....schemas.auth import (
     OTPVerifyResponse,
     OTPVerifySchema,
 )
-from ....services.otp_service import OTPService, get_otp_service
+from ....services.otp_service import OTPService, get_otp_service, otp_verbose_diagnostics_enabled
 
 logger = structlog.get_logger(__name__)
 
@@ -199,13 +198,26 @@ async def verify_otp(
     settings: Settings = Depends(get_settings),
 ) -> GenericResponse[OTPVerifyResponse]:
     """Verify OTP and return a JWT for the doctor."""
-    logger.info("OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
+    ve = otp_verbose_diagnostics_enabled()
+    logger.info(
+        "otp_verify_endpoint_start",
+        skip_verify=settings.SKIP_VERIFY,
+        app_env=settings.APP_ENV,
+        debug=settings.DEBUG,
+        mobile_masked=otp_service.mask_mobile(request.mobile_number),
+        mobile_repr=repr(request.mobile_number) if ve else None,
+        mobile_number=request.mobile_number if ve else None,
+        otp_len=len(request.otp or ""),
+        otp=request.otp if ve else None,
+    )
 
     # 1. Verify OTP (skipped when SKIP_VERIFY is enabled)
     if settings.SKIP_VERIFY:
         logger.warning(
             "SKIP_VERIFY is enabled — OTP check bypassed (dev/test mode only)",
             mobile=otp_service.mask_mobile(request.mobile_number),
+            mobile_repr=repr(request.mobile_number) if ve else None,
+            otp_len=len(request.otp or ""),
         )
     else:
         is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
@@ -222,6 +234,9 @@ async def verify_otp(
             logger.warning(
                 "OTP verification failed",
                 mobile=otp_service.mask_mobile(request.mobile_number),
+                mobile_repr=repr(request.mobile_number) if ve else None,
+                otp_len=len(request.otp or ""),
+                error_code=error_code,
                 reason=message,
             )
             raise HTTPException(
@@ -234,6 +249,13 @@ async def verify_otp(
     user_repo = UserRepository(db)
     doctor = await doctor_repo.get_by_phone_number(request.mobile_number)
     is_new_user = doctor is None
+
+    logger.info(
+        "otp_verify_doctor_lookup",
+        found_existing=doctor is not None,
+        doctor_id=doctor.id if doctor else None,
+        mobile_masked=otp_service.mask_mobile(request.mobile_number),
+    )
 
     if doctor is None:
         doctor = await doctor_repo.create_from_phone(
@@ -267,13 +289,32 @@ async def verify_otp(
             app_user = await user_repo.get_by_doctor_id(doctor_id)
     except Exception as exc:
         await db.rollback()
-        logger.warning("user_get_or_create_failed", error=str(exc))
+        logger.warning(
+            "user_get_or_create_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            exc_info=ve,
+            doctor_id=doctor_id,
+            mobile_masked=otp_service.mask_mobile(request.mobile_number),
+        )
         app_user = await user_repo.get_by_phone(request.mobile_number)
         if app_user is None:
             app_user = await user_repo.get_by_doctor_id(doctor_id)
 
     if app_user is None:
-        logger.error("user_missing_after_otp_verify", doctor_id=doctor_id)
+        logger.error(
+            "user_missing_after_otp_verify",
+            doctor_id=doctor_id,
+            is_new_user=is_new_user,
+            mobile_masked=otp_service.mask_mobile(request.mobile_number),
+            mobile_repr=repr(request.mobile_number) if ve else None,
+            user_by_phone_after_retry=(
+                (await user_repo.get_by_phone(request.mobile_number)) is not None
+            ),
+            user_by_doctor_after_retry=(
+                (await user_repo.get_by_doctor_id(doctor_id)) is not None
+            ),
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -300,6 +341,7 @@ async def verify_otp(
         mobile=otp_service.mask_mobile(request.mobile_number),
         is_new_user=is_new_user,
         doctor_id=doctor_id,
+        user_id=app_user.id,
         role=user_role,
     )
 
