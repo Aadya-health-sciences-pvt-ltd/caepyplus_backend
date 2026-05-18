@@ -1,0 +1,29 @@
+Traceback (most recent call last):
+  File "C:\Users\Pranay\AppData\Local\Programs\Python\Python313\Lib\site-packages\google\genai\live.py", line 1105, in connect
+    raw_response = await ws.recv(decode=False)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pranay\AppData\Local\Programs\Python\Python313\Lib\site-packages\websockets\asyncio\connection.py", line 324, in recv
+    raise self.protocol.close_exc from self.recv_exc
+websockets.exceptions.ConnectionClosedError: received 1008 (policy violation) Publisher Model `projects/linqmd-470410/locations/us-central1/publishers/google/models/gemini-2.5-flash-preview` was not fo; then sent 1008 (policy violation) Publisher Model `projects/linqmd-470410/locations/us-central1/publishers/google/models/gemini-2.5-flash-preview` was not fo
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Caepy_AI\backend\src\app\services\gemini_live_service.py", line 95, in run
+    async with self.client.aio.live.connect(
+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model=self.model_id,
+        ^^^^^^^^^^^^^^^^^^^^
+        config=config
+        ^^^^^^^^^^^^^
+    ) as session:
+    ^
+  File "C:\Users\Pranay\AppData\Local\Programs\Python\Python313\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pranay\AppData\Local\Programs\Python\Python313\Lib\site-packages\google\genai\live.py", line 1115, in connect
+    errors.APIError.raise_error(code, reason, None)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Pranay\AppData\Local\Programs\Python\Python313\Lib\site-packages\google\genai\errors.py", line 163, in raise_error
+    raise cls(status_code, response_json, response)
+google.genai.errors.APIError: 1008 None. Publisher Model `projects/linqmd-470410/locations/us-central1/publishers/google/models/gemini-2.5-flash-preview` was not fo
