@@ -6,6 +6,7 @@ RESTful API for doctor resource management.
 Exposed routes (all under /api/v1/doctors):
   GET    /                         - Paginated doctor list; ?status= filter returns full onboarding info
   GET    /lookup                   - Full admin view by id / email / phone
+  GET    /phone-availability       - Authenticated: can current doctor use this mobile?
   GET    /{doctor_id}              - Fetch single doctor profile
   PUT    /{doctor_id}              - Update doctor profile (admin/operation only)
   GET    /bulk-upload/csv/template  - Download the official CSV template with sample rows
@@ -364,6 +365,66 @@ async def lookup_doctor(
         doctor=doctor_resp,
         media=[DoctorMediaResponse.model_validate(m) for m in media],
         status_history=[DoctorStatusHistoryResponse.model_validate(h) for h in status_history],
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /doctors/phone-availability
+# ---------------------------------------------------------------------------
+
+class PhoneAvailabilityData(BaseModel):
+    """True when the phone is unused or already belongs to the authenticated doctor."""
+
+    available: bool
+
+
+_PHONE_TAKEN_MESSAGE = (
+    "Doctor already registered with this mobile number. Please enter a different number."
+)
+
+
+@router.get(
+    "/phone-availability",
+    response_model=GenericResponse[PhoneAvailabilityData],
+    summary="Check phone number availability for current doctor",
+    description=(
+        "Returns whether the given mobile can be saved on the authenticated doctor's profile. "
+        "If another doctor already uses this number, ``available`` is false. "
+        "Used when Google/email sign-in users add a phone during onboarding."
+    ),
+)
+async def check_phone_availability_for_current_doctor(
+    repo: DoctorRepoDep,
+    current_user: CurrentUser,
+    phone_number: str = Query(
+        ...,
+        min_length=3,
+        description="Mobile to check (+91… or 10 digits; normalized like other doctor APIs)",
+    ),
+) -> GenericResponse[PhoneAvailabilityData]:
+    if not current_user.doctor_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Doctor profile is not linked to this account.",
+        )
+
+    raw = phone_number.strip()
+    if not raw or raw == "+91":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid phone_number is required.",
+        )
+
+    existing = await repo.get_by_phone_number(raw)
+    if existing is None or existing.id == current_user.doctor_id:
+        return GenericResponse(
+            message="Phone number is available.",
+            data=PhoneAvailabilityData(available=True),
+        )
+
+    return GenericResponse(
+        message=_PHONE_TAKEN_MESSAGE,
+        data=PhoneAvailabilityData(available=False),
     )
 
 
