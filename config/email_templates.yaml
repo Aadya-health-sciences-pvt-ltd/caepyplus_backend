@@ -1,0 +1,272 @@
+# =============================================================================
+# LinQMD Platform — Email Notification Templates
+# =============================================================================
+# Templates are loaded at runtime on every request so changes here take effect
+# immediately without restarting the server.
+#
+# Supported placeholders (all optional — missing keys are left as-is):
+#   {doctor_name}                 Full name of the doctor (e.g. "Dr. Arjun Sharma")
+#   {first_name}                  Doctor's first name  (e.g. "Arjun")
+#   {medical_registration_number} MRN on file          (e.g. "MH-12345")
+#   {medical_council}             Issuing council      (e.g. "Maharashtra Medical Council")
+#   {specialization}              Primary specialisation
+#   {reason}                      Rejection reason (verified template: usually empty)
+#   {admin_notes}                 Free-form notes entered by admin
+#   {platform_name}               Populated from EMAIL_FROM_NAME setting
+#   {support_email}               Populated from EMAIL_FROM_ADDRESS setting
+# =============================================================================
+
+verified:
+  subject: "🎉 Congratulations! Your LinQMD Profile Has Been Verified"
+  body_html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Profile Verified</title>
+      <style>
+        body  { margin:0; padding:0; background:#f4f6f9; font-family:'Segoe UI',Arial,sans-serif; color:#333; }
+        .wrap { max-width:600px; margin:40px auto; background:#fff; border-radius:8px;
+                box-shadow:0 2px 8px rgba(0,0,0,.08); overflow:hidden; }
+        .hdr  { background:linear-gradient(135deg,#1a73e8,#0d47a1); padding:36px 40px; text-align:center; }
+        .hdr h1 { margin:0; color:#fff; font-size:24px; font-weight:700; letter-spacing:.5px; }
+        .hdr p  { margin:8px 0 0; color:#cce3ff; font-size:14px; }
+        .badge  { display:inline-block; background:#e8f5e9; color:#2e7d32; border-radius:20px;
+                  padding:6px 18px; font-size:13px; font-weight:600; margin:24px auto 0;
+                  border:1px solid #a5d6a7; }
+        .body   { padding:32px 40px; }
+        .body p { line-height:1.7; font-size:15px; margin:0 0 16px; }
+        .info-box { background:#f0f7ff; border-left:4px solid #1a73e8; border-radius:4px;
+                    padding:16px 20px; margin:20px 0; }
+        .info-box p { margin:4px 0; font-size:14px; }
+        .info-box strong { color:#1a73e8; }
+        .steps  { background:#f9fbe7; border:1px solid #dce775; border-radius:6px;
+                  padding:20px 24px; margin:24px 0; }
+        .steps h3 { margin:0 0 12px; font-size:15px; color:#558b2f; }
+        .steps ol { margin:0; padding-left:20px; }
+        .steps li { font-size:14px; line-height:1.8; color:#555; }
+        .btn    { display:inline-block; background:#1a73e8; color:#fff; text-decoration:none;
+                  border-radius:6px; padding:13px 32px; font-size:15px; font-weight:600;
+                  margin:8px 0 24px; }
+        .ftr    { background:#f4f6f9; padding:24px 40px; text-align:center; font-size:12px; color:#888; }
+        .ftr a  { color:#1a73e8; text-decoration:none; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="hdr">
+          <h1>✅ Profile Verified</h1>
+          <p>{platform_name} — Doctor Onboarding</p>
+          <div class="badge">Verification Successful</div>
+        </div>
+        <div class="body">
+          <p>Dear <strong>{doctor_name}</strong>,</p>
+          <p>
+            We are delighted to inform you that your professional profile on
+            <strong>{platform_name}</strong> has been <strong>successfully verified</strong>
+            by our medical review team.
+          </p>
+
+          <div class="info-box">
+            <p><strong>Name:</strong> {doctor_name}</p>
+            <p><strong>Registration No.:</strong> {medical_registration_number}</p>
+            <p><strong>Medical Council:</strong> {medical_council}</p>
+            <p><strong>Specialisation:</strong> {specialization}</p>
+          </div>
+
+          <div class="steps">
+            <h3>🚀 What happens next?</h3>
+            <ol>
+              <li>Log in to the LinQMD platform to review your verified profile.</li>
+              <li>Ensure your availability calendar and consultation fees are up to date.</li>
+              <li>Patients can now discover and book appointments with you.</li>
+              <li>You will start receiving appointment notifications as soon as you go live.</li>
+            </ol>
+          </div>
+
+          <p>
+            If you have any questions or need to update your profile, please reach out to
+            our support team at <a href="mailto:{support_email}">{support_email}</a>.
+          </p>
+
+          <p>Welcome to the LinQMD family — let's transform healthcare together!</p>
+
+          <p>
+            Warm regards,<br/>
+            <strong>The {platform_name} Team</strong>
+          </p>
+        </div>
+        <div class="ftr">
+          <p>© 2025 {platform_name}. All rights reserved.</p>
+          <p>
+            This is an automated message. Please do not reply directly to this email.<br/>
+            For support, write to <a href="mailto:{support_email}">{support_email}</a>.
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+
+  body_text: |
+    Dear {doctor_name},
+
+    Congratulations! Your professional profile on {platform_name} has been
+    successfully verified by our medical review team.
+
+    Profile Details
+    ---------------
+    Name                 : {doctor_name}
+    Registration No.     : {medical_registration_number}
+    Medical Council      : {medical_council}
+    Specialisation       : {specialization}
+
+    What happens next?
+    1. Log in to the LinQMD platform to review your verified profile.
+    2. Ensure your availability calendar and consultation fees are up to date.
+    3. Patients can now discover and book appointments with you.
+    4. You will start receiving appointment notifications as soon as you go live.
+
+    For any questions, write to {support_email}.
+
+    Welcome to the LinQMD family!
+
+    Warm regards,
+    The {platform_name} Team
+
+rejected:
+  subject: "Action Required: Your LinQMD Profile Needs Attention"
+  body_html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>Profile Needs Attention</title>
+      <style>
+        body  { margin:0; padding:0; background:#f4f6f9; font-family:'Segoe UI',Arial,sans-serif; color:#333; }
+        .wrap { max-width:600px; margin:40px auto; background:#fff; border-radius:8px;
+                box-shadow:0 2px 8px rgba(0,0,0,.08); overflow:hidden; }
+        .hdr  { background:linear-gradient(135deg,#e53935,#b71c1c); padding:36px 40px; text-align:center; }
+        .hdr h1 { margin:0; color:#fff; font-size:24px; font-weight:700; letter-spacing:.5px; }
+        .hdr p  { margin:8px 0 0; color:#ffcdd2; font-size:14px; }
+        .badge  { display:inline-block; background:#fff3e0; color:#e65100; border-radius:20px;
+                  padding:6px 18px; font-size:13px; font-weight:600; margin:24px auto 0;
+                  border:1px solid #ffb74d; }
+        .body   { padding:32px 40px; }
+        .body p { line-height:1.7; font-size:15px; margin:0 0 16px; }
+        .info-box { background:#fff8f0; border-left:4px solid #e53935; border-radius:4px;
+                    padding:16px 20px; margin:20px 0; }
+        .info-box p { margin:4px 0; font-size:14px; }
+        .info-box strong { color:#e53935; }
+        .reason-box { background:#fff3e0; border:1px solid #ffb74d; border-radius:6px;
+                      padding:16px 20px; margin:20px 0; }
+        .reason-box h3 { margin:0 0 8px; font-size:14px; color:#e65100; text-transform:uppercase;
+                         letter-spacing:.5px; }
+        .reason-box p { margin:0; font-size:14px; color:#555; line-height:1.6; }
+        .steps  { background:#e8f5e9; border:1px solid #a5d6a7; border-radius:6px;
+                  padding:20px 24px; margin:24px 0; }
+        .steps h3 { margin:0 0 12px; font-size:15px; color:#2e7d32; }
+        .steps ol { margin:0; padding-left:20px; }
+        .steps li { font-size:14px; line-height:1.8; color:#555; }
+        .btn    { display:inline-block; background:#e53935; color:#fff; text-decoration:none;
+                  border-radius:6px; padding:13px 32px; font-size:15px; font-weight:600;
+                  margin:8px 0 24px; }
+        .ftr    { background:#f4f6f9; padding:24px 40px; text-align:center; font-size:12px; color:#888; }
+        .ftr a  { color:#e53935; text-decoration:none; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="hdr">
+          <h1>⚠️ Profile Needs Attention</h1>
+          <p>{platform_name} — Doctor Onboarding</p>
+          <div class="badge">Action Required</div>
+        </div>
+        <div class="body">
+          <p>Dear <strong>{doctor_name}</strong>,</p>
+          <p>
+            Thank you for submitting your profile on <strong>{platform_name}</strong>.
+            After a thorough review by our medical team, we were unable to verify your
+            profile at this time.
+          </p>
+
+          <div class="info-box">
+            <p><strong>Name:</strong> {doctor_name}</p>
+            <p><strong>Registration No.:</strong> {medical_registration_number}</p>
+            <p><strong>Medical Council:</strong> {medical_council}</p>
+            <p><strong>Specialisation:</strong> {specialization}</p>
+          </div>
+
+          <div class="reason-box">
+            <h3>Reason for rejection</h3>
+            <p>{reason}</p>
+          </div>
+
+          <div class="steps">
+            <h3>✅ How to resolve this</h3>
+            <ol>
+              <li>Log in to the LinQMD platform and go to your <strong>Profile</strong> section.</li>
+              <li>Review and correct the information based on the reason above.</li>
+              <li>Upload clear, legible copies of all required documents.</li>
+              <li>Re-submit your profile for review — our team typically responds within 2–3 business days.</li>
+            </ol>
+          </div>
+
+          <p>
+            If you believe this decision was made in error or need clarification,
+            please write to us at
+            <a href="mailto:{support_email}">{support_email}</a> with your
+            registration number <strong>{medical_registration_number}</strong> in the subject line.
+          </p>
+
+          <p>
+            We appreciate your patience and look forward to welcoming you to the
+            LinQMD platform soon.
+          </p>
+
+          <p>
+            Warm regards,<br/>
+            <strong>The {platform_name} Team</strong>
+          </p>
+        </div>
+        <div class="ftr">
+          <p>© 2025 {platform_name}. All rights reserved.</p>
+          <p>
+            This is an automated message. Please do not reply directly to this email.<br/>
+            For support, write to <a href="mailto:{support_email}">{support_email}</a>.
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+
+  body_text: |
+    Dear {doctor_name},
+
+    Thank you for submitting your profile on {platform_name}. After a thorough
+    review, we were unable to verify your profile at this time.
+
+    Profile Details
+    ---------------
+    Name                 : {doctor_name}
+    Registration No.     : {medical_registration_number}
+    Medical Council      : {medical_council}
+    Specialisation       : {specialization}
+
+    Reason for Rejection
+    --------------------
+    {reason}
+
+    How to resolve this
+    -------------------
+    1. Log in to the LinQMD platform and go to your Profile section.
+    2. Review and correct the information based on the reason above.
+    3. Upload clear, legible copies of all required documents.
+    4. Re-submit your profile for review (response within 2-3 business days).
+
+    If you believe this was an error, write to {support_email} with your
+    registration number {medical_registration_number} in the subject line.
+
+    Warm regards,
+    The {platform_name} Team
