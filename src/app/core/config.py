@@ -201,7 +201,7 @@ class Settings(BaseSettings):
         description="JWT signing algorithm"
     )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=30,
+        default=120,
         ge=1,
         description="JWT access token expiration time (minutes)"
     )
