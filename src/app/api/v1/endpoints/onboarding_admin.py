@@ -445,15 +445,23 @@ async def sync_doctor_to_linqmd(
     result = await sync_service.sync_doctor_by_id(doctor_id, db)
     
     if not result.success:
+        detail = result.error_message or "LinQMD sync failed."
+        if isinstance(result.linqmd_response, dict):
+            linqmd_error = result.linqmd_response.get("error")
+            if linqmd_error:
+                detail = str(linqmd_error)
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=result.error_message or "LinQMD sync failed.",
+            detail=detail,
         )
-        
+
+    linqmd_response = result.linqmd_response if isinstance(result.linqmd_response, dict) else {}
     return GenericResponse(
-        message="Sync successful",
+        message="Doctor Profile created Successfully in LinQMD",
         data={
             "doctor_id": result.doctor_id,
-            "linqmd_response": result.linqmd_response,
+            "linqmd_response": linqmd_response,
+            "username": linqmd_response.get("Username"),
+            "password": linqmd_response.get("Password"),
         },
     )

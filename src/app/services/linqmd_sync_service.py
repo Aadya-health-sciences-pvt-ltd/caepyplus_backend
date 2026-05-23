@@ -283,25 +283,6 @@ class LinQMDSyncService:
         # Get overview/about text
         overview = details.get('professional_overview', '') or details.get('about_me', '') or ''
         
-        # Find display picture from media
-        display_picture = None
-        for m in media:
-            if m.get('media_category') == 'profile_photo' or m.get('is_primary'):
-                display_picture = m.get('file_uri')
-                break
-        
-        # Build YouTube videos (if external_links contains YouTube)
-        youtube_videos = []
-        external_links = details.get('external_links', {}) or {}
-        if isinstance(external_links, dict):
-            for key, value in external_links.items():
-                if 'youtube' in key.lower() or 'youtube' in str(value).lower():
-                    youtube_videos.append({
-                        'videotitle': key,
-                        'videodescription': '',
-                        'videoembed_code': value,
-                    })
-        
         return LinQMDUserPayload(
             name=username,
             mail=identity.get('email', ''),
@@ -314,9 +295,6 @@ class LinQMDSyncService:
             specialities_long=specialities_long,
             expertise_summary=expertise_summary,
             education_details=education_details,
-            expertises=expertises,
-            youtube_videos=youtube_videos,
-            display_picture_path=display_picture,
         )
     
     @retry(
@@ -358,7 +336,15 @@ class LinQMDSyncService:
             response_json = response.json()
         except Exception:
             response_json = {"raw_response": response.text[:500]}
-        
+
+        if isinstance(response_json, dict):
+            response_json = dict(response_json)
+        else:
+            response_json = {"raw_response": response_json}
+
+        response_json["Username"] = payload.name
+        response_json["Password"] = payload.password
+
         return response.status_code, response_json
     
     async def sync_doctor(
@@ -389,20 +375,36 @@ class LinQMDSyncService:
             # Send to LinQMD
             status_code, response_json = await self._send_to_linqmd(payload)
             
-            # Check for success (2xx status codes)
+            # Check for success (2xx status codes, no error payload)
             success = 200 <= status_code < 300
-            
+            api_error = (
+                response_json.get("error")
+                if isinstance(response_json, dict)
+                else None
+            )
+            if success and api_error:
+                success = False
+
             if success:
                 logger.info(f"Successfully synced doctor {doctor_id} to LinQMD")
             else:
                 logger.error(f"Failed to sync doctor {doctor_id} to LinQMD: {response_json}")
-            
+
+            error_message: str | None = None
+            if not success:
+                if api_error:
+                    error_message = str(api_error)
+                elif isinstance(response_json, dict) and response_json.get("message"):
+                    error_message = str(response_json["message"])
+                else:
+                    error_message = f"API returned status {status_code}"
+
             return LinQMDSyncResult(
                 success=success,
                 doctor_id=doctor_id,
                 linqmd_response=response_json,
                 http_status_code=status_code,
-                error_message=None if success else f"API returned status {status_code}",
+                error_message=error_message,
             )
             
         except httpx.TimeoutException as e:
