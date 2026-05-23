@@ -256,15 +256,20 @@ async def list_doctors(
         # Enrich with verification fields from doctor_identity table
         if data:
             onboarding_repo = OnboardingRepository(db)
+            from ....repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
+
             doctor_ids = [d.id for d in data]
             identity_map = await onboarding_repo.get_identities_by_doctor_ids(doctor_ids)
+            synced_ids = await LinqmdCredentialsRepository(db).get_synced_doctor_ids(doctor_ids)
             for doctor_resp in data:
+                doctor_resp.has_linqmd_profile = doctor_resp.id in synced_ids
                 identity = identity_map.get(doctor_resp.id)
                 if identity:
                     doctor_resp.rejection_reason = identity.rejection_reason
                     doctor_resp.verified_at = identity.verified_at
                     doctor_resp.status_updated_at = identity.status_updated_at
                     doctor_resp.status_updated_by = identity.status_updated_by
+                    doctor_resp.onboarding_status = identity.onboarding_status.value
 
         message = "Doctors retrieved successfully"
 
