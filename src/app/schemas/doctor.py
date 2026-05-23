@@ -299,6 +299,10 @@ class DoctorResponse(BaseModel):
     verified_at: datetime | None = Field(default=None, description="Timestamp when the doctor was verified")
     status_updated_at: datetime | None = Field(default=None, description="Timestamp of most recent status change")
     status_updated_by: str | None = Field(default=None, description="ID of user who last updated the status")
+    has_linqmd_profile: bool = Field(
+        default=False,
+        description="True when LinQMD credentials exist for this doctor",
+    )
 
     # Block 1: Professional Identity
     full_name: str | None = None

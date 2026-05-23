@@ -9,6 +9,7 @@ from .onboarding import (
 )
 from .user import User
 from .blog import Blog, BlogKeyword, BlogComment
+from .linqmd_credentials import DoctorLinqmdCredentials
 
 __all__ = [
     "Doctor",
@@ -21,4 +22,5 @@ __all__ = [
     "Blog",
     "BlogKeyword",
     "BlogComment",
+    "DoctorLinqmdCredentials",
 ]
