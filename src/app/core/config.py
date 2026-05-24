@@ -385,7 +385,14 @@ class Settings(BaseSettings):
     )
     LINQMD_PRACTICE_HUB_API_URL: str = Field(
         default="",
-        description="LinQMD Practice Hub API base URL for user creation"
+        description=(
+            "LinQMD Practice Hub API base URL (e.g. https://dev.linqmd.com). "
+            "Endpoint paths are appended in code or via LINQMD_PRACTICE_HUB_USER_CREATE_PATH."
+        ),
+    )
+    LINQMD_PRACTICE_HUB_USER_CREATE_PATH: str = Field(
+        default="/api/user/create",
+        description="Path for LinQMD user creation, appended to LINQMD_PRACTICE_HUB_API_URL",
     )
     LINQMD_PRACTICE_HUB_AUTH_TOKEN: str = Field(
         default="",
@@ -525,6 +532,19 @@ class Settings(BaseSettings):
         """Check if running in development environment."""
         return self.APP_ENV == "development"
 
+    def linqmd_practice_hub_url(self, path: str) -> str:
+        """Join Practice Hub base URL with an API path (e.g. /api/user/create)."""
+        base = (self.LINQMD_PRACTICE_HUB_API_URL or "").rstrip("/")
+        if not base:
+            return path if path.startswith("/") else f"/{path}"
+        normalized = path if path.startswith("/") else f"/{path}"
+        return f"{base}{normalized}"
+
+    @property
+    def linqmd_user_create_url(self) -> str:
+        """Full URL for LinQMD user creation POST."""
+        return self.linqmd_practice_hub_url(self.LINQMD_PRACTICE_HUB_USER_CREATE_PATH)
+
     @property
     def env_file_loaded(self) -> str:
         """Return which env file(s) were loaded."""
@@ -560,6 +580,18 @@ class Settings(BaseSettings):
                 stacklevel=2,
             )
         return v
+
+    @field_validator("LINQMD_PRACTICE_HUB_API_URL")
+    @classmethod
+    def normalize_linqmd_practice_hub_base_url(cls, v: str) -> str:
+        """Accept base URL only; strip legacy full endpoint URLs if present."""
+        if not v:
+            return v
+        normalized = v.rstrip("/")
+        legacy_suffix = "/api/user/create"
+        if normalized.endswith(legacy_suffix):
+            return normalized[: -len(legacy_suffix)]
+        return normalized
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
