@@ -321,11 +321,12 @@ class LinQMDSyncService:
         headers = self._get_headers()
         
         logger.info(f"Sending user to LinQMD: {payload.mail}")
-        logger.debug(f"LinQMD API URL: {self.settings.LINQMD_PRACTICE_HUB_API_URL}")
+        create_url = self.settings.linqmd_user_create_url
+        logger.debug(f"LinQMD API URL: {create_url}")
         logger.debug(f"Request data: {form_data}")
-        
+
         response = await self.client.post(
-            self.settings.LINQMD_PRACTICE_HUB_API_URL,
+            create_url,
             data=form_data,
             headers=headers,
         )
