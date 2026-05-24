@@ -184,11 +184,48 @@ services:
 
 ---
 
-## Current Migration
+## Existing database (missing `alembic_version`)
+
+If tables already exist but `alembic_version` was dropped or never created, **`upgrade head` will try to re-run migration `001` and fail** with errors like `relation "doctors" already exists`. Alembic does not compare your live schema to migrations automatically; it only tracks applied revisions in `alembic_version`.
+
+**Fix:** stamp the revision that matches what is already in the database, then upgrade:
+
+```bash
+# 1. Suggest which revision matches the current schema
+python scripts/migrate.py detect
+
+# 2. Record that revision without running DDL (example: schema matches 001 only)
+python scripts/migrate.py stamp 001
+
+# 3. Apply only newer migrations (002 → head)
+python scripts/migrate.py upgrade head
+```
+
+Or in one step (detect + stamp + apply pending migrations):
+
+```bash
+python scripts/migrate.py baseline --upgrade
+```
+
+| Revision | When to stamp |
+|----------|----------------|
+| `001` | Has `doctors` / core tables, no `lead_doctors` |
+| `002` | Has `lead_doctors`, no `blogs` |
+| `003` | Has blog tables, `users.phone` still `NOT NULL` |
+| `004` | `users.phone` nullable, `doctors.practice_segments` still `VARCHAR` |
+| `005` | `practice_segments` already `JSON` / `JSONB` (fully up to date) |
+
+---
+
+## Current Migrations
 
 | Revision | File | Description |
 |----------|------|-------------|
-| `001` | `001_initial_schema.py` | Complete schema: 7 tables, all indexes, `doctor_id_seq` sequence, admin user seed, ~205 dropdown seed values across 15 fields |
+| `001` | `001_initial_schema.py` | Complete initial schema: core tables, indexes, seed data |
+| `002` | `002_add_lead_doctors.py` | `lead_doctors` table |
+| `003` | `003_add_blog_comment_and_keyword_models.py` | `blogs`, `blog_comments`, `blog_keywords` |
+| `004` | `004_users_phone_nullable.py` | `users.phone` nullable |
+| `005` | `005_practice_segments_json.py` | `doctors.practice_segments` → JSONB (head) |
 
 ### Tables Created
 
@@ -215,13 +252,14 @@ services:
 | `Target database is not up to date` | Run `alembic upgrade head` first |
 | `Can't locate revision` | Check `alembic current` and ensure the versions directory isn't empty |
 | `psycopg2 not installed` | Install it: `pip install psycopg2-binary` (needed for sync Alembic operations) |
+| `relation "doctors" already exists` on upgrade | `alembic_version` is missing or wrong — use `detect` + `stamp` + `upgrade head` (see above) |
 | Migration fails on startup (Docker) | Check `docker compose logs api` for the error. Set `SKIP_MIGRATIONS=true` to start the app while you debug |
 
 ---
 
 ## Key Design Decisions
 
-1. **Single consolidated migration** — No incremental migration chain. The initial migration creates the complete schema. This simplifies fresh deployments and avoids long migration chains.
+1. **Initial migration + incremental revisions** — `001` creates the base schema; `002`–`005` apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
 4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.

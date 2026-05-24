@@ -26,7 +26,8 @@ from fastapi import status as http_status
 from ....core.rbac import AdminOrOperationUser
 from ....core.responses import GenericResponse
 from ....db.session import DbSession
-from ....repositories import OnboardingRepository
+from ....repositories import LinqmdCredentialsRepository, OnboardingRepository
+from ....schemas.linqmd import LinqMDCredentialsResponse
 from ....schemas import (
     DoctorIdentityCreate,
     DoctorIdentityResponse,
@@ -440,20 +441,94 @@ async def sync_doctor_to_linqmd(
     Requires Admin or Operation role.
     """
     from ....services.linqmd_sync_service import get_linqmd_sync_service
-    
+
+    creds_repo = LinqmdCredentialsRepository(db)
+    if await creds_repo.exists_for_doctor(doctor_id):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="LinQMD profile already exists for this doctor.",
+        )
+
+    onboarding_repo = OnboardingRepository(db)
+    identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
+    doctor_name = (identity.full_name if identity else "").strip() or f"Doctor {doctor_id}"
+
     sync_service = get_linqmd_sync_service()
     result = await sync_service.sync_doctor_by_id(doctor_id, db)
-    
+
     if not result.success:
+        detail = result.error_message or "LinQMD sync failed."
+        if isinstance(result.linqmd_response, dict):
+            linqmd_error = result.linqmd_response.get("error")
+            if linqmd_error:
+                detail = str(linqmd_error)
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail=result.error_message or "LinQMD sync failed.",
+            detail=detail,
         )
-        
+
+    linqmd_response = result.linqmd_response if isinstance(result.linqmd_response, dict) else {}
+    uid = linqmd_response.get("uid")
+    username = linqmd_response.get("Username")
+    password = linqmd_response.get("Password")
+
+    if uid is None or str(uid).strip() == "":
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="LinQMD did not return a user id (uid). Profile was not saved.",
+        )
+    if not username or not password:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="LinQMD credentials missing from response. Profile was not saved.",
+        )
+
+    try:
+        await creds_repo.create(
+            doctor_id=doctor_id,
+            doctor_name=doctor_name,
+            linqmd_user_id=str(uid),
+            linqmd_username=str(username),
+            linqmd_password=str(password),
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="LinQMD profile already exists for this doctor.",
+        ) from None
+
     return GenericResponse(
-        message="Sync successful",
+        message="Doctor Profile created Successfully in LinQMD",
         data={
             "doctor_id": result.doctor_id,
-            "linqmd_response": result.linqmd_response,
+            "linqmd_response": linqmd_response,
+            "username": username,
+            "password": password,
+            "linqmd_user_id": str(uid),
+            "doctor_name": doctor_name,
         },
+    )
+
+
+@router.get(
+    "/linqmd-credentials/{doctor_id}",
+    response_model=GenericResponse[LinqMDCredentialsResponse],
+    summary="Get stored LinQMD credentials (Admin/Operation only)",
+)
+async def get_linqmd_credentials(
+    doctor_id: int,
+    db: DbSession,
+    current_user: AdminOrOperationUser,
+) -> GenericResponse[LinqMDCredentialsResponse]:
+    """Return persisted LinQMD credentials for a doctor."""
+    creds_repo = LinqmdCredentialsRepository(db)
+    row = await creds_repo.get_by_doctor_id(doctor_id)
+    if row is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="No LinQMD profile found for this doctor.",
+        )
+    return GenericResponse(
+        message="LinQMD credentials retrieved",
+        data=LinqMDCredentialsResponse.model_validate(row),
     )

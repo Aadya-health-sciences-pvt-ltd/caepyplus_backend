@@ -22,6 +22,96 @@ except ImportError:
     logger.warning("redis package not installed — using in-memory OTP storage")
 
 
+def _verbose_otp_diagnostics_enabled() -> bool:
+    """Log full phone / OTP values only in dev (DEBUG or APP_ENV=development)."""
+    try:
+        s = get_settings()
+        return bool(s.DEBUG or s.is_development)
+    except Exception:
+        return False
+
+
+def otp_verbose_diagnostics_enabled() -> bool:
+    """Public check for dev-only OTP logging (endpoints and diagnostics)."""
+    return _verbose_otp_diagnostics_enabled()
+
+
+def _log_redis_verify_miss(mobile_number: str, otp_key: str, submitted_otp: str) -> None:
+    if _verbose_otp_diagnostics_enabled():
+        logger.warning(
+            "otp_redis_key_miss",
+            mobile_number=mobile_number,
+            mobile_repr=repr(mobile_number),
+            otp_key=otp_key,
+            submitted_otp=submitted_otp,
+            submitted_otp_len=len(submitted_otp or ""),
+        )
+    else:
+        logger.warning(
+            "otp_redis_key_miss",
+            mobile_suffix=mobile_number[-4:] if len(mobile_number) >= 4 else "****",
+            otp_key_suffix=otp_key[-12:],
+        )
+
+
+def _log_redis_otp_mismatch(
+    mobile_number: str,
+    submitted_otp: str,
+    stored_otp: str,
+    attempts: int,
+    remaining: int,
+) -> None:
+    verbose = _verbose_otp_diagnostics_enabled()
+    logger.warning(
+        "otp_redis_mismatch",
+        mobile_number=mobile_number if verbose else None,
+        mobile_repr=repr(mobile_number) if verbose else None,
+        submitted_otp=submitted_otp if verbose else None,
+        stored_otp=stored_otp if verbose else None,
+        submitted_len=len(submitted_otp or ""),
+        stored_len=len(stored_otp or ""),
+        attempts_before=attempts,
+        attempts_remaining_after_incr=remaining,
+    )
+
+
+def _log_memory_verify_miss(mobile_number: str, store_size: int) -> None:
+    if _verbose_otp_diagnostics_enabled():
+        logger.warning(
+            "otp_memory_key_miss",
+            mobile_number=mobile_number,
+            mobile_repr=repr(mobile_number),
+            in_memory_store=False,
+            memory_entry_count=store_size,
+        )
+    else:
+        logger.warning(
+            "otp_memory_key_miss",
+            mobile_suffix=mobile_number[-4:] if len(mobile_number) >= 4 else "****",
+            memory_entry_count=store_size,
+        )
+
+
+def _log_memory_otp_mismatch(
+    mobile_number: str,
+    submitted_otp: str,
+    stored_otp: str,
+    attempts: int,
+    remaining: int,
+) -> None:
+    verbose = _verbose_otp_diagnostics_enabled()
+    logger.warning(
+        "otp_memory_mismatch",
+        mobile_number=mobile_number if verbose else None,
+        submitted_otp=submitted_otp if verbose else None,
+        stored_otp=stored_otp if verbose else None,
+        submitted_len=len(submitted_otp or ""),
+        stored_len=len(stored_otp or ""),
+        attempts_before=attempts,
+        attempts_remaining_after_incr=remaining,
+    )
+
+
 class RedisOTPStore:
     """Redis-backed OTP storage with automatic TTL and attempt tracking."""
 
@@ -87,20 +177,46 @@ class RedisOTPStore:
 
         stored_otp = await self._redis.get(otp_key)
         if not stored_otp:
+            _log_redis_verify_miss(mobile_number, otp_key, otp)
             return False, "OTP not found or expired. Please request a new OTP."
 
         attempts = int(await self._redis.get(attempts_key) or "0")
         if attempts >= self._max_attempts:
             await self._redis.delete(otp_key, attempts_key)
+            logger.warning(
+                "otp_verify_max_attempts_redis",
+                mobile=mobile_number[-4:] if len(mobile_number) >= 4 else "****",
+                attempts=attempts,
+                max_attempts=self._max_attempts,
+            )
             return False, "Too many failed attempts. Please request a new OTP."
 
         if stored_otp != otp:
             await self._redis.incr(attempts_key)
             remaining = self._max_attempts - attempts - 1
+            _log_redis_otp_mismatch(mobile_number, otp, stored_otp, attempts, remaining)
             return False, f"Invalid OTP. {remaining} attempts remaining."
 
         await self._redis.delete(otp_key, attempts_key)
         return True, "OTP verified successfully"
+
+    async def debug_redis_otp_state(self, mobile_number: str) -> dict[str, object]:
+        """Introspection for dev/debug — OTP values are not returned."""
+        if not self._connected or not self._redis:
+            return {"connected": False, "redis": "not_connected"}
+        otp_key = self._otp_key(mobile_number)
+        att_key = self._attempts_key(mobile_number)
+        exists = bool(await self._redis.exists(otp_key))
+        ttl = await self._redis.ttl(otp_key) if exists else -2
+        att_raw = await self._redis.get(att_key)
+        stored_len = len(await self._redis.get(otp_key) or "") if exists else 0
+        return {
+            "otp_key": otp_key,
+            "otp_key_exists": exists,
+            "otp_ttl_seconds": ttl,
+            "attempts_raw": att_raw,
+            "stored_otp_length": stored_len,
+        }
 
     @property
     def is_connected(self) -> bool:
@@ -128,23 +244,44 @@ class InMemoryOTPStore:
     async def verify_otp(self, mobile_number: str, otp: str) -> tuple[bool, str]:
         """Verify OTP. Returns (is_valid, message)."""
         if mobile_number not in self._store:
+            _log_memory_verify_miss(mobile_number, len(self._store))
             return False, "OTP not found. Please request a new OTP."
 
         stored_otp, expiry = self._store[mobile_number]
         if time.time() > expiry:
             del self._store[mobile_number]
             self._attempts.pop(mobile_number, None)
+            if _verbose_otp_diagnostics_enabled():
+                logger.warning(
+                    "otp_memory_expired",
+                    mobile_number=mobile_number,
+                    mobile_repr=repr(mobile_number),
+                    expired_at=expiry,
+                )
+            else:
+                logger.warning(
+                    "otp_memory_expired",
+                    mobile_suffix=mobile_number[-4:] if len(mobile_number) >= 4 else "****",
+                )
             return False, "OTP has expired. Please request a new OTP."
 
         attempts = self._attempts.get(mobile_number, 0)
         if attempts >= self._max_attempts:
             del self._store[mobile_number]
             self._attempts.pop(mobile_number, None)
+            logger.warning(
+                "otp_verify_max_attempts_memory",
+                mobile=mobile_number[-4:] if len(mobile_number) >= 4 else "****",
+                attempts=attempts,
+                max_attempts=self._max_attempts,
+                verbose_mobile=mobile_number if _verbose_otp_diagnostics_enabled() else None,
+            )
             return False, "Too many failed attempts. Please request a new OTP."
 
         if stored_otp != otp:
             self._attempts[mobile_number] = attempts + 1
             remaining = self._max_attempts - attempts - 1
+            _log_memory_otp_mismatch(mobile_number, otp, stored_otp, attempts, remaining)
             return False, f"Invalid OTP. {remaining} attempts remaining."
 
         del self._store[mobile_number]
@@ -239,14 +376,14 @@ class OTPService:
         try:
             store = await self._get_store()
             otp = self.generate_otp(length=self.settings.OTP_LENGTH)
-            
+
             if delivery_method.lower() == "whatsapp":
                 logger.info(
                     "Sending OTP via WhatsApp",
                     mobile=self.mask_mobile(mobile_number),
                     storage_type="redis" if isinstance(store, RedisOTPStore) else "memory",
                 )
-                
+
                 payload = {
                     "communication_type": "whatsapp",
                     "message_type": "template",
@@ -277,28 +414,28 @@ class OTPService:
                         ]
                     }
                 }
-                
+
                 response = await self.http_client.post(
                     self.settings.LINQMD_COMMUNICATION_SERVICE_URL,
                     json=payload
                 )
-                
+
                 # Log the raw response from communication service
                 logger.info("WhatsApp API response", status_code=response.status_code, body=response.text[:200])
-                
+
                 response_data = response.json()
-                
+
                 if response.status_code != 201 or response_data.get("status_code") != 201:
                     logger.error("WhatsApp API error", status_code=response.status_code, response=response_data)
                     return False, "Failed to send OTP via WhatsApp. Please try again."
-                
+
                 # Parse the success response format
                 response_message = response_data.get("message", "OTP sent successfully via WhatsApp")
                 message_id = response_data.get("data", {}).get("message_id")
-                
+
                 await store.store_otp(mobile_number, otp)
-                
-                logger.info("OTP sent successfully via WhatsApp", 
+
+                logger.info("OTP sent successfully via WhatsApp",
                             mobile=self.mask_mobile(mobile_number),
                             message_id=message_id)
                 return True, response_message
@@ -362,7 +499,57 @@ class OTPService:
     async def verify_otp(self, mobile_number: str, otp: str) -> tuple[bool, str]:
         """Verify the OTP for a given mobile number."""
         store = await self._get_store()
-        return await store.verify_otp(mobile_number, otp)
+        store_kind = "redis" if isinstance(store, RedisOTPStore) else "memory"
+        redis_connected = bool(self._redis_store and self._redis_store.is_connected)
+        verbose = _verbose_otp_diagnostics_enabled()
+
+        logger.info(
+            "otp_verify_start",
+            store=store_kind,
+            mobile_masked=self.mask_mobile(mobile_number),
+            mobile_repr=repr(mobile_number) if verbose else None,
+            otp_len=len(otp or ""),
+            otp_full=otp if verbose else None,
+            redis_enabled=bool(self.settings.REDIS_ENABLED and REDIS_AVAILABLE),
+            redis_connected=redis_connected,
+            using_memory_fallback=store_kind == "memory" and bool(
+                self.settings.REDIS_ENABLED and REDIS_AVAILABLE
+            ),
+        )
+
+        if verbose and isinstance(store, RedisOTPStore):
+            try:
+                dbg = await store.debug_redis_otp_state(mobile_number)
+                logger.info("otp_verify_redis_state_before", **dbg)
+            except Exception as exc:
+                logger.warning("otp_verify_redis_debug_failed", error=str(exc))
+
+        try:
+            ok, msg = await store.verify_otp(mobile_number, otp)
+        except Exception as exc:
+            logger.error(
+                "otp_verify_store_error",
+                store=store_kind,
+                error_type=type(exc).__name__,
+                error=str(exc),
+                exc_info=verbose,
+            )
+            return False, "OTP verification failed. Please try again."
+
+        if verbose and isinstance(store, RedisOTPStore) and not ok:
+            try:
+                dbg_after = await store.debug_redis_otp_state(mobile_number)
+                logger.info("otp_verify_redis_state_after_fail", **dbg_after)
+            except Exception as exc:
+                logger.warning("otp_verify_redis_debug_after_failed", error=str(exc))
+
+        logger.info(
+            "otp_verify_result",
+            store=store_kind,
+            ok=ok,
+            message=msg if (verbose or not ok) else None,
+        )
+        return ok, msg
 
     async def close(self) -> None:
         """Close HTTP client and Redis connections."""

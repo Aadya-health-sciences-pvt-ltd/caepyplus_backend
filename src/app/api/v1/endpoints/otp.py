@@ -14,18 +14,19 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
-from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
-
-from ....core.responses import GenericResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ....core.config import Settings, get_settings
+from ....core.responses import GenericResponse
 from ....db.session import get_db
 from ....models.enums import UserRole
+from ....models.user import User
 from ....repositories.doctor_repository import DoctorRepository
 from ....repositories.user_repository import UserRepository
 from ....schemas.auth import (
@@ -36,7 +37,7 @@ from ....schemas.auth import (
     OTPVerifyResponse,
     OTPVerifySchema,
 )
-from ....services.otp_service import OTPService, get_otp_service
+from ....services.otp_service import OTPService, get_otp_service, otp_verbose_diagnostics_enabled
 
 logger = structlog.get_logger(__name__)
 
@@ -197,13 +198,26 @@ async def verify_otp(
     settings: Settings = Depends(get_settings),
 ) -> GenericResponse[OTPVerifyResponse]:
     """Verify OTP and return a JWT for the doctor."""
-    logger.info("OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
+    ve = otp_verbose_diagnostics_enabled()
+    logger.info(
+        "otp_verify_endpoint_start",
+        skip_verify=settings.SKIP_VERIFY,
+        app_env=settings.APP_ENV,
+        debug=settings.DEBUG,
+        mobile_masked=otp_service.mask_mobile(request.mobile_number),
+        mobile_repr=repr(request.mobile_number) if ve else None,
+        mobile_number=request.mobile_number if ve else None,
+        otp_len=len(request.otp or ""),
+        otp=request.otp if ve else None,
+    )
 
     # 1. Verify OTP (skipped when SKIP_VERIFY is enabled)
     if settings.SKIP_VERIFY:
         logger.warning(
             "SKIP_VERIFY is enabled — OTP check bypassed (dev/test mode only)",
             mobile=otp_service.mask_mobile(request.mobile_number),
+            mobile_repr=repr(request.mobile_number) if ve else None,
+            otp_len=len(request.otp or ""),
         )
     else:
         is_valid, message = await otp_service.verify_otp(request.mobile_number, request.otp)
@@ -220,6 +234,9 @@ async def verify_otp(
             logger.warning(
                 "OTP verification failed",
                 mobile=otp_service.mask_mobile(request.mobile_number),
+                mobile_repr=repr(request.mobile_number) if ve else None,
+                otp_len=len(request.otp or ""),
+                error_code=error_code,
                 reason=message,
             )
             raise HTTPException(
@@ -232,6 +249,13 @@ async def verify_otp(
     user_repo = UserRepository(db)
     doctor = await doctor_repo.get_by_phone_number(request.mobile_number)
     is_new_user = doctor is None
+
+    logger.info(
+        "otp_verify_doctor_lookup",
+        found_existing=doctor is not None,
+        doctor_id=doctor.id if doctor else None,
+        mobile_masked=otp_service.mask_mobile(request.mobile_number),
+    )
 
     if doctor is None:
         doctor = await doctor_repo.create_from_phone(
@@ -247,23 +271,60 @@ async def verify_otp(
     doctor_id = doctor.id
     doctor_email = doctor.email
 
-    # 3. Resolve role from users table (single source of truth for RBAC)
-    existing_user = await user_repo.get_by_phone(request.mobile_number)
-    if existing_user:
-        user_role = existing_user.role or "user"
-    else:
-        user_role = "user"
-        try:
-            await user_repo.create(
-                phone=request.mobile_number,
-                email=doctor_email,
-                role=user_role,
-                is_active=True,
-                doctor_id=doctor_id,
-            )
-        except Exception as exc:
-            # Tolerate race-condition duplicates; role is already "user"
-            logger.warning("User record creation skipped (may already exist)", error=str(exc))
+    # 3. Ensure RBAC users row exists (get_or_create + race recovery). Never issue a
+    #    JWT if we cannot resolve a User — otherwise get_current_user returns 401
+    #    and the client session appears to "log out" on the next protected call.
+    app_user: User | None = None
+    try:
+        app_user, _ = await user_repo.get_or_create(
+            phone=request.mobile_number,
+            email=doctor_email,
+            doctor_id=doctor_id,
+        )
+    except IntegrityError as exc:
+        await db.rollback()
+        logger.warning("user_get_or_create_integrity", error=str(exc))
+        app_user = await user_repo.get_by_phone(request.mobile_number)
+        if app_user is None:
+            app_user = await user_repo.get_by_doctor_id(doctor_id)
+    except Exception as exc:
+        await db.rollback()
+        logger.warning(
+            "user_get_or_create_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            exc_info=ve,
+            doctor_id=doctor_id,
+            mobile_masked=otp_service.mask_mobile(request.mobile_number),
+        )
+        app_user = await user_repo.get_by_phone(request.mobile_number)
+        if app_user is None:
+            app_user = await user_repo.get_by_doctor_id(doctor_id)
+
+    if app_user is None:
+        logger.error(
+            "user_missing_after_otp_verify",
+            doctor_id=doctor_id,
+            is_new_user=is_new_user,
+            mobile_masked=otp_service.mask_mobile(request.mobile_number),
+            mobile_repr=repr(request.mobile_number) if ve else None,
+            user_by_phone_after_retry=(
+                (await user_repo.get_by_phone(request.mobile_number)) is not None
+            ),
+            user_by_doctor_after_retry=(
+                (await user_repo.get_by_doctor_id(doctor_id)) is not None
+            ),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "success": False,
+                "message": "Account setup could not be completed. Please try again.",
+                "error_code": "USER_SETUP_FAILED",
+            },
+        )
+
+    user_role = app_user.role or "user"
 
     # 4. Issue JWT (subject stays the verified phone key used at login)
     token = _create_access_token(
@@ -280,6 +341,7 @@ async def verify_otp(
         mobile=otp_service.mask_mobile(request.mobile_number),
         is_new_user=is_new_user,
         doctor_id=doctor_id,
+        user_id=app_user.id,
         role=user_role,
     )
 

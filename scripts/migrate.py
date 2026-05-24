@@ -26,6 +26,14 @@ Usage examples
 # 6. Show pending migrations:
     python scripts/migrate.py heads
 
+# 7. Existing DB but alembic_version missing (avoids re-running 001 CREATE TABLE):
+    python scripts/migrate.py detect
+    python scripts/migrate.py stamp 001          # revision that matches current schema
+    python scripts/migrate.py upgrade head       # applies only 002..head
+
+# 8. Detect + stamp (+ optional upgrade) in one step:
+    python scripts/migrate.py baseline --upgrade
+
 Environment variables
 ---------------------
 DATABASE_URL     Override the database connection string (takes lower priority
@@ -87,6 +95,69 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     return parser.parse_args()
+
+
+def _sync_db_url(db_url: str | None) -> str:
+    """Return a synchronous SQLAlchemy URL for introspection queries."""
+    from src.app.core.config import get_settings
+
+    url = db_url or os.environ.get("DATABASE_URL")
+    if not url:
+        url = get_settings().DATABASE_URL
+    return url.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
+
+
+def detect_schema_revision(db_url: str | None = None) -> str | None:
+    """Infer the Alembic revision that matches the live database schema.
+
+    Returns ``None`` when the database has no application tables (fresh DB).
+    """
+    from sqlalchemy import create_engine, inspect, text
+
+    engine = create_engine(_sync_db_url(db_url))
+    try:
+        with engine.connect() as conn:
+            tables = set(inspect(engine).get_table_names())
+            if "doctors" not in tables:
+                return None
+
+            if "lead_doctors" not in tables:
+                return "001"
+            if "blogs" not in tables:
+                return "002"
+
+            phone_nullable = conn.execute(
+                text(
+                    """
+                    SELECT is_nullable
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'users'
+                      AND column_name = 'phone'
+                    """
+                )
+            ).scalar()
+            if phone_nullable == "NO":
+                return "003"
+
+            seg_type = conn.execute(
+                text(
+                    """
+                    SELECT data_type, udt_name
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'doctors'
+                      AND column_name = 'practice_segments'
+                    """
+                )
+            ).first()
+            if seg_type:
+                data_type, udt_name = seg_type
+                if data_type in ("json", "jsonb") or udt_name in ("json", "jsonb"):
+                    return "005"
+            return "004"
+    finally:
+        engine.dispose()
 
 
 def main() -> int:  # noqa: C901
@@ -185,10 +256,39 @@ def main() -> int:  # noqa: C901
             revision = extra[0] if extra else "head"
             alembic_command.stamp(alembic_cfg, revision)
 
+        elif sub_command == "detect":
+            revision = detect_schema_revision(db_url)
+            if revision is None:
+                print("[migrate] No application tables found — use 'upgrade head' on a fresh database.")
+            else:
+                print(f"[migrate] Suggested stamp revision: {revision}")
+                print(
+                    f"[migrate] Next: python scripts/migrate.py stamp {revision}"
+                    + (" && python scripts/migrate.py upgrade head" if revision != "005" else "")
+                )
+
+        elif sub_command == "baseline":
+            explicit = next((a for a in extra if not a.startswith("-")), None)
+            do_upgrade = "--upgrade" in extra
+            revision = explicit or detect_schema_revision(db_url)
+            if revision is None:
+                print(
+                    "[migrate] ERROR: cannot baseline — no application tables. "
+                    "Use 'upgrade head' for a fresh database.",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"[migrate] Stamping database at revision {revision} (no DDL executed).")
+            alembic_command.stamp(alembic_cfg, revision)
+            if do_upgrade:
+                print("[migrate] Applying pending migrations: upgrade head")
+                alembic_command.upgrade(alembic_cfg, "head")
+
         else:
             print(
                 f"[migrate] ERROR: unknown sub-command '{sub_command}'. "
-                "Supported: upgrade, downgrade, current, history, heads, revision, stamp.",
+                "Supported: upgrade, downgrade, current, history, heads, revision, "
+                "stamp, detect, baseline.",
                 file=sys.stderr,
             )
             return 1
