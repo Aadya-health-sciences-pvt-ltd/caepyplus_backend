@@ -152,41 +152,120 @@ class LinQMDSyncService:
         return headers
     
 
-    def _generate_username(self, email: str, full_name: str) -> str:
+    @staticmethod
+    def _slug_field_segment(value: str) -> str:
+        """Lowercase alphanumeric slug for a single field (speciality or location)."""
+        return ''.join(c.lower() for c in (value or '').strip() if c.isalnum())
+
+    _HONORIFIC_PREFIXES = frozenset({'dr', 'mr', 'mrs', 'ms', 'prof'})
+
+    @classmethod
+    def _slug_name_word_segments(cls, full_name: str) -> list[str]:
         """
-        Generate a username from doctor data.
-        
-        Strategy: Use email prefix, fallback to name-based username
+        Split full name into hyphen-joined word segments.
+
+        Honorifics (e.g. Dr) are merged with the following word:
+        "Dr Murali Mohan Selvam" -> drmurali, mohan, selvam
         """
-        # Try email prefix first
+        raw_words = (full_name or '').split()
+        segments: list[str] = []
+        i = 0
+        while i < len(raw_words):
+            segment = ''.join(c.lower() for c in raw_words[i] if c.isalnum())
+            if not segment:
+                i += 1
+                continue
+
+            if (
+                segment in cls._HONORIFIC_PREFIXES
+                and i + 1 < len(raw_words)
+            ):
+                next_segment = ''.join(
+                    c.lower() for c in raw_words[i + 1] if c.isalnum()
+                )
+                if next_segment:
+                    segments.append(segment + next_segment)
+                    i += 2
+                    continue
+
+            segments.append(segment)
+            i += 1
+
+        return segments
+
+    def _generate_username(
+        self,
+        speciality: str,
+        primary_location: str,
+        full_name: str,
+        email: str = '',
+    ) -> str:
+        """
+        Generate LinQMD login username: speciality-primarylocation-drfullname.
+
+        Example: Cardiology, Bangalore, "Dr Murali Mohan Selvam"
+        -> cardiology-bangalore-drmurali-mohan-selvam
+        """
+        parts: list[str] = []
+
+        spec = self._slug_field_segment(speciality)
+        if spec:
+            parts.append(spec)
+
+        loc = self._slug_field_segment(primary_location)
+        if loc:
+            parts.append(loc)
+
+        parts.extend(self._slug_name_word_segments(full_name))
+
+        username = '-'.join(parts)
+        if len(username) >= 3:
+            return username
+
+        # Fallback when required profile fields are missing
         if email and '@' in email:
-            username = email.split('@')[0].lower()
-            # Clean special characters
-            username = ''.join(c for c in username if c.isalnum() or c in '._-')
-            if len(username) >= 3:
-                return username
-        
-        # Fallback to name-based
-        name_base = full_name.lower()
-        name_base = ''.join(c for c in name_base if c.isalnum())
-        
-        # Add random suffix to avoid collisions
+            email_username = email.split('@')[0].lower()
+            email_username = ''.join(
+                c for c in email_username if c.isalnum() or c in '._-'
+            )
+            if len(email_username) >= 3:
+                return email_username
+
+        name_base = ''.join(c.lower() for c in (full_name or '') if c.isalnum())
         suffix = ''.join(secrets.choice(string.digits) for _ in range(4))
-        return f"{name_base}{suffix}"
+        return f"{name_base or 'doctor'}{suffix}"
     
+    _LINQMD_TEMP_PASSWORD_SPECIALS = '!#'
+    _LINQMD_PASSWORD_ADJECTIVES = (
+        'Velvet', 'Crimson', 'Golden', 'Silver', 'Amber', 'Azure', 'Jade', 'Ivory',
+        'Noble', 'Royal', 'Bright', 'Crystal', 'Pearl', 'Starlit', 'Radiant', 'Serene',
+        'Alpine', 'Coastal', 'Lunar', 'Solar', 'Arctic', 'Floral', 'Mystic', 'Gentle',
+        'Quiet', 'Swift', 'Clear', 'Sunset', 'Stellar', 'Opal', 'Satin', 'Copper',
+    )
+    _LINQMD_PASSWORD_NOUNS = (
+        'Horizon', 'Summit', 'Meadow', 'Harbor', 'Canyon', 'Valley', 'Garden', 'Phoenix',
+        'Marina', 'Prism', 'Orion', 'Cypress', 'Willow', 'Blossom', 'Cascade', 'Meridian',
+        'Zephyr', 'Lotus', 'Echo', 'Nova', 'Comet', 'Ridge', 'Brook', 'Shore', 'Crest',
+        'Gate', 'Bloom', 'Spark', 'Atlas', 'Falcon', 'Harbour', 'Aurora', 'Ember',
+    )
+
     def _generate_password(self) -> str:
         """
-        Generate a secure temporary password.
-        
-        If LINQMD_DEFAULT_PASSWORD is set, use that (for testing).
-        Otherwise, generate a secure random password.
+        Generate a temporary LinQMD password.
+
+        Format: {Adjective}{Noun}{digits}{special}
+        Example: VelvetHorizon742!
+
+        The word pair is randomized from memorable, name-like tokens (PascalCase).
+        Special character is randomized from ! or # only.
         """
-        if self.settings.LINQMD_DEFAULT_PASSWORD:
-            return self.settings.LINQMD_DEFAULT_PASSWORD
-        
-        # Generate secure random password
-        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
-        return ''.join(secrets.choice(alphabet) for _ in range(16))
+        prefix = (
+            f'{secrets.choice(self._LINQMD_PASSWORD_ADJECTIVES)}'
+            f'{secrets.choice(self._LINQMD_PASSWORD_NOUNS)}'
+        )
+        digits = ''.join(secrets.choice(string.digits) for _ in range(3))
+        special = secrets.choice(self._LINQMD_TEMP_PASSWORD_SPECIALS)
+        return f'{prefix}{digits}{special}'
     
     def transform_doctor_data(
         self,
@@ -210,13 +289,28 @@ class LinQMDSyncService:
         
         # Get full name
         fullname = identity.get('full_name', '').strip()
-        
-        # Generate username
-        username = self._generate_username(
-            identity.get('email', ''),
-            fullname
+
+        speciality = (
+            details.get('speciality', '')
+            or details.get('specialty', '')
+            or identity.get('speciality', '')
+            or identity.get('specialty', '')
+            or ''
         )
-        
+        primary_location = (
+            details.get('primary_practice_location', '')
+            or details.get('primary_location', '')
+            or identity.get('primary_practice_location', '')
+            or ''
+        )
+
+        username = self._generate_username(
+            speciality,
+            primary_location,
+            fullname,
+            identity.get('email', ''),
+        )
+
         # Format qualifications as degree string
         qualifications = details.get('qualifications', []) or []
         degree_parts = []
@@ -247,8 +341,9 @@ class LinQMDSyncService:
                 education_lines.append(qual)
         education_details = '\n'.join(education_lines)
         
-        # Format specialities
-        speciality = details.get('speciality', '') or ''
+        # Format specialities (speciality resolved above for username)
+        if not speciality:
+            speciality = details.get('speciality', '') or ''
         sub_specialities = details.get('sub_specialities', []) or []
         specialities_long = ', '.join([speciality] + sub_specialities) if sub_specialities else speciality
         
@@ -478,7 +573,12 @@ class LinQMDSyncService:
         if details:
             details_dict = {
                 'gender': getattr(details, 'gender', None),
-                'speciality': getattr(details, 'specialty', getattr(details, 'primary_specialization', None)),
+                'speciality': getattr(
+                    details,
+                    'specialty',
+                    getattr(details, 'speciality', getattr(details, 'primary_specialization', None)),
+                ),
+                'primary_practice_location': getattr(details, 'primary_practice_location', None),
                 'sub_specialities': getattr(details, 'sub_specialities', []),
                 'areas_of_expertise': getattr(details, 'areas_of_clinical_interest', []),
                 'qualifications': getattr(details, 'qualifications', []),
