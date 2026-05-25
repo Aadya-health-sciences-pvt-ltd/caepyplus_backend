@@ -374,10 +374,6 @@ class Settings(BaseSettings):
     # ========================================
     # LinQMD Integration Configuration
     # ========================================
-    LINQMD_DEFAULT_PASSWORD: str = Field(
-        default="",
-        description="Default password for temporarily created LinQMD users"
-    )
     LINQMD_API_TIMEOUT: int = Field(
         default=30,
         ge=5,
