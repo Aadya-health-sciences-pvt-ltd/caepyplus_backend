@@ -59,12 +59,15 @@ class LinQMDUserPayload:
     
     # Display picture (optional file path or bytes)
     display_picture_path: str | None = None
+
+    # Practice hub theme (dp_1 | dp_2)
+    theme: str = "dp_1"
     
     def to_form_data(self) -> dict[str, str]:
         """
         Convert to urlencoded data format expected by LinQMD API.
         
-        Mandatory fields: name, mail, pass
+        Mandatory fields: name, mail, pass, theme
         Optional fields: fullname, phone_number, degree, speciality, overview, 
                         specialities_long, expertise_summary, education_details
         
@@ -76,6 +79,7 @@ class LinQMDUserPayload:
             'name': self.name,
             'mail': self.mail,
             'pass': self.password,
+            'theme': self.theme,
         }
         
         # Optional fields - only include if they have values
@@ -384,6 +388,7 @@ class LinQMDSyncService:
             password=self._generate_password(),
             fullname=fullname,
             phone_number=identity.get('phone_number', ''),
+            theme=secrets.choice(('dp_1', 'dp_2')),
             degree=degree,
             speciality=speciality,
             overview=overview,

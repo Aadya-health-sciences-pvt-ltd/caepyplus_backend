@@ -149,6 +149,20 @@ class GeminiService:
                     message="Request blocked by AI safety filters",
                     original_error=str(e),
                 )
+            if (
+                "api key expired" in error_str
+                or "api_key_invalid" in error_str
+                or "api key not valid" in error_str
+                or "invalid api key" in error_str
+            ):
+                logger.error("Gemini API key error: %s", e)
+                raise AIServiceError(
+                    message=(
+                        "Google AI API key is invalid or expired. "
+                        "Update GOOGLE_API_KEY in the backend .env and restart the server."
+                    ),
+                    original_error=str(e),
+                )
             logger.error("Gemini API error: %s", e)
             raise AIServiceError(
                 message="AI service temporarily unavailable",
