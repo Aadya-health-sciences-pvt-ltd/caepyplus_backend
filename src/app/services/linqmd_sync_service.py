@@ -13,9 +13,11 @@ Features:
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 import string
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -57,22 +59,21 @@ class LinQMDUserPayload:
     # YouTube videos
     youtube_videos: list[dict[str, str]] = field(default_factory=list)
     
-    # Profile photo URL for LinQMD (presigned S3 URL when applicable)
-    display_picture: str = ""
+    # Profile photo file for LinQMD multipart upload: (filename, bytes, content_type)
+    display_picture_file: tuple[str, bytes, str] | None = None
 
     # Practice hub theme (dp_1 | dp_2)
     theme: str = "dp_1"
     
     def to_form_data(self) -> dict[str, str]:
         """
-        Convert to urlencoded data format expected by LinQMD API.
-        
+        Build text fields for LinQMD user create (multipart when a photo is attached).
+
         Mandatory fields: name, mail, pass, theme
-        Optional fields: fullname, phone_number, degree, speciality, overview, 
+        Optional fields: fullname, phone_number, degree, speciality, overview,
                         specialities_long, expertise_summary, education_details
-        
-        Returns:
-            Dictionary ready for application/x-www-form-urlencoded submission
+
+        displayPicture is sent separately as a file upload, not in this dict.
         """
         # Mandatory fields - always include these
         payload = {
@@ -98,9 +99,6 @@ class LinQMDUserPayload:
         for key, value in optional_fields.items():
             if value:
                 payload[key] = value
-
-        if self.display_picture:
-            payload['displayPicture'] = self.display_picture
         
         return payload
 
@@ -144,11 +142,9 @@ class LinQMDSyncService:
         return self._client
     
     def _get_headers(self) -> dict[str, str]:
-        """Build request headers for LinQMD API."""
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        }
-        
+        """Build request headers for LinQMD API (Content-Type set by httpx for multipart)."""
+        headers: dict[str, str] = {}
+
         # Auth token already includes "Basic " prefix from config
         if self.settings.LINQMD_PRACTICE_HUB_AUTH_TOKEN:
             headers['Authorization'] = self.settings.LINQMD_PRACTICE_HUB_AUTH_TOKEN
@@ -277,19 +273,34 @@ class LinQMDSyncService:
     @staticmethod
     def _stored_uri_to_s3_key(stored_uri: str) -> str | None:
         """Extract S3 object key from a full S3 URL or bare key stored in the DB."""
+        stored_uri = (stored_uri or "").strip()
+        if not stored_uri:
+            return None
         if ".amazonaws.com/" in stored_uri:
-            return stored_uri.split(".amazonaws.com/", 1)[1]
-        if not stored_uri.startswith("http") and "/" in stored_uri:
-            return stored_uri
+            return stored_uri.split(".amazonaws.com/", 1)[1].split("?", 1)[0]
+        if not stored_uri.startswith("http"):
+            return stored_uri.split("?", 1)[0]
         return None
 
-    async def _resolve_profile_photo_url(
+    @staticmethod
+    def _parse_local_profile_photo_uri(stored_uri: str) -> tuple[str, int, str] | None:
+        """Parse local blob URI into (blob_id, doctor_id, extension)."""
+        match = re.search(r"/(\d+)/profile_photo/([^/?#]+)$", stored_uri)
+        if not match:
+            return None
+        doctor_id = int(match.group(1))
+        filename = match.group(2)
+        extension = Path(filename).suffix or ".jpg"
+        blob_id = Path(filename).stem
+        return blob_id, doctor_id, extension
+
+    async def _load_display_picture_file(
         self,
         profile_photo: str | None,
         media: list[dict[str, Any]] | None = None,
-    ) -> str:
+    ) -> tuple[str, bytes, str] | None:
         """
-        Resolve doctor profile photo to a URL LinQMD can fetch.
+        Load doctor profile photo bytes for LinQMD multipart upload.
 
         Uses doctors.profile_photo (S3 key or URL). Falls back to doctor_media
         with category profile_photo when the column is empty.
@@ -301,29 +312,91 @@ class LinQMDSyncService:
                     stored = str(item["file_uri"]).strip()
                     break
         if not stored:
-            return ""
+            logger.info("LinQMD displayPicture: no profile photo on record")
+            return None
 
-        from .blob_storage_service import S3BlobStorageService, get_blob_storage_service
+        from .blob_storage_service import (
+            LocalBlobStorageService,
+            S3BlobStorageService,
+            get_blob_storage_service,
+        )
 
         blob_service = get_blob_storage_service()
-        if isinstance(blob_service, S3BlobStorageService) and blob_service.use_signed_urls:
+
+        if isinstance(blob_service, S3BlobStorageService):
             s3_key = self._stored_uri_to_s3_key(stored)
             if s3_key:
                 try:
-                    return await blob_service.generate_presigned_url(s3_key)
+                    content, filename, content_type = await blob_service.get_object_bytes(
+                        s3_key
+                    )
+                    logger.info(
+                        "LinQMD displayPicture: loaded from S3 key=%s bytes=%d",
+                        s3_key,
+                        len(content),
+                    )
+                    return filename, content, content_type
                 except Exception as exc:
                     logger.warning(
-                        "Failed to presign profile photo for LinQMD; using stored URI: %s",
+                        "LinQMD displayPicture: S3 get_object failed for key=%s: %s",
+                        s3_key,
                         exc,
                     )
 
+        if isinstance(blob_service, LocalBlobStorageService):
+            parsed = self._parse_local_profile_photo_uri(stored)
+            if parsed:
+                blob_id, doc_id, extension = parsed
+                try:
+                    content, meta = await blob_service.get_blob(
+                        blob_id, doc_id, "profile_photo", extension
+                    )
+                    filename = meta.file_name or f"profile_photo{extension}"
+                    logger.info(
+                        "LinQMD displayPicture: loaded from local storage doctor_id=%s bytes=%d",
+                        doc_id,
+                        len(content),
+                    )
+                    return filename, content, meta.mime_type
+                except Exception as exc:
+                    logger.warning(
+                        "LinQMD displayPicture: local blob read failed: %s", exc
+                    )
+
+        download_url = stored
         if stored.startswith("/"):
             base = (self.settings.BLOB_BASE_URL or "").rstrip("/")
             if base.startswith("http"):
-                return f"{base}{stored}"
-            return stored
+                download_url = f"{base}{stored}"
+            else:
+                logger.warning(
+                    "LinQMD displayPicture: relative URI without HTTP BLOB_BASE_URL: %s",
+                    stored,
+                )
+                return None
 
-        return stored
+        if download_url.startswith("http"):
+            try:
+                content, suggested = await blob_service._download_from_url(download_url)
+                filename = suggested or "profile_photo.jpg"
+                content_type = blob_service._detect_mime_type(filename, content)
+                logger.info(
+                    "LinQMD displayPicture: downloaded from URL bytes=%d",
+                    len(content),
+                )
+                return filename, content, content_type
+            except Exception as exc:
+                logger.warning(
+                    "LinQMD displayPicture: HTTP download failed for %s: %s",
+                    download_url,
+                    exc,
+                )
+
+        logger.warning(
+            "LinQMD displayPicture: could not resolve profile photo: %s",
+            stored[:120],
+        )
+        return None
     
     def transform_doctor_data(
         self,
@@ -443,7 +516,6 @@ class LinQMDSyncService:
             fullname=fullname,
             phone_number=identity.get('phone_number', ''),
             theme=secrets.choice(('dp_1', 'dp_2')),
-            display_picture=identity.get('display_picture', '') or '',
             degree=degree,
             speciality=speciality,
             overview=overview,
@@ -474,17 +546,43 @@ class LinQMDSyncService:
         """
         form_data = payload.to_form_data()
         headers = self._get_headers()
-        
-        logger.info(f"Sending user to LinQMD: {payload.mail}")
         create_url = self.settings.linqmd_user_create_url
-        logger.debug(f"LinQMD API URL: {create_url}")
-        logger.debug(f"Request data: {form_data}")
 
-        response = await self.client.post(
-            create_url,
-            data=form_data,
-            headers=headers,
+        files: dict[str, tuple[str, bytes, str]] | None = None
+        if payload.display_picture_file:
+            filename, content, content_type = payload.display_picture_file
+            files = {
+                'displayPicture': (filename, content, content_type),
+            }
+
+        safe_log_data = {k: v for k, v in form_data.items() if k != 'pass'}
+        logger.info(
+            "Sending user to LinQMD: mail=%s has_display_picture=%s",
+            payload.mail,
+            files is not None,
         )
+        logger.debug(
+            "LinQMD API URL: %s fields=%s display_picture_bytes=%s",
+            create_url,
+            safe_log_data,
+            len(payload.display_picture_file[1])
+            if payload.display_picture_file
+            else 0,
+        )
+
+        if files:
+            response = await self.client.post(
+                create_url,
+                data=form_data,
+                files=files,
+                headers=headers,
+            )
+        else:
+            response = await self.client.post(
+                create_url,
+                data=form_data,
+                headers=headers,
+            )
         
         logger.info(f"LinQMD response: status={response.status_code}")
         
@@ -525,14 +623,14 @@ class LinQMDSyncService:
         doctor_id = doctor_id or identity.get('doctor_id', 0)
         
         try:
-            identity_payload = dict(identity)
-            identity_payload['display_picture'] = await self._resolve_profile_photo_url(
+            display_picture_file = await self._load_display_picture_file(
                 identity.get('profile_photo'),
                 media,
             )
 
             # Transform data to LinQMD format
-            payload = self.transform_doctor_data(identity_payload, details, media)
+            payload = self.transform_doctor_data(identity, details, media)
+            payload.display_picture_file = display_picture_file
             
             # Send to LinQMD
             status_code, response_json = await self._send_to_linqmd(payload)
