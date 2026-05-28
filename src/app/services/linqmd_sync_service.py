@@ -57,8 +57,8 @@ class LinQMDUserPayload:
     # YouTube videos
     youtube_videos: list[dict[str, str]] = field(default_factory=list)
     
-    # Display picture (optional file path or bytes)
-    display_picture_path: str | None = None
+    # Profile photo URL for LinQMD (presigned S3 URL when applicable)
+    display_picture: str = ""
 
     # Practice hub theme (dp_1 | dp_2)
     theme: str = "dp_1"
@@ -98,6 +98,9 @@ class LinQMDUserPayload:
         for key, value in optional_fields.items():
             if value:
                 payload[key] = value
+
+        if self.display_picture:
+            payload['displayPicture'] = self.display_picture
         
         return payload
 
@@ -270,6 +273,57 @@ class LinQMDSyncService:
         digits = ''.join(secrets.choice(string.digits) for _ in range(3))
         special = secrets.choice(self._LINQMD_TEMP_PASSWORD_SPECIALS)
         return f'{prefix}{digits}{special}'
+
+    @staticmethod
+    def _stored_uri_to_s3_key(stored_uri: str) -> str | None:
+        """Extract S3 object key from a full S3 URL or bare key stored in the DB."""
+        if ".amazonaws.com/" in stored_uri:
+            return stored_uri.split(".amazonaws.com/", 1)[1]
+        if not stored_uri.startswith("http") and "/" in stored_uri:
+            return stored_uri
+        return None
+
+    async def _resolve_profile_photo_url(
+        self,
+        profile_photo: str | None,
+        media: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """
+        Resolve doctor profile photo to a URL LinQMD can fetch.
+
+        Uses doctors.profile_photo (S3 key or URL). Falls back to doctor_media
+        with category profile_photo when the column is empty.
+        """
+        stored = (profile_photo or "").strip()
+        if not stored and media:
+            for item in media:
+                if item.get("media_category") == "profile_photo" and item.get("file_uri"):
+                    stored = str(item["file_uri"]).strip()
+                    break
+        if not stored:
+            return ""
+
+        from .blob_storage_service import S3BlobStorageService, get_blob_storage_service
+
+        blob_service = get_blob_storage_service()
+        if isinstance(blob_service, S3BlobStorageService) and blob_service.use_signed_urls:
+            s3_key = self._stored_uri_to_s3_key(stored)
+            if s3_key:
+                try:
+                    return await blob_service.generate_presigned_url(s3_key)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to presign profile photo for LinQMD; using stored URI: %s",
+                        exc,
+                    )
+
+        if stored.startswith("/"):
+            base = (self.settings.BLOB_BASE_URL or "").rstrip("/")
+            if base.startswith("http"):
+                return f"{base}{stored}"
+            return stored
+
+        return stored
     
     def transform_doctor_data(
         self,
@@ -389,6 +443,7 @@ class LinQMDSyncService:
             fullname=fullname,
             phone_number=identity.get('phone_number', ''),
             theme=secrets.choice(('dp_1', 'dp_2')),
+            display_picture=identity.get('display_picture', '') or '',
             degree=degree,
             speciality=speciality,
             overview=overview,
@@ -470,8 +525,14 @@ class LinQMDSyncService:
         doctor_id = doctor_id or identity.get('doctor_id', 0)
         
         try:
+            identity_payload = dict(identity)
+            identity_payload['display_picture'] = await self._resolve_profile_photo_url(
+                identity.get('profile_photo'),
+                media,
+            )
+
             # Transform data to LinQMD format
-            payload = self.transform_doctor_data(identity, details, media)
+            payload = self.transform_doctor_data(identity_payload, details, media)
             
             # Send to LinQMD
             status_code, response_json = await self._send_to_linqmd(payload)
@@ -572,6 +633,7 @@ class LinQMDSyncService:
             'full_name': identity.full_name,
             'email': identity.email,
             'phone_number': identity.phone_number,
+            'profile_photo': getattr(details, 'profile_photo', None) if details else None,
         }
         
         details_dict = None
