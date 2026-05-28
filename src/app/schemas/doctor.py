@@ -303,6 +303,13 @@ class DoctorResponse(BaseModel):
         default=False,
         description="True when LinQMD credentials exist for this doctor",
     )
+    public_profile_url: str | None = Field(
+        default=None,
+        description=(
+            "LinQMD public profile URL when verified "
+            "(LINQMD_PRACTICE_HUB_API_URL + /doctor/{username})"
+        ),
+    )
 
     # Block 1: Professional Identity
     full_name: str | None = None
