@@ -37,6 +37,7 @@ from ....db.session import DbSession
 from ....models.doctor import Doctor as DoctorModel
 from ....models.onboarding import DoctorIdentity, DoctorStatusHistory, OnboardingStatus
 from ....repositories.doctor_repository import DoctorRepository
+from ....repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
 from ....repositories.onboarding_repository import OnboardingRepository
 from ....schemas.doctor import DoctorResponse, DoctorUpdate
 from ....schemas.onboarding import (
@@ -119,6 +120,37 @@ async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorRespo
         signed for link in response.external_links
         if (signed := await _sign(link))
     ]
+
+    return response
+
+
+async def _enrich_doctor_response(
+    doctor_id: int,
+    response: DoctorResponse,
+    db: DbSession,
+    settings: Settings,
+) -> DoctorResponse:
+    """Merge identity onboarding status and LinQMD public profile URL."""
+    onboarding_repo = OnboardingRepository(db)
+    identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
+    if identity is not None:
+        status = identity.onboarding_status
+        response.onboarding_status = (
+            status.value if hasattr(status, "value") else str(status)
+        ).lower()
+
+    creds_repo = LinqmdCredentialsRepository(db)
+    creds = await creds_repo.get_by_doctor_id(doctor_id)
+    response.has_linqmd_profile = creds is not None
+
+    is_verified = (response.onboarding_status or "").lower() == "verified"
+    if is_verified and creds and creds.linqmd_username.strip():
+        username = creds.linqmd_username.strip().lstrip("/")
+        response.public_profile_url = settings.linqmd_practice_hub_url(
+            f"/doctor/{username}"
+        )
+    else:
+        response.public_profile_url = None
 
     return response
 
@@ -446,13 +478,16 @@ async def check_phone_availability_for_current_doctor(
 async def get_doctor(
     doctor_id: int,
     repo: DoctorRepoDep,
+    db: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> GenericResponse[DoctorResponse]:
     """Fetch a doctor record by its numeric ID."""
     doctor = await repo.get_by_id_or_raise(doctor_id)
     signed_doctor = await _sign_doctor_urls(doctor)
+    enriched = await _enrich_doctor_response(doctor_id, signed_doctor, db, settings)
     return GenericResponse(
         message="Doctor retrieved successfully",
-        data=signed_doctor,
+        data=enriched,
     )
 
 
@@ -484,9 +519,12 @@ async def update_doctor(
         )
     doctor = await repo.update(doctor_id, data)
     signed_doctor = await _sign_doctor_urls(doctor)
+    enriched = await _enrich_doctor_response(
+        doctor_id, signed_doctor, repo.session, settings
+    )
     return GenericResponse(
         message="Doctor updated successfully",
-        data=signed_doctor,
+        data=enriched,
     )
 
 

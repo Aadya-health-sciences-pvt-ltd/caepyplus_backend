@@ -11,6 +11,7 @@ from sqlalchemy import select, delete
 
 from ....core.security import require_authentication
 from ....core.prompts import get_prompt_manager
+from ....core.exceptions import AIServiceError, ExtractionError
 from ....services.gemini_service import get_gemini_service
 from ....db.session import DbSession
 from ....models.blog import Blog, BlogKeyword, BlogComment
@@ -77,21 +78,41 @@ async def _resolve_image_urls(image_urls: list | None) -> list[str]:
 # AI Suggestions (Static Paths First)
 # ---------------------------------------------------------------------------
 
+_TOPICS_MAX_TOKENS = 8192
+
+
+def _topics_http_exception(exc: Exception) -> HTTPException:
+    """Map AI failures to actionable API errors for the Blog Studio UI."""
+    if isinstance(exc, AIServiceError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.message,
+        )
+    if isinstance(exc, ExtractionError):
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=exc.message,
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to generate topics: {str(exc)}",
+    )
+
+
 @router.get("/insights/topics", response_model=AITopicsResponse)
 async def get_ai_topics() -> AITopicsResponse:
     """Get AI suggested blog topics for the doctor using Gemini."""
     try:
         gemini = get_gemini_service()
         prompts = get_prompt_manager()
-        
+
         prompt = prompts.get_blog_topics_prompt()
-        result = await gemini.generate_structured(prompt)
+        result = await gemini.generate_structured(prompt, max_tokens=_TOPICS_MAX_TOKENS)
         return AITopicsResponse(**result)
+    except (AIServiceError, ExtractionError, HTTPException):
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate topics: {str(e)}"
-        )
+        raise _topics_http_exception(e) from e
 
 @router.get("/insights/keywords", response_model=AIKeywordSuggestionResponse)
 async def get_ai_keywords(topic: str) -> AIKeywordSuggestionResponse:
