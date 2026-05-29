@@ -194,8 +194,24 @@ class OnboardingRepository:
                     await self.session.flush()  # clear the conflicting email before setting ours
             existing.email = new_email
 
-            existing.phone_number = phone_number or existing.phone_number
-            if full_name:
+            from ..core.doctor_utils import (
+                is_synthetic_identity_full_name,
+                is_synthetic_identity_phone,
+            )
+
+            if phone_number and (
+                not existing.phone_number
+                or is_synthetic_identity_phone(
+                    existing.phone_number, doctor_id=doctor_id
+                )
+            ):
+                existing.phone_number = phone_number
+            if full_name and (
+                not existing.full_name
+                or is_synthetic_identity_full_name(
+                    existing.full_name, doctor_id=doctor_id
+                )
+            ):
                 existing.full_name = full_name
             await self.session.commit()
             await self.session.refresh(existing)
@@ -213,6 +229,96 @@ class OnboardingRepository:
         await self.session.commit()
         await self.session.refresh(identity)
         return identity
+
+    async def sync_identity_from_doctor(
+        self,
+        doctor_id: int,
+        *,
+        email: str | None = None,
+        phone_number: str | None = None,
+        full_name: str | None = None,
+    ) -> DoctorIdentity | None:
+        """Replace synthetic identity fields with real values from the doctors row."""
+        from ..core.doctor_utils import (
+            is_synthetic_identity_email,
+            is_synthetic_identity_full_name,
+            is_synthetic_identity_phone,
+        )
+
+        identity = await self.get_identity_by_doctor_id(doctor_id)
+        if identity is None:
+            return None
+
+        normalized_email = (email or "").strip().lower()
+        if (
+            normalized_email
+            and not is_synthetic_identity_email(normalized_email)
+            and is_synthetic_identity_email(identity.email)
+        ):
+            phone_for_create = (phone_number or "").strip()
+            if not phone_for_create or is_synthetic_identity_phone(
+                phone_for_create, doctor_id=doctor_id
+            ):
+                if identity.phone_number and not is_synthetic_identity_phone(
+                    identity.phone_number, doctor_id=doctor_id
+                ):
+                    phone_for_create = identity.phone_number
+                else:
+                    phone_for_create = phone_number or identity.phone_number or ""
+
+            name_for_create = (full_name or "").strip()
+            if not name_for_create or is_synthetic_identity_full_name(
+                name_for_create, doctor_id=doctor_id
+            ):
+                if identity.full_name and not is_synthetic_identity_full_name(
+                    identity.full_name, doctor_id=doctor_id
+                ):
+                    name_for_create = identity.full_name
+                else:
+                    name_for_create = full_name or identity.full_name or ""
+
+            identity = await self.create_identity(
+                doctor_id=doctor_id,
+                email=normalized_email,
+                phone_number=phone_for_create,
+                full_name=name_for_create,
+                onboarding_status=identity.onboarding_status,
+            )
+
+        changed = False
+        phone = (phone_number or "").strip()
+        if phone and not is_synthetic_identity_phone(phone, doctor_id=doctor_id):
+            if is_synthetic_identity_phone(identity.phone_number, doctor_id=doctor_id):
+                identity.phone_number = phone
+                changed = True
+
+        name = (full_name or "").strip()
+        if name and not is_synthetic_identity_full_name(name, doctor_id=doctor_id):
+            if is_synthetic_identity_full_name(identity.full_name, doctor_id=doctor_id):
+                identity.full_name = name
+                changed = True
+
+        if changed:
+            await self.session.commit()
+            await self.session.refresh(identity)
+
+        return identity
+
+    async def sync_email_from_doctor(
+        self,
+        doctor_id: int,
+        *,
+        email: str | None,
+        phone_number: str | None = None,
+        full_name: str | None = None,
+    ) -> DoctorIdentity | None:
+        """Backward-compatible alias for :meth:`sync_identity_from_doctor`."""
+        return await self.sync_identity_from_doctor(
+            doctor_id,
+            email=email,
+            phone_number=phone_number,
+            full_name=full_name,
+        )
 
     async def get_identity_by_doctor_id(self, doctor_id: int) -> DoctorIdentity | None:
         """Fetch doctor_identity by numeric doctor_id."""

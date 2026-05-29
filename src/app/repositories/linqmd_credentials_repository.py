@@ -59,3 +59,18 @@ class LinqmdCredentialsRepository:
             await self.session.rollback()
             raise ValueError("LinQMD credentials already exist for this doctor") from exc
         return row
+
+    async def update_credentials(
+        self,
+        doctor_id: int,
+        linqmd_username: str,
+        linqmd_password: str,
+    ) -> DoctorLinqmdCredentials:
+        """Update stored LinQMD username and password after a successful login."""
+        row = await self.get_by_doctor_id(doctor_id)
+        if row is None:
+            raise ValueError(f"No LinQMD credentials for doctor_id={doctor_id}")
+        row.linqmd_username = linqmd_username.strip()
+        row.linqmd_password = linqmd_password
+        await self.session.flush()
+        return row

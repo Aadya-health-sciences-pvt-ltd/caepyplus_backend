@@ -104,6 +104,25 @@ class BlogPublishConfig(BaseModel):
     share_to_instagram: bool = False
 
 
+class PracticeHubCredentialOverride(BaseModel):
+    """Optional credentials for Practice Hub login retry after failure."""
+    username: str
+    password: str
+
+
+class BlogPublishPracticeHubRequest(BaseModel):
+    """Publish blog to LinQMD Practice Hub."""
+    credentials: PracticeHubCredentialOverride | None = None
+
+
+class BlogPublishPracticeHubResponse(BaseModel):
+    """Result of Practice Hub blog publish."""
+    blog_id: int
+    status: str
+    drupal_node_id: str | None = None
+    practice_hub_response: dict[str, Any] | None = None
+
+
 # ---------------------------------------------------------------------------
 # AI Insights (Stubs)
 # ---------------------------------------------------------------------------
