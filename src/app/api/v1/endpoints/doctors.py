@@ -29,7 +29,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ....core.config import Settings, get_settings
-from ....core.doctor_utils import synthesise_identity as _synthesise_identity
+from ....core.doctor_utils import (
+    resolve_display_email,
+    resolve_display_full_name,
+    resolve_display_phone,
+    synthesise_identity as _synthesise_identity,
+)
 from ....core.rbac import AdminOrOperationUser, CurrentUser
 from ....core.security import decode_bearer_jwt_from_request, subject_effective_doctor_id
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
@@ -388,6 +393,21 @@ async def lookup_doctor(
 
     if identity:
         identity_resp = DoctorIdentityResponse.model_validate(identity)
+        if doctor:
+            identity_resp.email = resolve_display_email(
+                identity_resp.email,
+                doctor.email,
+            )
+            identity_resp.full_name = resolve_display_full_name(
+                identity_resp.full_name,
+                doctor.full_name,
+                doctor_id=resolved_id,
+            )
+            identity_resp.phone_number = resolve_display_phone(
+                identity_resp.phone_number,
+                doctor.phone,
+                doctor_id=resolved_id,
+            )
     else:
         assert doctor is not None
         identity_resp = _synthesise_identity(doctor)
@@ -518,6 +538,13 @@ async def update_doctor(
             detail="You do not have permission to update this doctor profile.",
         )
     doctor = await repo.update(doctor_id, data)
+    onboarding_repo = OnboardingRepository(repo.session)
+    await onboarding_repo.sync_identity_from_doctor(
+        doctor_id,
+        email=doctor.email,
+        phone_number=doctor.phone,
+        full_name=doctor.full_name,
+    )
     signed_doctor = await _sign_doctor_urls(doctor)
     enriched = await _enrich_doctor_response(
         doctor_id, signed_doctor, repo.session, settings
@@ -687,15 +714,19 @@ async def upload_profile_photo(
     onboarding_repo = OnboardingRepository(db)
     identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
 
-    if not identity:
-        # Lazy initialization: If a doctor is uploading a profile photo outside the formal
-        # onboarding flow, we bootstrap a basic identity so the media tracking doesn't fail.
-        # This keeps the User App and Admin Dashboard in sync.
+    if not identity and doctor.email and doctor.phone:
+        # Bootstrap identity only when we have a real email (never persist placeholder_*).
         identity = await onboarding_repo.create_identity(
             doctor_id=doctor_id,
-            email=doctor.email or f"placeholder_{doctor_id}@caepy.com",
-            phone_number=doctor.phone or f"UNKNOWN_{doctor_id}",
-            full_name=doctor.full_name or f"Doctor {doctor_id}",
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=(doctor.full_name or "").strip(),
+        )
+    elif not identity:
+        logger.info(
+            "profile_photo_upload_without_identity",
+            doctor_id=doctor_id,
+            has_email=bool(doctor.email),
         )
 
     media_category = "profile_photo"

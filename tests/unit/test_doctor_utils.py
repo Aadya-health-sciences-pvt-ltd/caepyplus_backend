@@ -13,7 +13,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.app.core.doctor_utils import synthesise_identity
+from src.app.core.doctor_utils import (
+    is_synthetic_identity_email,
+    is_synthetic_identity_full_name,
+    is_synthetic_identity_phone,
+    resolve_display_email,
+    resolve_display_full_name,
+    resolve_display_phone,
+    synthesise_identity,
+)
 from src.app.models.doctor import Doctor
 from src.app.schemas.onboarding import DoctorIdentityResponse
 
@@ -49,6 +57,57 @@ def _make_doctor(**overrides) -> MagicMock:
     for k, v in defaults.items():
         setattr(doctor, k, v)
     return doctor
+
+
+# ---------------------------------------------------------------------------
+# Synthetic identity field detection
+# ---------------------------------------------------------------------------
+
+
+class TestSyntheticIdentityFields:
+
+    def test_placeholder_email_is_synthetic(self):
+        assert is_synthetic_identity_email("placeholder_42@caepy.com")
+
+    def test_real_email_is_not_synthetic(self):
+        assert not is_synthetic_identity_email("dr@example.com")
+
+    def test_doctor_placeholder_name_is_synthetic(self):
+        assert is_synthetic_identity_full_name("Doctor 42", doctor_id=42)
+        assert is_synthetic_identity_full_name("doctor 7")
+
+    def test_real_name_is_not_synthetic(self):
+        assert not is_synthetic_identity_full_name("Anjali Sharma")
+
+    def test_unknown_phone_is_synthetic(self):
+        assert is_synthetic_identity_phone("UNKNOWN_99", doctor_id=99)
+        assert is_synthetic_identity_phone("unknown_5")
+
+    def test_real_phone_is_not_synthetic(self):
+        assert not is_synthetic_identity_phone("+919876543210")
+
+
+class TestResolveDisplayFields:
+
+    def test_resolve_display_email_prefers_doctors_row_when_identity_placeholder(self):
+        assert resolve_display_email(
+            "placeholder_1@caepy.com",
+            "real@example.com",
+        ) == "real@example.com"
+
+    def test_resolve_display_full_name_prefers_doctors_row(self):
+        assert resolve_display_full_name(
+            "Doctor 1",
+            "Priya Nair",
+            doctor_id=1,
+        ) == "Priya Nair"
+
+    def test_resolve_display_phone_prefers_doctors_row(self):
+        assert resolve_display_phone(
+            "UNKNOWN_3",
+            "+918888888888",
+            doctor_id=3,
+        ) == "+918888888888"
 
 
 # ---------------------------------------------------------------------------

@@ -390,6 +390,14 @@ class Settings(BaseSettings):
         default="/api/user/create",
         description="Path for LinQMD user creation, appended to LINQMD_PRACTICE_HUB_API_URL",
     )
+    LINQMD_PRACTICE_HUB_LOGIN_PATH: str = Field(
+        default="/api/caepy/auth/login",
+        description="Path for Practice Hub Caepy login, appended to LINQMD_PRACTICE_HUB_API_URL",
+    )
+    LINQMD_PRACTICE_HUB_BLOGS_PATH: str = Field(
+        default="/api/caepy/blogs",
+        description="Path for Practice Hub blog publish, appended to LINQMD_PRACTICE_HUB_API_URL",
+    )
     LINQMD_PRACTICE_HUB_AUTH_TOKEN: str = Field(
         default="",
         description="Basic Authentication token for LinQMD Practice Hub API"
@@ -540,6 +548,16 @@ class Settings(BaseSettings):
     def linqmd_user_create_url(self) -> str:
         """Full URL for LinQMD user creation POST."""
         return self.linqmd_practice_hub_url(self.LINQMD_PRACTICE_HUB_USER_CREATE_PATH)
+
+    @property
+    def linqmd_login_url(self) -> str:
+        """Full URL for Practice Hub Caepy login POST."""
+        return self.linqmd_practice_hub_url(self.LINQMD_PRACTICE_HUB_LOGIN_PATH)
+
+    @property
+    def linqmd_blogs_url(self) -> str:
+        """Full URL for Practice Hub blog publish POST."""
+        return self.linqmd_practice_hub_url(self.LINQMD_PRACTICE_HUB_BLOGS_PATH)
 
     @property
     def env_file_loaded(self) -> str:

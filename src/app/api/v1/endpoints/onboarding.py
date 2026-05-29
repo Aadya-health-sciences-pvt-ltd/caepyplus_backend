@@ -248,6 +248,12 @@ async def submit_profile(
         identity.onboarding_status = OnboardingStatus.SUBMITTED
         identity.updated_at = now
         identity.status_updated_at = now
+        await repo.sync_identity_from_doctor(
+            doctor_id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
 
     # Audit trail
     await repo.log_status_change(
@@ -431,6 +437,12 @@ async def verify_profile(
         identity.status_updated_at = now
         identity.status_updated_by = str(current_user.id)
         identity.updated_at = now
+        await repo.sync_identity_from_doctor(
+            doctor_id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
 
     # Audit trail
     await repo.log_status_change(
@@ -584,6 +596,12 @@ async def reject_profile(
         identity.status_updated_at = now
         identity.status_updated_by = str(current_user.id)
         identity.updated_at = now
+        await repo.sync_identity_from_doctor(
+            doctor_id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
 
     # Audit trail
     await repo.log_status_change(
