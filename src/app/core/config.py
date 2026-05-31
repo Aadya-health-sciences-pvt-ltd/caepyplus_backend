@@ -390,6 +390,13 @@ class Settings(BaseSettings):
         default="/api/user/create",
         description="Path for LinQMD user creation, appended to LINQMD_PRACTICE_HUB_API_URL",
     )
+    LINQMD_PRACTICE_HUB_USER_UPDATE_PATH: str = Field(
+        default="/api/user/update/{linqmd_user_id}",
+        description=(
+            "Path for LinQMD user profile update; {linqmd_user_id} is replaced with "
+            "doctor_linqmd_credentials.linqmd_user_id"
+        ),
+    )
     LINQMD_PRACTICE_HUB_LOGIN_PATH: str = Field(
         default="/api/caepy/auth/login",
         description="Path for Practice Hub Caepy login, appended to LINQMD_PRACTICE_HUB_API_URL",
@@ -548,6 +555,13 @@ class Settings(BaseSettings):
     def linqmd_user_create_url(self) -> str:
         """Full URL for LinQMD user creation POST."""
         return self.linqmd_practice_hub_url(self.LINQMD_PRACTICE_HUB_USER_CREATE_PATH)
+
+    def linqmd_user_update_url(self, linqmd_user_id: str) -> str:
+        """Full URL for LinQMD user profile update POST."""
+        path = self.LINQMD_PRACTICE_HUB_USER_UPDATE_PATH.format(
+            linqmd_user_id=linqmd_user_id
+        )
+        return self.linqmd_practice_hub_url(path)
 
     @property
     def linqmd_login_url(self) -> str:

@@ -221,8 +221,9 @@ class DoctorRepository:
         """
         doctor = await self.get_by_id_or_raise(doctor_id)
 
-        # Update only provided fields
+        # Update only provided fields (never change onboarding_status via profile PUT)
         update_data = data.model_dump(exclude_unset=True, exclude_none=True)
+        update_data.pop("onboarding_status", None)
 
         # Handle nested objects - practice_locations
         if "practice_locations" in update_data:

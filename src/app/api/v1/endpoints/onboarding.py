@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import BaseModel, Field
 
 from ....core.config import Settings, get_settings
+from ....core.doctor_utils import should_preserve_verified_on_profile_resubmit
 from ....core.exceptions import FileValidationError
 from ....core.rbac import AdminOrOperationUser, CurrentUser
 from ....core.security import decode_bearer_jwt_from_request, subject_effective_doctor_id
@@ -223,13 +224,59 @@ async def submit_profile(
 
     now = datetime.now(UTC)
     previous_status = doctor.onboarding_status
+    identity = await repo.get_identity_by_doctor_id(doctor_id)
+    preserve_verified = should_preserve_verified_on_profile_resubmit(
+        doctor.onboarding_status,
+        identity.onboarding_status if identity else None,
+    )
+
+    if preserve_verified:
+        doctor.onboarding_status = OnboardingStatus.VERIFIED.value
+        doctor.updated_at = now
+        if identity is None:
+            import uuid as _uuid
+
+            from ....models.onboarding import DoctorIdentity as _DoctorIdentity
+
+            identity = _DoctorIdentity(
+                id=str(_uuid.uuid4()),
+                doctor_id=doctor_id,
+                full_name=getattr(doctor, "full_name", None) or "",
+                email=doctor.email or "",
+                phone_number=doctor.phone or "",
+                onboarding_status=OnboardingStatus.VERIFIED,
+            )
+            db.add(identity)
+            await db.flush()
+        else:
+            identity.onboarding_status = OnboardingStatus.VERIFIED
+            identity.updated_at = now
+        await repo.sync_identity_from_doctor(
+            doctor_id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
+        await db.commit()
+        await db.refresh(doctor)
+        if identity is not None:
+            await db.refresh(identity)
+
+        return GenericResponse(
+            message="Profile updated successfully",
+            data={
+                "doctor_id": doctor.id,
+                "previous_status": previous_status,
+                "new_status": doctor.onboarding_status,
+                "status_unchanged": True,
+            },
+        )
 
     doctor.onboarding_status = OnboardingStatus.SUBMITTED.value
     doctor.updated_at = now
 
     # Ensure a doctor_identity row exists (required for FK in doctor_status_history).
     # OTP-created doctors may not have one yet — auto-create a minimal identity.
-    identity = await repo.get_identity_by_doctor_id(doctor_id)
     if identity is None:
         import uuid as _uuid
 

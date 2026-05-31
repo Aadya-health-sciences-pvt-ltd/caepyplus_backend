@@ -25,6 +25,52 @@ DOCTOR_PLACEHOLDER_NAME_RE = re.compile(r"^Doctor \d+$", re.IGNORECASE)
 UNKNOWN_IDENTITY_PHONE_RE = re.compile(r"^UNKNOWN_\d+$", re.IGNORECASE)
 
 
+def _normalize_onboarding_status(status: str | None) -> str:
+    if not status or not str(status).strip():
+        return ""
+    return str(status).strip().lower()
+
+
+def normalize_onboarding_status_value(status: str | object | None) -> str:
+    """Normalize doctors / identity status to a lowercase string."""
+    if status is None:
+        return ""
+    if hasattr(status, "value"):
+        return str(status.value).strip().lower()
+    return str(status).strip().lower()
+
+
+def should_preserve_verified_on_profile_resubmit(
+    doctor_status: str | object | None,
+    identity_status: str | object | None = None,
+) -> bool:
+    """True when resubmit/update must not downgrade verified onboarding status."""
+    return (
+        normalize_onboarding_status_value(doctor_status) == "verified"
+        or normalize_onboarding_status_value(identity_status) == "verified"
+    )
+
+
+def resolve_onboarding_status_for_response(
+    identity_status: str | None,
+    doctor_status: str | None,
+    *,
+    has_identity_row: bool = True,
+) -> str:
+    """Merge doctor_identity and doctors.onboarding_status for API responses.
+
+    If either source is ``verified``, the result is ``verified`` (fixes UI drift when
+    the two tables were updated out of sync).
+    """
+    identity = _normalize_onboarding_status(identity_status)
+    doctor = _normalize_onboarding_status(doctor_status)
+    if identity == "verified" or doctor == "verified":
+        return "verified"
+    if has_identity_row:
+        return identity or doctor or "pending"
+    return doctor or "pending"
+
+
 def is_synthetic_identity_email(email: str | None) -> bool:
     """True for bootstrap / collision placeholder emails, not real user addresses."""
     if not email or not str(email).strip():

@@ -20,6 +20,9 @@ from src.app.core.doctor_utils import (
     resolve_display_email,
     resolve_display_full_name,
     resolve_display_phone,
+    normalize_onboarding_status_value,
+    resolve_onboarding_status_for_response,
+    should_preserve_verified_on_profile_resubmit,
     synthesise_identity,
 )
 from src.app.models.doctor import Doctor
@@ -62,6 +65,46 @@ def _make_doctor(**overrides) -> MagicMock:
 # ---------------------------------------------------------------------------
 # Synthetic identity field detection
 # ---------------------------------------------------------------------------
+
+
+class TestPreserveVerifiedOnResubmit:
+
+    def test_preserves_when_doctors_row_verified(self):
+        assert should_preserve_verified_on_profile_resubmit("verified", "submitted")
+
+    def test_preserves_when_identity_verified(self):
+        assert should_preserve_verified_on_profile_resubmit("submitted", "verified")
+
+    def test_does_not_preserve_for_pending(self):
+        assert not should_preserve_verified_on_profile_resubmit("pending", "pending")
+
+
+class TestResolveOnboardingStatusForResponse:
+
+    def test_verified_wins_when_doctors_row_verified_identity_submitted(self):
+        assert resolve_onboarding_status_for_response(
+            "submitted",
+            "verified",
+        ) == "verified"
+
+    def test_verified_wins_when_identity_verified_doctors_pending(self):
+        assert resolve_onboarding_status_for_response(
+            "verified",
+            "pending",
+        ) == "verified"
+
+    def test_uses_identity_when_no_verified_mismatch(self):
+        assert resolve_onboarding_status_for_response(
+            "submitted",
+            "pending",
+        ) == "submitted"
+
+    def test_falls_back_to_doctors_row_without_identity(self):
+        assert resolve_onboarding_status_for_response(
+            None,
+            "submitted",
+            has_identity_row=False,
+        ) == "submitted"
 
 
 class TestSyntheticIdentityFields:

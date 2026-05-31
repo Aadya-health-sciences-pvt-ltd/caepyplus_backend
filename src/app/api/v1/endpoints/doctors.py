@@ -33,6 +33,7 @@ from ....core.doctor_utils import (
     resolve_display_email,
     resolve_display_full_name,
     resolve_display_phone,
+    resolve_onboarding_status_for_response,
     synthesise_identity as _synthesise_identity,
 )
 from ....core.rbac import AdminOrOperationUser, CurrentUser
@@ -136,13 +137,20 @@ async def _enrich_doctor_response(
     settings: Settings,
 ) -> DoctorResponse:
     """Merge identity onboarding status and LinQMD public profile URL."""
+    doctor_row_status = response.onboarding_status
     onboarding_repo = OnboardingRepository(db)
     identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
+    identity_status: str | None = None
     if identity is not None:
         status = identity.onboarding_status
-        response.onboarding_status = (
+        identity_status = (
             status.value if hasattr(status, "value") else str(status)
-        ).lower()
+        )
+    response.onboarding_status = resolve_onboarding_status_for_response(
+        identity_status,
+        doctor_row_status,
+        has_identity_row=identity is not None,
+    )
 
     creds_repo = LinqmdCredentialsRepository(db)
     creds = await creds_repo.get_by_doctor_id(doctor_id)
@@ -545,6 +553,9 @@ async def update_doctor(
         phone_number=doctor.phone,
         full_name=doctor.full_name,
     )
+    from ....services.linqmd_sync_service import sync_linqmd_profile_update_if_credentials_exist
+
+    await sync_linqmd_profile_update_if_credentials_exist(doctor_id, repo.session)
     signed_doctor = await _sign_doctor_urls(doctor)
     enriched = await _enrich_doctor_response(
         doctor_id, signed_doctor, repo.session, settings
@@ -752,6 +763,10 @@ async def upload_profile_photo(
         doctor_id=doctor_id,
         file_uri=upload_result.file_uri,
     )
+
+    from ....services.linqmd_sync_service import sync_linqmd_profile_update_if_credentials_exist
+
+    await sync_linqmd_profile_update_if_credentials_exist(doctor_id, db)
 
     signed_doctor = await _sign_doctor_urls(doctor)
 
