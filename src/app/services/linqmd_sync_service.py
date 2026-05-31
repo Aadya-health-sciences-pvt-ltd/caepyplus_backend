@@ -52,6 +52,8 @@ class LinQMDUserPayload:
     specialities_long: str = ""  # Detailed specialities
     expertise_summary: str = ""  # Summary of expertise
     education_details: str = ""  # Education details
+    yearsofexperiences: str = ""  # years_post_specialisation, else years_of_clinical_experience
+    awards_honors: str = ""  # awards_academic_honours when present
     
     # Arrays of expertise items
     expertises: list[dict[str, str]] = field(default_factory=list)
@@ -65,23 +67,22 @@ class LinQMDUserPayload:
     # Practice hub theme (dp_1 | dp_2)
     theme: str = "dp_1"
     
-    def to_form_data(self) -> dict[str, str]:
+    def to_form_data(self, *, include_theme: bool = True) -> dict[str, str]:
         """
-        Build text fields for LinQMD user create (multipart when a photo is attached).
+        Build text fields for LinQMD user create/update (multipart when a photo is attached).
 
-        Mandatory fields: name, mail, pass, theme
-        Optional fields: fullname, phone_number, degree, speciality, overview,
-                        specialities_long, expertise_summary, education_details
+        Create: mandatory name, mail, pass, theme
+        Update: mandatory name, mail, pass (theme omitted — set only at profile creation)
 
         displayPicture is sent separately as a file upload, not in this dict.
         """
-        # Mandatory fields - always include these
-        payload = {
+        payload: dict[str, str] = {
             'name': self.name,
             'mail': self.mail,
             'pass': self.password,
-            'theme': self.theme,
         }
+        if include_theme:
+            payload['theme'] = self.theme
         
         # Optional fields - only include if they have values
         optional_fields = {
@@ -93,6 +94,8 @@ class LinQMDUserPayload:
             'specialities_long': self.specialities_long,
             'expertise_summary': self.expertise_summary,
             'education_details': self.education_details,
+            'yearsofexperiences': self.yearsofexperiences,
+            'awards_honors': self.awards_honors,
         }
         
         # Add non-empty optional fields
@@ -403,6 +406,10 @@ class LinQMDSyncService:
         identity: dict[str, Any],
         details: dict[str, Any] | None = None,
         media: list[dict[str, Any]] | None = None,
+        *,
+        linqmd_username: str | None = None,
+        linqmd_password: str | None = None,
+        include_theme: bool = True,
     ) -> LinQMDUserPayload:
         """
         Transform internal doctor data to LinQMD API format.
@@ -435,7 +442,7 @@ class LinQMDSyncService:
             or ''
         )
 
-        username = self._generate_username(
+        username = linqmd_username or self._generate_username(
             speciality,
             primary_location,
             fullname,
@@ -508,20 +515,48 @@ class LinQMDSyncService:
         
         # Get overview/about text
         overview = details.get('professional_overview', '') or details.get('about_me', '') or ''
+
+        years_value = details.get('years_post_specialisation')
+        if years_value is None:
+            years_value = details.get('years_of_clinical_experience')
+        yearsofexperiences = (
+            str(years_value) if years_value is not None else ''
+        )
+
+        awards_raw = details.get('awards_academic_honours', []) or []
+        awards_parts: list[str] = []
+        for item in awards_raw:
+            if isinstance(item, str) and item.strip():
+                awards_parts.append(item.strip())
+            elif isinstance(item, dict):
+                label = (
+                    item.get('title')
+                    or item.get('name')
+                    or item.get('award')
+                    or ''
+                )
+                if str(label).strip():
+                    awards_parts.append(str(label).strip())
+        awards_honors = ', '.join(awards_parts)
         
+        password = linqmd_password or self._generate_password()
+        theme = secrets.choice(('dp_1', 'dp_2')) if include_theme else 'dp_1'
+
         return LinQMDUserPayload(
             name=username,
             mail=identity.get('email', ''),
-            password=self._generate_password(),
+            password=password,
             fullname=fullname,
             phone_number=identity.get('phone_number', ''),
-            theme=secrets.choice(('dp_1', 'dp_2')),
+            theme=theme,
             degree=degree,
             speciality=speciality,
             overview=overview,
             specialities_long=specialities_long,
             expertise_summary=expertise_summary,
             education_details=education_details,
+            yearsofexperiences=yearsofexperiences,
+            awards_honors=awards_honors,
         )
     
     @retry(
@@ -531,22 +566,17 @@ class LinQMDSyncService:
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
-    async def _send_to_linqmd(
+    async def _post_user_multipart(
         self,
+        url: str,
         payload: LinQMDUserPayload,
+        *,
+        include_theme: bool,
+        attach_credentials_to_response: bool,
     ) -> tuple[int, dict[str, Any]]:
-        """
-        Send user data to LinQMD API with retry logic.
-        
-        Args:
-            payload: User data to send
-            
-        Returns:
-            Tuple of (status_code, response_json)
-        """
-        form_data = payload.to_form_data()
+        """POST multipart user payload to a LinQMD user create or update URL."""
+        form_data = payload.to_form_data(include_theme=include_theme)
         headers = self._get_headers()
-        create_url = self.settings.linqmd_user_create_url
 
         files: dict[str, tuple[str, bytes, str]] | None = None
         if payload.display_picture_file:
@@ -557,13 +587,14 @@ class LinQMDSyncService:
 
         safe_log_data = {k: v for k, v in form_data.items() if k != 'pass'}
         logger.info(
-            "Sending user to LinQMD: mail=%s has_display_picture=%s",
+            "LinQMD user request: url=%s mail=%s has_display_picture=%s include_theme=%s",
+            url,
             payload.mail,
             files is not None,
+            include_theme,
         )
         logger.debug(
-            "LinQMD API URL: %s fields=%s display_picture_bytes=%s",
-            create_url,
+            "LinQMD fields=%s display_picture_bytes=%s",
             safe_log_data,
             len(payload.display_picture_file[1])
             if payload.display_picture_file
@@ -572,20 +603,20 @@ class LinQMDSyncService:
 
         if files:
             response = await self.client.post(
-                create_url,
+                url,
                 data=form_data,
                 files=files,
                 headers=headers,
             )
         else:
             response = await self.client.post(
-                create_url,
+                url,
                 data=form_data,
                 headers=headers,
             )
-        
-        logger.info(f"LinQMD response: status={response.status_code}")
-        
+
+        logger.info("LinQMD response: status=%s url=%s", response.status_code, url)
+
         try:
             response_json = response.json()
         except Exception:
@@ -596,11 +627,131 @@ class LinQMDSyncService:
         else:
             response_json = {"raw_response": response_json}
 
-        response_json["Username"] = payload.name
-        response_json["Password"] = payload.password
+        if attach_credentials_to_response:
+            response_json["Username"] = payload.name
+            response_json["Password"] = payload.password
 
         return response.status_code, response_json
-    
+
+    async def _send_to_linqmd(
+        self,
+        payload: LinQMDUserPayload,
+    ) -> tuple[int, dict[str, Any]]:
+        """Send user data to LinQMD user create API with retry logic."""
+        return await self._post_user_multipart(
+            self.settings.linqmd_user_create_url,
+            payload,
+            include_theme=True,
+            attach_credentials_to_response=True,
+        )
+
+    def _finalize_sync_result(
+        self,
+        doctor_id: int,
+        status_code: int,
+        response_json: dict[str, Any],
+    ) -> LinQMDSyncResult:
+        """Map LinQMD HTTP response to LinQMDSyncResult."""
+        success = 200 <= status_code < 300
+        api_error = (
+            response_json.get("error")
+            if isinstance(response_json, dict)
+            else None
+        )
+        if success and api_error:
+            success = False
+
+        error_message: str | None = None
+        if not success:
+            if api_error:
+                error_message = str(api_error)
+            elif isinstance(response_json, dict) and response_json.get("message"):
+                error_message = str(response_json["message"])
+            else:
+                error_message = f"API returned status {status_code}"
+
+        return LinQMDSyncResult(
+            success=success,
+            doctor_id=doctor_id,
+            linqmd_response=response_json,
+            http_status_code=status_code,
+            error_message=error_message,
+        )
+
+    async def _build_sync_context(
+        self,
+        doctor_id: int,
+        db_session: Any,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, Any]]] | None:
+        """Load identity, doctor row, and media for LinQMD sync. None if identity missing."""
+        from ..repositories.onboarding_repository import OnboardingRepository
+
+        repo = OnboardingRepository(db_session)
+        identity = await repo.get_identity_by_doctor_id(doctor_id)
+        if not identity:
+            return None
+
+        from ..repositories.doctor_repository import DoctorRepository
+
+        doc_repo = DoctorRepository(db_session)
+        details = await doc_repo.get_by_id(doctor_id)
+        media = await repo.list_media(doctor_id)
+
+        identity_dict = {
+            'doctor_id': identity.doctor_id,
+            'full_name': identity.full_name,
+            'email': identity.email,
+            'phone_number': identity.phone_number,
+            'profile_photo': getattr(details, 'profile_photo', None) if details else None,
+        }
+
+        details_dict = None
+        if details:
+            details_dict = {
+                'gender': getattr(details, 'gender', None),
+                'speciality': getattr(
+                    details,
+                    'specialty',
+                    getattr(details, 'speciality', getattr(details, 'primary_specialization', None)),
+                ),
+                'primary_practice_location': getattr(details, 'primary_practice_location', None),
+                'sub_specialities': getattr(details, 'sub_specialities', []),
+                'areas_of_expertise': getattr(details, 'areas_of_clinical_interest', []),
+                'qualifications': getattr(details, 'qualifications', []),
+                'professional_overview': getattr(
+                    details,
+                    'professional_overview',
+                    getattr(details, 'professional_achievement', None),
+                ),
+                'about_me': getattr(
+                    details,
+                    'about_me',
+                    getattr(details, 'personal_achievement', None),
+                ),
+                'conditions_treated': getattr(details, 'conditions_treated', []),
+                'procedures_performed': getattr(details, 'procedures_performed', []),
+                'external_links': getattr(details, 'external_links', {}),
+                'years_post_specialisation': getattr(
+                    details, 'years_post_specialisation', None
+                ),
+                'years_of_clinical_experience': getattr(
+                    details, 'years_of_clinical_experience', None
+                ),
+                'awards_academic_honours': getattr(
+                    details, 'awards_academic_honours', []
+                ),
+            }
+
+        media_list = [
+            {
+                'media_category': m.media_category,
+                'file_uri': m.file_uri,
+                'is_primary': m.is_primary,
+            }
+            for m in media
+        ]
+        return identity_dict, details_dict, media_list
+
     async def sync_doctor(
         self,
         identity: dict[str, Any],
@@ -632,40 +783,17 @@ class LinQMDSyncService:
             payload = self.transform_doctor_data(identity, details, media)
             payload.display_picture_file = display_picture_file
             
-            # Send to LinQMD
             status_code, response_json = await self._send_to_linqmd(payload)
-            
-            # Check for success (2xx status codes, no error payload)
-            success = 200 <= status_code < 300
-            api_error = (
-                response_json.get("error")
-                if isinstance(response_json, dict)
-                else None
-            )
-            if success and api_error:
-                success = False
-
-            if success:
-                logger.info(f"Successfully synced doctor {doctor_id} to LinQMD")
+            result = self._finalize_sync_result(doctor_id, status_code, response_json)
+            if result.success:
+                logger.info("Successfully created/synced doctor %s on LinQMD", doctor_id)
             else:
-                logger.error(f"Failed to sync doctor {doctor_id} to LinQMD: {response_json}")
-
-            error_message: str | None = None
-            if not success:
-                if api_error:
-                    error_message = str(api_error)
-                elif isinstance(response_json, dict) and response_json.get("message"):
-                    error_message = str(response_json["message"])
-                else:
-                    error_message = f"API returned status {status_code}"
-
-            return LinQMDSyncResult(
-                success=success,
-                doctor_id=doctor_id,
-                linqmd_response=response_json,
-                http_status_code=status_code,
-                error_message=error_message,
-            )
+                logger.error(
+                    "Failed to sync doctor %s to LinQMD: %s",
+                    doctor_id,
+                    response_json,
+                )
+            return result
             
         except httpx.TimeoutException as e:
             logger.error(f"Timeout syncing doctor {doctor_id} to LinQMD: {e}")
@@ -695,74 +823,119 @@ class LinQMDSyncService:
         db_session: Any,
     ) -> LinQMDSyncResult:
         """
-        Sync a doctor to LinQMD by their internal ID.
-        
-        Fetches data from database and syncs.
-        
-        Args:
-            doctor_id: Internal doctor ID
-            db_session: Database session for fetching data
-            
-        Returns:
-            LinQMDSyncResult
+        Create a LinQMD user by internal doctor ID (admin initial profile creation).
         """
-        from ..repositories.onboarding_repository import OnboardingRepository
-        
-        repo = OnboardingRepository(db_session)
-        
-        # Fetch doctor data
-        identity = await repo.get_identity_by_doctor_id(doctor_id)
-        if not identity:
+        context = await self._build_sync_context(doctor_id, db_session)
+        if context is None:
             return LinQMDSyncResult(
                 success=False,
                 doctor_id=doctor_id,
                 error_message=f"Doctor with ID {doctor_id} not found",
             )
-        
-        from ..repositories.doctor_repository import DoctorRepository
-        doc_repo = DoctorRepository(db_session)
-        
-        details = await doc_repo.get_by_id(doctor_id)
-        media = await repo.list_media(doctor_id)
-        
-        # Convert ORM objects to dicts
-        identity_dict = {
-            'doctor_id': identity.doctor_id,
-            'full_name': identity.full_name,
-            'email': identity.email,
-            'phone_number': identity.phone_number,
-            'profile_photo': getattr(details, 'profile_photo', None) if details else None,
-        }
-        
-        details_dict = None
-        if details:
-            details_dict = {
-                'gender': getattr(details, 'gender', None),
-                'speciality': getattr(
-                    details,
-                    'specialty',
-                    getattr(details, 'speciality', getattr(details, 'primary_specialization', None)),
-                ),
-                'primary_practice_location': getattr(details, 'primary_practice_location', None),
-                'sub_specialities': getattr(details, 'sub_specialities', []),
-                'areas_of_expertise': getattr(details, 'areas_of_clinical_interest', []),
-                'qualifications': getattr(details, 'qualifications', []),
-                'professional_overview': getattr(details, 'professional_overview', getattr(details, 'professional_achievement', None)),
-                'about_me': getattr(details, 'about_me', getattr(details, 'personal_achievement', None)),
-                'conditions_treated': getattr(details, 'conditions_treated', []),
-                'procedures_performed': getattr(details, 'procedures_performed', []),
-                'external_links': getattr(details, 'external_links', {}),
-            }
-        
-        media_list = []
-        for m in media:
-            media_list.append({
-                'media_category': m.media_category,
-                'file_uri': m.file_uri,
-                'is_primary': m.is_primary,
-            })
-        
+        identity_dict, details_dict, media_list = context
         return await self.sync_doctor(identity_dict, details_dict, media_list, doctor_id)
+
+    async def _send_update_to_linqmd(
+        self,
+        linqmd_user_id: str,
+        payload: LinQMDUserPayload,
+    ) -> tuple[int, dict[str, Any]]:
+        """Send user data to LinQMD user update API (no theme field)."""
+        update_url = self.settings.linqmd_user_update_url(linqmd_user_id)
+        return await self._post_user_multipart(
+            update_url,
+            payload,
+            include_theme=False,
+            attach_credentials_to_response=False,
+        )
+
+    async def sync_doctor_update_by_id(
+        self,
+        doctor_id: int,
+        db_session: Any,
+    ) -> LinQMDSyncResult:
+        """
+        Push current Caepy profile data to LinQMD when credentials already exist.
+
+        No-op (success) when doctor_linqmd_credentials row is missing.
+        """
+        from ..repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
+
+        creds_repo = LinqmdCredentialsRepository(db_session)
+        creds = await creds_repo.get_by_doctor_id(doctor_id)
+        if creds is None:
+            return LinQMDSyncResult(
+                success=True,
+                doctor_id=doctor_id,
+                linqmd_response={"skipped": "no_linqmd_credentials"},
+            )
+
+        context = await self._build_sync_context(doctor_id, db_session)
+        if context is None:
+            return LinQMDSyncResult(
+                success=False,
+                doctor_id=doctor_id,
+                error_message=f"Doctor with ID {doctor_id} not found",
+            )
+
+        identity_dict, details_dict, media_list = context
+        doctor_id = doctor_id or identity_dict.get('doctor_id', 0)
+
+        try:
+            display_picture_file = await self._load_display_picture_file(
+                identity_dict.get('profile_photo'),
+                media_list,
+            )
+            payload = self.transform_doctor_data(
+                identity_dict,
+                details_dict,
+                media_list,
+                linqmd_username=creds.linqmd_username,
+                linqmd_password=creds.linqmd_password,
+                include_theme=False,
+            )
+            payload.display_picture_file = display_picture_file
+
+            status_code, response_json = await self._send_update_to_linqmd(
+                creds.linqmd_user_id,
+                payload,
+            )
+            result = self._finalize_sync_result(doctor_id, status_code, response_json)
+            if result.success:
+                logger.info(
+                    "LinQMD profile updated doctor_id=%s linqmd_user_id=%s",
+                    doctor_id,
+                    creds.linqmd_user_id,
+                )
+            else:
+                logger.warning(
+                    "LinQMD profile update failed doctor_id=%s: %s",
+                    doctor_id,
+                    response_json,
+                )
+            return result
+
+        except httpx.TimeoutException as e:
+            logger.error("Timeout updating LinQMD profile doctor_id=%s: %s", doctor_id, e)
+            return LinQMDSyncResult(
+                success=False,
+                doctor_id=doctor_id,
+                error_message=f"Request timeout: {e}",
+            )
+        except httpx.ConnectError as e:
+            logger.error("Connection error updating LinQMD profile doctor_id=%s: %s", doctor_id, e)
+            return LinQMDSyncResult(
+                success=False,
+                doctor_id=doctor_id,
+                error_message=f"Connection error: {e}",
+            )
+        except Exception as e:
+            logger.exception("Unexpected error updating LinQMD profile doctor_id=%s", doctor_id)
+            return LinQMDSyncResult(
+                success=False,
+                doctor_id=doctor_id,
+                error_message=f"Unexpected error: {str(e)}",
+            )
 
 
 # -----------------------------------------------------------------------------
@@ -778,3 +951,30 @@ def get_linqmd_sync_service() -> LinQMDSyncService:
     if _linqmd_sync_service is None:
         _linqmd_sync_service = LinQMDSyncService()
     return _linqmd_sync_service
+
+
+async def sync_linqmd_profile_update_if_credentials_exist(
+    doctor_id: int,
+    db_session: Any,
+) -> None:
+    """Best-effort LinQMD profile update after a Caepy doctor profile change.
+
+    Does nothing when ``doctor_linqmd_credentials`` has no row for the doctor.
+    Failures are logged only so the caller's HTTP response is not blocked.
+    """
+    try:
+        result = await get_linqmd_sync_service().sync_doctor_update_by_id(
+            doctor_id,
+            db_session,
+        )
+        if not result.success and result.error_message:
+            logger.warning(
+                "LinQMD profile update failed doctor_id=%s: %s",
+                doctor_id,
+                result.error_message,
+            )
+    except Exception:
+        logger.exception(
+            "LinQMD profile update error doctor_id=%s",
+            doctor_id,
+        )

@@ -101,6 +101,28 @@ async def test_verify_profile(
 
 
 @pytest.mark.asyncio
+async def test_submit_after_verify_keeps_verified_status(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_doctor_id: int
+) -> None:
+    """Re-submitting after verification must not downgrade to submitted."""
+    verify_resp = await client.post(
+        f"/api/v1/onboarding/verify/{seeded_doctor_id}",
+        json={"send_email": False},
+        headers=auth_headers,
+    )
+    assert verify_resp.status_code == 200
+
+    submit_resp = await client.post(
+        f"/api/v1/onboarding/submit/{seeded_doctor_id}",
+        headers=auth_headers,
+    )
+    assert submit_resp.status_code == 200
+    submit_data = submit_resp.json()["data"]
+    assert submit_data["new_status"] == "verified"
+    assert submit_data.get("status_unchanged") is True
+
+
+@pytest.mark.asyncio
 async def test_verify_nonexistent_doctor_returns_404(
     client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:
