@@ -14,16 +14,25 @@ Doctor creation is done via CSV bulk-upload (or the admin onboarding flow).
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
+from tests.conftest import _create_test_jwt
+
 from src.app.main import app
 from src.app.db.session import get_db
+from src.app.core.doctor_utils import is_synthetic_identity_email
 from src.app.models.doctor import Doctor
+from src.app.models.enums import UserRole
+from src.app.models.onboarding import DoctorIdentity, DoctorMedia
+from src.app.models.user import User
+from src.app.repositories.doctor_repository import DoctorRepository
 
 
 async def _seed_doctor(client: "AsyncClient") -> int:
@@ -153,6 +162,109 @@ async def test_update_doctor_requires_auth(client: AsyncClient) -> None:
     """PUT /doctors/{id} without auth returns 401."""
     response = await client.put("/api/v1/doctors/1", json={"first_name": "X"})
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/doctors/{id}/profile-photo
+# ---------------------------------------------------------------------------
+
+
+async def _seed_phone_only_doctor(client: "AsyncClient") -> tuple[int, str]:
+    """Create OTP-style doctor (phone, no email) and return (id, phone)."""
+    override_get_db = app.dependency_overrides.get(get_db)
+    assert override_get_db is not None
+
+    doctor_id: int | None = None
+    phone = "+919876543288"
+    gen = override_get_db()
+    session: AsyncSession = await gen.__anext__()
+    doc_repo = DoctorRepository(session)
+    doctor = await doc_repo.create_from_phone(phone)
+    doctor_id = doctor.id
+    session.add(
+        User(
+            phone=phone,
+            email=None,
+            role=UserRole.USER.value,
+            is_active=True,
+            doctor_id=doctor_id,
+        )
+    )
+    await session.flush()
+    try:
+        await gen.__anext__()
+    except StopAsyncIteration:
+        pass
+
+    assert doctor_id is not None
+    return doctor_id, phone
+
+
+@pytest.mark.asyncio
+async def test_upload_profile_photo_bootstraps_identity_for_phone_only_doctor(
+    client: AsyncClient,
+    mock_blob_storage: MagicMock,
+) -> None:
+    """Early onboarding: photo upload before form fields creates identity + media."""
+    doctor_id, phone = await _seed_phone_only_doctor(client)
+    token = _create_test_jwt(
+        subject=phone,
+        doctor_id=doctor_id,
+        email=None,
+        role="user",
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    mock_upload = MagicMock(
+        success=True,
+        blob_id="test_blob",
+        file_uri=f"doctors/{doctor_id}/profile_photo/test.jpg",
+        file_size=128,
+        mime_type="image/jpeg",
+        content_hash="abc",
+        error_message=None,
+    )
+    mock_blob_storage.upload_from_bytes = AsyncMock(return_value=mock_upload)
+
+    with patch(
+        "src.app.api.v1.endpoints.doctors.get_blob_storage_service",
+        return_value=mock_blob_storage,
+    ):
+        response = await client.post(
+            f"/api/v1/doctors/{doctor_id}/profile-photo",
+            headers=headers,
+            files={"file": ("profile-photo.jpg", b"\xff\xd8\xff", "image/jpeg")},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["profile_photo"] == mock_upload.file_uri
+
+    override_get_db = app.dependency_overrides.get(get_db)
+    assert override_get_db is not None
+    gen = override_get_db()
+    session: AsyncSession = await gen.__anext__()
+    identity = (
+        await session.execute(
+            select(DoctorIdentity).where(DoctorIdentity.doctor_id == doctor_id)
+        )
+    ).scalar_one_or_none()
+    media_rows = (
+        await session.execute(
+            select(DoctorMedia).where(DoctorMedia.doctor_id == doctor_id)
+        )
+    ).scalars().all()
+    try:
+        await gen.__anext__()
+    except StopAsyncIteration:
+        pass
+
+    assert identity is not None
+    assert is_synthetic_identity_email(identity.email)
+    assert identity.phone_number == phone
+    assert len(media_rows) == 1
+    assert media_rows[0].field_name == "profile_photo"
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..models.doctor import Doctor
 from ..models.onboarding import (
     DoctorIdentity,
     DoctorMedia,
@@ -24,6 +25,8 @@ from ..models.onboarding import (
     DropdownOption,
     OnboardingStatus,
 )
+
+PHONE_REQUIRED_FOR_IDENTITY = "phone_required"
 
 
 class OnboardingRepository:
@@ -288,15 +291,28 @@ class OnboardingRepository:
         changed = False
         phone = (phone_number or "").strip()
         if phone and not is_synthetic_identity_phone(phone, doctor_id=doctor_id):
-            if is_synthetic_identity_phone(identity.phone_number, doctor_id=doctor_id):
+            if identity.phone_number != phone:
                 identity.phone_number = phone
                 changed = True
 
         name = (full_name or "").strip()
         if name and not is_synthetic_identity_full_name(name, doctor_id=doctor_id):
-            if is_synthetic_identity_full_name(identity.full_name, doctor_id=doctor_id):
+            if identity.full_name != name:
                 identity.full_name = name
                 changed = True
+
+        if (
+            normalized_email
+            and not is_synthetic_identity_email(normalized_email)
+            and identity.email.lower() != normalized_email
+        ):
+            conflicting = await self.get_identity_by_email(normalized_email)
+            if conflicting is not None and conflicting.id != identity.id:
+                conflicting.email = f"_displaced_{uuid.uuid4().hex}@placeholder"
+                self.session.add(conflicting)
+                await self.session.flush()
+            identity.email = normalized_email
+            changed = True
 
         if changed:
             await self.session.commit()
@@ -318,6 +334,33 @@ class OnboardingRepository:
             email=email,
             phone_number=phone_number,
             full_name=full_name,
+        )
+
+    async def ensure_identity_for_doctor(self, doctor: Doctor) -> DoctorIdentity:
+        """Ensure ``doctor_identity`` exists so ``doctor_media`` FK inserts succeed.
+
+        OTP signup creates a ``doctors`` row with phone only. Media rows reference
+        ``doctor_identity.doctor_id``, so early profile-photo upload must bootstrap
+        identity when missing. Uses a synthetic email only while ``doctors.email``
+        is still null; replaced later via :meth:`sync_identity_from_doctor`.
+        """
+        existing = await self.get_identity_by_doctor_id(doctor.id)
+        if existing is not None:
+            return existing
+
+        phone = (doctor.phone or "").strip()
+        if not phone:
+            raise ValueError(PHONE_REQUIRED_FOR_IDENTITY)
+
+        email = (doctor.email or "").strip().lower()
+        if not email:
+            email = f"placeholder_{doctor.id}@caepy.com"
+
+        return await self.create_identity(
+            doctor_id=doctor.id,
+            email=email,
+            phone_number=phone,
+            full_name=(doctor.full_name or "").strip(),
         )
 
     async def get_identity_by_doctor_id(self, doctor_id: int) -> DoctorIdentity | None:
