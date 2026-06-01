@@ -163,6 +163,45 @@ class LinQMDSyncService:
         """Lowercase alphanumeric slug for a single field (speciality or location)."""
         return ''.join(c.lower() for c in (value or '').strip() if c.isalnum())
 
+    # When normalized speciality exceeds this length, trim trailing words (not mid-word).
+    _SPECIALITY_TRUNCATE_TRIGGER_CHARS = 15
+
+    @classmethod
+    def _normalize_speciality_text(cls, value: str) -> str:
+        """Replace non-alphanumeric characters with spaces and collapse whitespace."""
+        text = re.sub(r'[^0-9A-Za-z]+', ' ', (value or '').strip())
+        return ' '.join(text.split())
+
+    @classmethod
+    def _truncate_speciality_text(cls, text: str) -> str:
+        """
+        If text exceeds the trigger length, drop trailing words (never mid-word).
+
+        Keeps at least two leading words when possible so titles like
+        "Consultant Pediatrician …" are preserved; a single long word is kept whole.
+        """
+        if len(text) <= cls._SPECIALITY_TRUNCATE_TRIGGER_CHARS:
+            return text
+        words = text.split()
+        while len(words) > 2:
+            words.pop()
+        return ' '.join(words)
+
+    @classmethod
+    def _speciality_username_slug(cls, speciality: str) -> str:
+        """
+        Prepare speciality for the username slug: normalize, word-boundary truncate, slugify.
+
+        Example: "Consultant Pediatrician & allergy asthma specialist"
+        -> "Consultant Pediatrician allergy asthma specialist" (normalized)
+        -> "Consultant Pediatrician" (trim trailing words) -> ``consultantpediatrician``.
+        """
+        normalized = cls._normalize_speciality_text(speciality)
+        if not normalized:
+            return ''
+        truncated = cls._truncate_speciality_text(normalized)
+        return cls._slug_field_segment(truncated)
+
     _HONORIFIC_PREFIXES = frozenset({'dr', 'mr', 'mrs', 'ms', 'prof'})
 
     @classmethod
@@ -214,7 +253,7 @@ class LinQMDSyncService:
         """
         parts: list[str] = []
 
-        spec = self._slug_field_segment(speciality)
+        spec = self._speciality_username_slug(speciality)
         if spec:
             parts.append(spec)
 
