@@ -124,6 +124,20 @@ def resolve_display_email(
     return identity or doctor or ""
 
 
+def resolve_linqmd_sync_email(
+    identity_email: str | None,
+    doctor_email: str | None,
+) -> str:
+    """Email for outbound LinQMD sync — prefer the doctors row (source of PUT /doctors)."""
+    doctor = (doctor_email or "").strip().lower()
+    if doctor and not doctor.startswith("pending_"):
+        return doctor
+    identity = (identity_email or "").strip()
+    if identity and not is_synthetic_identity_email(identity):
+        return identity.lower()
+    return doctor or identity or ""
+
+
 def resolve_display_full_name(
     identity_full_name: str | None,
     doctor_full_name: str | None,

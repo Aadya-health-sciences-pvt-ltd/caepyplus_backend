@@ -262,6 +262,12 @@ async def submit_profile(
         if identity is not None:
             await db.refresh(identity)
 
+        from ....services.linqmd_sync_service import (
+            sync_linqmd_profile_update_if_credentials_exist,
+        )
+
+        await sync_linqmd_profile_update_if_credentials_exist(doctor_id, db)
+
         return GenericResponse(
             message="Profile updated successfully",
             data={
@@ -314,6 +320,12 @@ async def submit_profile(
 
     await db.commit()
     await db.refresh(doctor)
+
+    from ....services.linqmd_sync_service import (
+        sync_linqmd_profile_update_if_credentials_exist,
+    )
+
+    await sync_linqmd_profile_update_if_credentials_exist(doctor_id, db)
 
     return GenericResponse(
         message="Profile submitted successfully",

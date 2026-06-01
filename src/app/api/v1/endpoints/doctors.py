@@ -44,7 +44,10 @@ from ....models.doctor import Doctor as DoctorModel
 from ....models.onboarding import DoctorIdentity, DoctorStatusHistory, OnboardingStatus
 from ....repositories.doctor_repository import DoctorRepository
 from ....repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
-from ....repositories.onboarding_repository import OnboardingRepository
+from ....repositories.onboarding_repository import (
+    PHONE_REQUIRED_FOR_IDENTITY,
+    OnboardingRepository,
+)
 from ....schemas.doctor import DoctorResponse, DoctorUpdate
 from ....schemas.onboarding import (
     DoctorIdentityResponse,
@@ -547,6 +550,7 @@ async def update_doctor(
         )
     doctor = await repo.update(doctor_id, data)
     onboarding_repo = OnboardingRepository(repo.session)
+    await onboarding_repo.ensure_identity_for_doctor(doctor)
     await onboarding_repo.sync_identity_from_doctor(
         doctor_id,
         email=doctor.email,
@@ -555,6 +559,7 @@ async def update_doctor(
     )
     from ....services.linqmd_sync_service import sync_linqmd_profile_update_if_credentials_exist
 
+    await repo.session.expire_all()
     await sync_linqmd_profile_update_if_credentials_exist(doctor_id, repo.session)
     signed_doctor = await _sign_doctor_urls(doctor)
     enriched = await _enrich_doctor_response(
@@ -721,24 +726,17 @@ async def upload_profile_photo(
     await repo.session.commit()
     await repo.session.refresh(doctor)
 
-    # Update doctor_media table for Admin view compatibility
+    # doctor_media FK requires doctor_identity (OTP users may not have one yet).
     onboarding_repo = OnboardingRepository(db)
-    identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
-
-    if not identity and doctor.email and doctor.phone:
-        # Bootstrap identity only when we have a real email (never persist placeholder_*).
-        identity = await onboarding_repo.create_identity(
-            doctor_id=doctor_id,
-            email=doctor.email,
-            phone_number=doctor.phone,
-            full_name=(doctor.full_name or "").strip(),
-        )
-    elif not identity:
-        logger.info(
-            "profile_photo_upload_without_identity",
-            doctor_id=doctor_id,
-            has_email=bool(doctor.email),
-        )
+    try:
+        await onboarding_repo.ensure_identity_for_doctor(doctor)
+    except ValueError as exc:
+        if str(exc) == PHONE_REQUIRED_FOR_IDENTITY:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Complete phone verification before uploading a profile photo.",
+            ) from exc
+        raise
 
     media_category = "profile_photo"
     media_type = (

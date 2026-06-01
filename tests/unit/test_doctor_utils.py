@@ -18,6 +18,7 @@ from src.app.core.doctor_utils import (
     is_synthetic_identity_full_name,
     is_synthetic_identity_phone,
     resolve_display_email,
+    resolve_linqmd_sync_email,
     resolve_display_full_name,
     resolve_display_phone,
     normalize_onboarding_status_value,
@@ -137,6 +138,12 @@ class TestResolveDisplayFields:
             "placeholder_1@caepy.com",
             "real@example.com",
         ) == "real@example.com"
+
+    def test_resolve_linqmd_sync_email_prefers_doctors_row_over_stale_identity(self):
+        assert resolve_linqmd_sync_email(
+            "old.identity@hospital.com",
+            "new.doctor@hospital.com",
+        ) == "new.doctor@hospital.com"
 
     def test_resolve_display_full_name_prefers_doctors_row(self):
         assert resolve_display_full_name(

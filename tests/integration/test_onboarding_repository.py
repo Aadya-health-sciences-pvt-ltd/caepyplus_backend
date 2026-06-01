@@ -18,8 +18,13 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.core.doctor_utils import is_synthetic_identity_email
 from src.app.models.onboarding import OnboardingStatus
-from src.app.repositories.onboarding_repository import OnboardingRepository
+from src.app.repositories.doctor_repository import DoctorRepository
+from src.app.repositories.onboarding_repository import (
+    PHONE_REQUIRED_FOR_IDENTITY,
+    OnboardingRepository,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +263,94 @@ class TestUpsertDetails:
         identity = await _create_identity(repo, suffix="F4")
         result = await repo.get_details_by_doctor_id(identity.doctor_id)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# ensure_identity_for_doctor (early onboarding / profile photo)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureIdentityForDoctor:
+    async def test_bootstraps_identity_for_phone_only_doctor(
+        self, db_session: AsyncSession
+    ) -> None:
+        doc_repo = DoctorRepository(db_session)
+        doctor = await doc_repo.create_from_phone("+919876543299")
+        repo = OnboardingRepository(db_session)
+
+        identity = await repo.ensure_identity_for_doctor(doctor)
+
+        assert identity.doctor_id == doctor.id
+        assert identity.phone_number == doctor.phone
+        assert is_synthetic_identity_email(identity.email)
+
+        media = await repo.add_media(
+            doctor_id=doctor.id,
+            media_type="image",
+            media_category="profile_photo",
+            field_name="profile_photo",
+            file_name="photo.jpg",
+            file_uri=f"doctors/{doctor.id}/profile_photo/test.jpg",
+        )
+        assert media.doctor_id == doctor.id
+
+    async def test_returns_existing_identity_without_placeholder_overwrite(
+        self, db_session: AsyncSession
+    ) -> None:
+        doc_repo = DoctorRepository(db_session)
+        doctor = await doc_repo.create_from_phone("+919876543298")
+        repo = OnboardingRepository(db_session)
+        created = await repo.create_identity(
+            doctor_id=doctor.id,
+            email="real.doctor@hospital.com",
+            phone_number=doctor.phone or "",
+            full_name="Dr Real",
+        )
+
+        identity = await repo.ensure_identity_for_doctor(doctor)
+
+        assert identity.id == created.id
+        assert identity.email == "real.doctor@hospital.com"
+
+    async def test_raises_when_phone_missing(self, db_session: AsyncSession) -> None:
+        doc_repo = DoctorRepository(db_session)
+        doctor = await doc_repo.create_from_email(
+            "google.only@hospital.com",
+            name="Google User",
+        )
+        repo = OnboardingRepository(db_session)
+
+        with pytest.raises(ValueError, match=PHONE_REQUIRED_FOR_IDENTITY):
+            await repo.ensure_identity_for_doctor(doctor)
+
+
+class TestSyncIdentityFromDoctor:
+    async def test_mirrors_real_full_name_when_identity_differs(
+        self, db_session: AsyncSession
+    ) -> None:
+        doc_repo = DoctorRepository(db_session)
+        doctor = await doc_repo.create_from_phone("+919876543277")
+        doctor.full_name = "Dr Updated Name"
+        await db_session.commit()
+        await db_session.refresh(doctor)
+
+        repo = OnboardingRepository(db_session)
+        await repo.create_identity(
+            doctor_id=doctor.id,
+            email="old.identity@hospital.com",
+            phone_number=doctor.phone or "",
+            full_name="Dr Old Name",
+        )
+
+        updated = await repo.sync_identity_from_doctor(
+            doctor.id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
+
+        assert updated is not None
+        assert updated.full_name == "Dr Updated Name"
 
 
 # ---------------------------------------------------------------------------
