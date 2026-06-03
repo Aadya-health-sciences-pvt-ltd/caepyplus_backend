@@ -550,7 +550,6 @@ async def update_doctor(
         )
     doctor = await repo.update(doctor_id, data)
     onboarding_repo = OnboardingRepository(repo.session)
-    await onboarding_repo.ensure_identity_for_doctor(doctor)
     await onboarding_repo.sync_identity_from_doctor(
         doctor_id,
         email=doctor.email,
@@ -559,7 +558,6 @@ async def update_doctor(
     )
     from ....services.linqmd_sync_service import sync_linqmd_profile_update_if_credentials_exist
 
-    await repo.session.expire_all()
     await sync_linqmd_profile_update_if_credentials_exist(doctor_id, repo.session)
     signed_doctor = await _sign_doctor_urls(doctor)
     enriched = await _enrich_doctor_response(

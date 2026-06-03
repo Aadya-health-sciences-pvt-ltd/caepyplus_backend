@@ -324,35 +324,6 @@ class TestEnsureIdentityForDoctor:
             await repo.ensure_identity_for_doctor(doctor)
 
 
-class TestSyncIdentityFromDoctor:
-    async def test_mirrors_real_full_name_when_identity_differs(
-        self, db_session: AsyncSession
-    ) -> None:
-        doc_repo = DoctorRepository(db_session)
-        doctor = await doc_repo.create_from_phone("+919876543277")
-        doctor.full_name = "Dr Updated Name"
-        await db_session.commit()
-        await db_session.refresh(doctor)
-
-        repo = OnboardingRepository(db_session)
-        await repo.create_identity(
-            doctor_id=doctor.id,
-            email="old.identity@hospital.com",
-            phone_number=doctor.phone or "",
-            full_name="Dr Old Name",
-        )
-
-        updated = await repo.sync_identity_from_doctor(
-            doctor.id,
-            email=doctor.email,
-            phone_number=doctor.phone,
-            full_name=doctor.full_name,
-        )
-
-        assert updated is not None
-        assert updated.full_name == "Dr Updated Name"
-
-
 # ---------------------------------------------------------------------------
 # add_media / list_media / delete_media
 # ---------------------------------------------------------------------------

@@ -291,28 +291,15 @@ class OnboardingRepository:
         changed = False
         phone = (phone_number or "").strip()
         if phone and not is_synthetic_identity_phone(phone, doctor_id=doctor_id):
-            if identity.phone_number != phone:
+            if is_synthetic_identity_phone(identity.phone_number, doctor_id=doctor_id):
                 identity.phone_number = phone
                 changed = True
 
         name = (full_name or "").strip()
         if name and not is_synthetic_identity_full_name(name, doctor_id=doctor_id):
-            if identity.full_name != name:
+            if is_synthetic_identity_full_name(identity.full_name, doctor_id=doctor_id):
                 identity.full_name = name
                 changed = True
-
-        if (
-            normalized_email
-            and not is_synthetic_identity_email(normalized_email)
-            and identity.email.lower() != normalized_email
-        ):
-            conflicting = await self.get_identity_by_email(normalized_email)
-            if conflicting is not None and conflicting.id != identity.id:
-                conflicting.email = f"_displaced_{uuid.uuid4().hex}@placeholder"
-                self.session.add(conflicting)
-                await self.session.flush()
-            identity.email = normalized_email
-            changed = True
 
         if changed:
             await self.session.commit()

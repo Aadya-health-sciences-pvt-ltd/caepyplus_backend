@@ -707,19 +707,7 @@ class LinQMDSyncService:
             elif isinstance(response_json, dict) and response_json.get("message"):
                 error_message = str(response_json["message"])
             else:
-                raw = (
-                    response_json.get("raw_response", "")
-                    if isinstance(response_json, dict)
-                    else ""
-                )
-                if status_code == 404 and isinstance(raw, str) and "<!DOCTYPE" in raw[:200]:
-                    error_message = (
-                        "LinQMD user update endpoint returned HTTP 404 (route not found). "
-                        "Confirm LINQMD_PRACTICE_HUB_USER_UPDATE_PATH is deployed on "
-                        f"{self.settings.LINQMD_PRACTICE_HUB_API_URL}."
-                    )
-                else:
-                    error_message = f"API returned status {status_code}"
+                error_message = f"API returned status {status_code}"
 
         return LinQMDSyncResult(
             success=success,
@@ -734,52 +722,26 @@ class LinQMDSyncService:
         doctor_id: int,
         db_session: Any,
     ) -> tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, Any]]] | None:
-        """Load identity, doctor row, and media for LinQMD sync.
-
-        Returns None only when the doctors row is missing. ``doctor_identity`` is
-        optional; contact fields prefer the doctors row for outbound sync.
-        """
+        """Load identity, doctor row, and media for LinQMD sync. None if identity missing."""
         from ..repositories.onboarding_repository import OnboardingRepository
 
         repo = OnboardingRepository(db_session)
         identity = await repo.get_identity_by_doctor_id(doctor_id)
+        if not identity:
+            return None
 
         from ..repositories.doctor_repository import DoctorRepository
 
         doc_repo = DoctorRepository(db_session)
         details = await doc_repo.get_by_id(doctor_id)
-        if details is None:
-            return None
-
         media = await repo.list_media(doctor_id)
 
-        from ..core.doctor_utils import (
-            resolve_display_full_name,
-            resolve_display_phone,
-            resolve_linqmd_sync_email,
-        )
-
-        doctor_email = getattr(details, 'email', None)
-        doctor_phone = getattr(details, 'phone', None)
-        doctor_full_name = getattr(details, 'full_name', None)
-        identity_email = identity.email if identity else None
-        identity_full_name = identity.full_name if identity else None
-        identity_phone = identity.phone_number if identity else None
-
         identity_dict = {
-            'doctor_id': doctor_id,
-            'full_name': resolve_display_full_name(
-                identity_full_name,
-                doctor_full_name,
-                doctor_id=doctor_id,
-            ),
-            'email': resolve_linqmd_sync_email(identity_email, doctor_email),
-            'phone_number': resolve_display_phone(
-                identity_phone,
-                doctor_phone,
-                doctor_id=doctor_id,
-            ),
-            'profile_photo': getattr(details, 'profile_photo', None),
+            'doctor_id': identity.doctor_id,
+            'full_name': identity.full_name,
+            'email': identity.email,
+            'phone_number': identity.phone_number,
+            'profile_photo': getattr(details, 'profile_photo', None) if details else None,
         }
 
         details_dict = None
@@ -941,18 +903,11 @@ class LinQMDSyncService:
         creds_repo = LinqmdCredentialsRepository(db_session)
         creds = await creds_repo.get_by_doctor_id(doctor_id)
         if creds is None:
-            logger.info(
-                "LinQMD profile update skipped (no credentials) doctor_id=%s",
-                doctor_id,
-            )
             return LinQMDSyncResult(
                 success=True,
                 doctor_id=doctor_id,
                 linqmd_response={"skipped": "no_linqmd_credentials"},
             )
-
-        # Ensure ORM reads see commits from DoctorRepository.update / identity sync.
-        await db_session.expire_all()
 
         context = await self._build_sync_context(doctor_id, db_session)
         if context is None:
@@ -964,7 +919,6 @@ class LinQMDSyncService:
 
         identity_dict, details_dict, media_list = context
         doctor_id = doctor_id or identity_dict.get('doctor_id', 0)
-        update_url = self.settings.linqmd_user_update_url(creds.linqmd_user_id)
 
         try:
             display_picture_file = await self._load_display_picture_file(
@@ -980,13 +934,6 @@ class LinQMDSyncService:
                 include_theme=False,
             )
             payload.display_picture_file = display_picture_file
-
-            logger.info(
-                "LinQMD profile update starting doctor_id=%s linqmd_user_id=%s url=%s",
-                doctor_id,
-                creds.linqmd_user_id,
-                update_url,
-            )
 
             status_code, response_json = await self._send_update_to_linqmd(
                 creds.linqmd_user_id,
