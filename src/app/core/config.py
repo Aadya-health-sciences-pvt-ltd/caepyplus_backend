@@ -188,6 +188,22 @@ class Settings(BaseSettings):
         description="Maximum tokens in AI response"
     )
 
+        # ========================================
+    # Google Cloud / Vertex AI Configuration
+    # ========================================
+    GOOGLE_CLOUD_PROJECT: str = Field(
+        default="",
+        description="Google Cloud project ID for Vertex AI (e.g. linqmd-470410)"
+    )
+    GOOGLE_CLOUD_LOCATION: str = Field(
+        default="us-central1",
+        description="Google Cloud region for Vertex AI Live API"
+    )
+    GOOGLE_APPLICATION_CREDENTIALS: str = Field(
+        default="",
+        description="Path to the Google Cloud service account JSON key file"
+    )
+
     # ========================================
     # Security Configuration
     # ========================================
