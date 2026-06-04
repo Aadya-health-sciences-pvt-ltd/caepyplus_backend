@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket
 from pydantic import BaseModel, Field
 
 from ....core.exceptions import SessionExpiredError, SessionNotFoundError
@@ -468,3 +468,44 @@ async def cancel_session(
         await service.cancel_session(session_id)
     except SessionNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+
+# Separate router for the WebSocket endpoint — it cannot use the router-level
+# require_authentication dependency because that dependency accepts `Request`
+# which is not available on WebSocket connections.
+voice_ws_router = APIRouter(prefix="/voice", tags=["Voice Onboarding"])
+
+@voice_ws_router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, context: str = "{}"):
+    """
+    WebSocket endpoint for bidirectional audio streaming with Gemini Live API.
+    Used by the frontend to send raw 16kHz PCM audio and receive 24kHz PCM audio.
+    Token auth is handled via the ?token= query parameter sent by the frontend.
+    """
+    from ....services.gemini_live_service import GeminiLiveService
+    from fastapi import WebSocketDisconnect
+    import json
+    
+    await websocket.accept()
+    logger.info("Voice WebSocket connection established.")
+    
+    try:
+        parsed_context = json.loads(context)
+    except:
+        parsed_context = {}
+
+    try:
+        # Create Gemini service instance for this connection
+        service = GeminiLiveService(websocket, context=parsed_context)
+        
+        # Start the bidirectional communication loop
+        await service.run()
+        
+    except WebSocketDisconnect:
+        logger.info("Voice WebSocket client disconnected")
+    except Exception as e:
+        logger.error(f"Error in Voice WebSocket connection: {e}", exc_info=True)
+        try:
+            await websocket.close()
+        except:
+            pass

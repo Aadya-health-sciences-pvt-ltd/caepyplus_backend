@@ -57,6 +57,7 @@ class PromptManager:
 
         self.config_path = config_path
         self._prompts: dict[str, Any] | None = None
+        self._mtime: float = 0.0
         self._load_prompts()
 
     def _load_prompts(self) -> None:
@@ -70,6 +71,7 @@ class PromptManager:
             with open(self.config_path, encoding="utf-8") as f:
                 self._prompts = yaml.safe_load(f)
 
+            self._mtime = self.config_path.stat().st_mtime
             logger.info("Loaded prompts from %s", self.config_path)
 
         except yaml.YAMLError as e:
@@ -82,6 +84,16 @@ class PromptManager:
         self._prompts = None
         self._load_prompts()
         logger.info("Prompts reloaded")
+
+    def _reload_if_changed(self) -> None:
+        """Reload prompts from disk if the YAML file has been modified."""
+        try:
+            current_mtime = self.config_path.stat().st_mtime
+            if current_mtime != self._mtime:
+                logger.info("prompts.yaml changed — hot-reloading prompts")
+                self._load_prompts()
+        except OSError:
+            pass  # Ignore transient filesystem errors
 
     def get(self, path: str, default: str | None = None) -> str:
         """
@@ -100,6 +112,7 @@ class PromptManager:
         Example:
             prompt = manager.get("voice_onboarding.greeting_template")
         """
+        self._reload_if_changed()
         if self._prompts is None:
             self._load_prompts()
 
