@@ -35,6 +35,7 @@ from .endpoints import (
     voice,
     blogs,
 )
+from .endpoints.voice import voice_ws_router
 
 router = APIRouter(prefix="/v1")
 
@@ -67,6 +68,13 @@ router.include_router(
     voice.router,
     tags=["Voice Onboarding"],
     dependencies=[Depends(require_authentication)],
+)
+
+# WebSocket voice endpoint — no router-level auth dep (WS connections do not
+# carry HTTP headers the same way; auth is handled via ?token= query param)
+router.include_router(
+    voice_ws_router,
+    tags=["Voice Onboarding"],
 )
 
 router.include_router(
