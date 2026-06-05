@@ -177,6 +177,15 @@ class Settings(BaseSettings):
         default="gemini-2.5-flash",
         description="Gemini model to use for AI operations"
     )
+    GEMINI_RESUME_MODEL: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model for resume/CV extraction (generateContent / vision)",
+    )
+    GEMINI_RESUME_MAX_TOKENS: int = Field(
+        default=8192,
+        ge=256,
+        description="Max output tokens for resume/CV extraction (JSON can be large)",
+    )
     GEMINI_MAX_RETRIES: int = Field(
         default=3,
         ge=0,

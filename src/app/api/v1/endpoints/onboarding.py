@@ -25,6 +25,7 @@ from ....repositories.onboarding_repository import OnboardingRepository
 from ....schemas.doctor import ExtractionResponse
 from ....services.email_service import EmailService, get_email_service
 from ....services.extraction_service import get_extraction_service
+from ....services.gemini_service import mask_api_key
 
 log = structlog.get_logger(__name__)
 
@@ -172,7 +173,13 @@ async def extract_resume(
             filename=file.filename,
         )
 
-    log.info("resume_processing", filename=file.filename, size_bytes=len(content))
+    log.info(
+        "resume_processing",
+        filename=file.filename,
+        size_bytes=len(content),
+        gemini_resume_model=settings.GEMINI_RESUME_MODEL,
+        google_api_key=mask_api_key(settings.GOOGLE_API_KEY),
+    )
 
     # Extract data
     extracted_data, processing_time = await extraction_service.extract_from_file(
