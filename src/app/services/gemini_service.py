@@ -30,6 +30,62 @@ from ..core.exceptions import AIServiceError, ExtractionError
 
 logger = logging.getLogger(__name__)
 
+# Models with "live" in the id are for the Live/WebSocket API, not generateContent.
+_LIVE_MODEL_MARKERS = ("-live", "live-preview")
+
+
+def mask_api_key(api_key: str) -> str:
+    """Return a log-safe API key fingerprint (first/last 4 chars)."""
+    key = (api_key or "").strip()
+    if not key:
+        return "<not set>"
+    if len(key) <= 8:
+        return "<set>"
+    return f"{key[:4]}...{key[-4:]}"
+
+
+def gemini_remediation_hint(
+    error_text: str,
+    model: str,
+    *,
+    config_key: str = "GEMINI_MODEL",
+) -> str:
+    """Suggest a fix based on the Gemini API error message."""
+    lowered = error_text.lower()
+
+    if "resource_exhausted" in lowered or "429" in lowered:
+        return (
+            "Gemini API quota/billing exhausted for this key. "
+            "Add credits in Google AI Studio or switch GOOGLE_API_KEY."
+        )
+    if (
+        "api key expired" in lowered
+        or "api_key_invalid" in lowered
+        or "api key not valid" in lowered
+        or "invalid api key" in lowered
+    ):
+        return "Update GOOGLE_API_KEY in backend .env and restart the server."
+    if "not found" in lowered or "404" in lowered:
+        if any(marker in model.lower() for marker in _LIVE_MODEL_MARKERS):
+            return (
+                f"Model '{model}' is a Live/voice model and does not support resume "
+                f"extraction (generateContent). Set {config_key} to a generateContent "
+                "model such as gemini-2.5-flash in .env."
+            )
+        return (
+            f"Model '{model}' is unavailable or unsupported for generateContent. "
+            f"Set {config_key} to a supported model (e.g. gemini-2.5-flash)."
+        )
+    if "not supported for generatecontent" in lowered:
+        return (
+            f"Model '{model}' cannot be used for resume parsing. "
+            f"Use gemini-2.5-flash (or another generateContent model) in {config_key}."
+        )
+    return (
+        f"Check server logs for the full Gemini error and verify "
+        f"GOOGLE_API_KEY + {config_key}."
+    )
+
 
 class GeminiService:
     """
@@ -63,19 +119,132 @@ class GeminiService:
                     original_error="GOOGLE_API_KEY environment variable is empty",
                 )
             self._client = genai.Client(api_key=self.settings.GOOGLE_API_KEY)
-            logger.info("Initialized Gemini client with model: %s", self.settings.GEMINI_MODEL)
+            logger.info(
+                "Initialized Gemini client model=%s api_key=%s",
+                self.settings.GEMINI_MODEL,
+                mask_api_key(self.settings.GOOGLE_API_KEY),
+            )
         return self._client
+
+    def _resolve_model(self, model: str | None) -> str:
+        """Use explicit model override when provided, else default GEMINI_MODEL."""
+        return model or self.settings.GEMINI_MODEL
+
+    def _log_request_context(
+        self,
+        operation: str,
+        *,
+        model: str | None = None,
+        mime_type: str | None = None,
+        file_size_bytes: int | None = None,
+        prompt_chars: int | None = None,
+        config_key: str = "GEMINI_MODEL",
+    ) -> None:
+        """Log model + masked API key for every Gemini call."""
+        resolved_model = self._resolve_model(model)
+        logger.info(
+            "Gemini %s: model=%s api_key=%s%s%s",
+            operation,
+            resolved_model,
+            mask_api_key(self.settings.GOOGLE_API_KEY),
+            f" mime_type={mime_type}" if mime_type else "",
+            f" file_size_bytes={file_size_bytes}" if file_size_bytes is not None else "",
+        )
+        if prompt_chars is not None:
+            logger.debug("Gemini %s prompt_chars=%d", operation, prompt_chars)
+        if any(marker in resolved_model.lower() for marker in _LIVE_MODEL_MARKERS):
+            logger.warning(
+                "%s=%s looks like a Live/voice model; resume extraction "
+                "requires a generateContent model (e.g. gemini-2.5-flash).",
+                config_key,
+                resolved_model,
+            )
+
+    def _raise_gemini_api_error(
+        self,
+        exc: Exception,
+        operation: str,
+        *,
+        model: str | None = None,
+        config_key: str = "GEMINI_MODEL",
+    ) -> None:
+        """Log full Gemini failure details and raise AIServiceError."""
+        error_text = str(exc)
+        resolved_model = self._resolve_model(model)
+        remediation = gemini_remediation_hint(
+            error_text, resolved_model, config_key=config_key
+        )
+        logger.error(
+            "Gemini %s failed: model=%s api_key=%s error=%s remediation=%s",
+            operation,
+            resolved_model,
+            mask_api_key(self.settings.GOOGLE_API_KEY),
+            error_text,
+            remediation,
+            exc_info=True,
+        )
+        error_str = error_text.lower()
+        if "blocked" in error_str or "safety" in error_str:
+            raise AIServiceError(
+                message="Request blocked by AI safety filters",
+                original_error=error_text,
+            ) from exc
+        if (
+            "api key expired" in error_str
+            or "api_key_invalid" in error_str
+            or "api key not valid" in error_str
+            or "invalid api key" in error_str
+        ):
+            raise AIServiceError(
+                message=(
+                    "Google AI API key is invalid or expired. "
+                    "Update GOOGLE_API_KEY in the backend .env and restart the server."
+                ),
+                original_error=error_text,
+            ) from exc
+        raise AIServiceError(
+            message="AI service temporarily unavailable",
+            original_error=error_text,
+        ) from exc
 
     def _get_generation_config(
         self,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        json_mode: bool = False,
     ) -> dict[str, Any]:
         """Create generation config with defaults from settings."""
-        return {
+        config: dict[str, Any] = {
             "temperature": temperature or self.settings.GEMINI_TEMPERATURE,
             "max_output_tokens": max_tokens or self.settings.GEMINI_MAX_TOKENS,
         }
+        if json_mode:
+            config["response_mime_type"] = "application/json"
+        return config
+
+    @staticmethod
+    def _extract_response_text(response: Any) -> str:
+        """Collect text from a Gemini response (handles multi-part output)."""
+        text = getattr(response, "text", None)
+        if text:
+            return text
+        parts: list[str] = []
+        for candidate in getattr(response, "candidates", None) or []:
+            content = getattr(candidate, "content", None)
+            for part in getattr(content, "parts", None) or []:
+                part_text = getattr(part, "text", None)
+                if part_text:
+                    parts.append(part_text)
+        return "".join(parts)
+
+    @staticmethod
+    def _response_finish_reason(response: Any) -> str | None:
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return None
+        reason = getattr(candidates[0], "finish_reason", None)
+        return str(reason) if reason is not None else None
 
     def _get_retry_decorator(self) -> Any:
         """Return a cached tenacity retry decorator.
@@ -106,6 +275,10 @@ class GeminiService:
         prompt: str,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        model: str | None = None,
+        config_key: str = "GEMINI_MODEL",
+        json_mode: bool = False,
     ) -> str:
         """
         Generate text response from Gemini.
@@ -125,48 +298,35 @@ class GeminiService:
         start_time = time.time()
 
         try:
-            config = self._get_generation_config(temperature, max_tokens)
+            config = self._get_generation_config(
+                temperature, max_tokens, json_mode=json_mode
+            )
 
-            logger.debug("Gemini request: %s...", prompt[:200])
+            resolved_model = self._resolve_model(model)
+            self._log_request_context(
+                "generate",
+                model=resolved_model,
+                prompt_chars=len(prompt),
+                config_key=config_key,
+            )
 
             # Use new google.genai API
             response = await self.client.aio.models.generate_content(
-                model=self.settings.GEMINI_MODEL,
+                model=resolved_model,
                 contents=prompt,
                 config=config,  # type: ignore[arg-type]
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
-            logger.info("Gemini response in %.2fms", elapsed_ms)
+            logger.info("Gemini generate response in %.2fms", elapsed_ms)
 
             return response.text or ""
 
+        except AIServiceError:
+            raise
         except Exception as e:
-            error_str = str(e).lower()
-            if "blocked" in error_str or "safety" in error_str:
-                logger.error("Prompt blocked by Gemini safety filters: %s", e)
-                raise AIServiceError(
-                    message="Request blocked by AI safety filters",
-                    original_error=str(e),
-                )
-            if (
-                "api key expired" in error_str
-                or "api_key_invalid" in error_str
-                or "api key not valid" in error_str
-                or "invalid api key" in error_str
-            ):
-                logger.error("Gemini API key error: %s", e)
-                raise AIServiceError(
-                    message=(
-                        "Google AI API key is invalid or expired. "
-                        "Update GOOGLE_API_KEY in the backend .env and restart the server."
-                    ),
-                    original_error=str(e),
-                )
-            logger.error("Gemini API error: %s", e)
-            raise AIServiceError(
-                message="AI service temporarily unavailable",
-                original_error=str(e),
+            self._raise_gemini_api_error(
+                e, "generate", model=model, config_key=config_key
             )
 
     async def generate_with_retry(
@@ -174,6 +334,10 @@ class GeminiService:
         prompt: str,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        model: str | None = None,
+        config_key: str = "GEMINI_MODEL",
+        json_mode: bool = False,
     ) -> str:
         """
         Generate text with automatic retries.
@@ -182,7 +346,14 @@ class GeminiService:
         """
         @self._get_retry_decorator()  # type: ignore[untyped-decorator]
         async def _generate() -> str:
-            return await self.generate(prompt, temperature, max_tokens)
+            return await self.generate(
+                prompt,
+                temperature,
+                max_tokens,
+                model=model,
+                config_key=config_key,
+                json_mode=json_mode,
+            )
 
         return await _generate()  # type: ignore[no-any-return]
 
@@ -191,6 +362,10 @@ class GeminiService:
         prompt: str,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        model: str | None = None,
+        config_key: str = "GEMINI_MODEL",
+        json_mode: bool = True,
     ) -> dict[str, Any]:
         """
         Generate structured JSON response from Gemini.
@@ -211,7 +386,12 @@ class GeminiService:
             AIServiceError: If generation fails
         """
         raw_response = await self.generate_with_retry(
-            prompt, temperature, max_tokens
+            prompt,
+            temperature,
+            max_tokens,
+            model=model,
+            config_key=config_key,
+            json_mode=json_mode,
         )
 
         return self._parse_json_response(raw_response)
@@ -246,12 +426,21 @@ class GeminiService:
         try:
             return json.loads(cleaned, strict=False)  # type: ignore[no-any-return]
         except json.JSONDecodeError as e:
-            logger.error("Failed to parse JSON response: %s", e)
+            logger.error(
+                "Failed to parse JSON response: %s (response_chars=%d tail=%r)",
+                e,
+                len(cleaned),
+                cleaned[-120:] if cleaned else "",
+            )
             logger.debug("Raw response: %s", response)
             raise ExtractionError(
                 message="Failed to parse AI response as JSON",
                 source="gemini",
-                details={"parse_error": str(e), "raw_response": response[:500]},
+                details={
+                    "parse_error": str(e),
+                    "response_chars": len(cleaned),
+                    "raw_response": response[:500],
+                },
             )
 
     async def generate_with_vision(
@@ -261,6 +450,10 @@ class GeminiService:
         mime_type: str,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        *,
+        model: str | None = None,
+        config_key: str = "GEMINI_MODEL",
+        json_mode: bool = True,
     ) -> dict[str, Any]:
         """
         Generate structured response from image/PDF using Gemini Vision.
@@ -282,7 +475,9 @@ class GeminiService:
         start_time = time.time()
 
         try:
-            config = self._get_generation_config(temperature, max_tokens)
+            config = self._get_generation_config(
+                temperature, max_tokens, json_mode=json_mode
+            )
 
             # Create the Part for the new google.genai API
             image_part = genai_types.Part.from_bytes(
@@ -290,35 +485,71 @@ class GeminiService:
                 mime_type=mime_type,
             )
 
-            logger.info("Gemini Vision request for %s", mime_type)
+            resolved_model = self._resolve_model(model)
+            self._log_request_context(
+                "vision",
+                model=resolved_model,
+                mime_type=mime_type,
+                file_size_bytes=len(file_content),
+                prompt_chars=len(prompt),
+                config_key=config_key,
+            )
 
             contents_list: list[Any] = [prompt, image_part]
             # Use new google.genai API with multimodal content
             response = await self.client.aio.models.generate_content(
-                model=self.settings.GEMINI_MODEL,
+                model=resolved_model,
                 contents=contents_list,
                 config=config,  # type: ignore[arg-type]
             )
 
             elapsed_ms = (time.time() - start_time) * 1000
-            logger.info("Gemini Vision response in %.2fms", elapsed_ms)
+            raw_text = self._extract_response_text(response)
+            finish_reason = self._response_finish_reason(response)
+            logger.info(
+                "Gemini Vision response in %.2fms chars=%d finish_reason=%s",
+                elapsed_ms,
+                len(raw_text),
+                finish_reason,
+            )
 
-            return self._parse_json_response(response.text or "")
+            try:
+                return self._parse_json_response(raw_text)
+            except ExtractionError as parse_exc:
+                if finish_reason == "MAX_TOKENS" or len(raw_text) < 1500:
+                    logger.warning(
+                        "Gemini vision JSON truncated (finish_reason=%s, chars=%d); "
+                        "retrying with higher max_output_tokens",
+                        finish_reason,
+                        len(raw_text),
+                    )
+                    retry_tokens = (max_tokens or self.settings.GEMINI_MAX_TOKENS) * 2
+                    retry_config = self._get_generation_config(
+                        temperature,
+                        retry_tokens,
+                        json_mode=json_mode,
+                    )
+                    retry_response = await self.client.aio.models.generate_content(
+                        model=resolved_model,
+                        contents=contents_list,
+                        config=retry_config,  # type: ignore[arg-type]
+                    )
+                    retry_text = self._extract_response_text(retry_response)
+                    logger.info(
+                        "Gemini Vision retry chars=%d finish_reason=%s",
+                        len(retry_text),
+                        self._response_finish_reason(retry_response),
+                    )
+                    return self._parse_json_response(retry_text)
+                raise parse_exc
 
         except ExtractionError:
             raise
+        except AIServiceError:
+            raise
         except Exception as e:
-            error_str = str(e).lower()
-            if "blocked" in error_str or "safety" in error_str:
-                logger.error("Vision prompt blocked: %s", e)
-                raise AIServiceError(
-                    message="Document blocked by AI safety filters",
-                    original_error=str(e),
-                )
-            logger.error("Gemini Vision error: %s", e)
-            raise AIServiceError(
-                message="AI vision service temporarily unavailable",
-                original_error=str(e),
+            self._raise_gemini_api_error(
+                e, "vision", model=model, config_key=config_key
             )
 
 
