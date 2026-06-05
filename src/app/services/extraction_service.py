@@ -14,6 +14,7 @@ import time
 from ..core.exceptions import ExtractionError, FileValidationError
 from ..core.prompts import get_prompt_manager
 from ..schemas.doctor import ResumeExtractedData
+from .document_extraction import OFFICE_EXTENSIONS, extract_text_from_document
 from .gemini_service import get_gemini_service
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,19 @@ class ResumeExtractionService:
             ExtractionError: If data extraction fails
             AIServiceError: If AI service is unavailable
         """
+        extension = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+
+        # Word documents are not supported by Gemini Vision — extract their text
+        # first and run the text-based extraction path instead.
+        if extension in OFFICE_EXTENSIONS:
+            document_text = extract_text_from_document(file_content, extension)
+            logger.info(
+                "Extracted %d chars of text from %s for resume parsing",
+                len(document_text),
+                filename,
+            )
+            return await self.extract_from_text(document_text)
+
         start_time = time.time()
 
         mime_type = self._get_mime_type(filename)

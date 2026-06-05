@@ -47,6 +47,7 @@ dependencies = [
     "orjson>=3.10.0,<4.0.0",           # Fast JSON serialization
     "pyyaml>=6.0.0,<7.0.0",            # YAML parsing for prompts + email templates
     "aiosmtplib>=3.0.0,<4.0.0",        # Async SMTP for outbound email notifications
+    "python-docx>=1.1.0",              # Text extraction from .docx resume uploads
     # JWT is implemented with stdlib hmac+hashlib (otp.py + security.py) — no
     # python-jose or passlib needed.  Add passlib[bcrypt] if password hashing
     # is ever introduced.

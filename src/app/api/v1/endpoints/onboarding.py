@@ -87,6 +87,12 @@ def validate_file(
         "image/png",
         "image/jpeg",
         "image/jpg",
+        # Word documents (.doc / .docx)
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        # Some browsers send a generic content type for Office uploads; the
+        # extension check above is the authoritative gate in that case.
+        "application/octet-stream",
     ]
     if file.content_type and file.content_type not in valid_content_types:
         raise FileValidationError(
@@ -105,9 +111,9 @@ def validate_file(
     response_model=ExtractionResponse,
     summary="Extract data from resume",
     description="""
-Upload a doctor's resume (PDF or Image) and extract structured professional data.
+Upload a doctor's resume (PDF, Image, or Word document) and extract structured professional data.
 
-**Supported formats:** PDF, PNG, JPG, JPEG
+**Supported formats:** PDF, PNG, JPG, JPEG, DOC, DOCX
 
 **Max file size:** 10MB
 
@@ -138,7 +144,7 @@ The response can be used to pre-fill the doctor registration form.
     },
 )
 async def extract_resume(
-    file: Annotated[UploadFile, File(description="Resume file (PDF, PNG, JPG)")],
+    file: Annotated[UploadFile, File(description="Resume file (PDF, PNG, JPG, DOC, DOCX)")],
     settings: Annotated[Settings, Depends(get_settings)],
     extraction_service: Annotated[Any, Depends(get_extraction_service)],
 ) -> ExtractionResponse:

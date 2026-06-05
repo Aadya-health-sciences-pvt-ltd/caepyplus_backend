@@ -44,6 +44,7 @@ pyyaml>=6.0.0,<7.0.0            # Email template + prompt YAML loading
 
 # ── File Processing ───────────────────────────────────────────────────────────
 pillow>=11.0.0                   # Image processing
+python-docx>=1.1.0              # Text extraction from .docx resumes
 
 # ── Caching (Redis) ───────────────────────────────────────────────────────────
 redis>=5.0.0                     # OTP storage + caching

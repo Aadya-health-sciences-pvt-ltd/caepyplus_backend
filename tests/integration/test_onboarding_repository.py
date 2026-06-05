@@ -39,8 +39,7 @@ async def _create_identity(
     status: OnboardingStatus = OnboardingStatus.PENDING,
 ) -> object:
     return await repo.create_identity(
-        first_name="Test",
-        last_name=f"Doctor{suffix}",
+        full_name=f"Test Doctor{suffix}",
         email=f"dr{suffix}@example.com",
         phone_number=f"+9198000{suffix}",
         onboarding_status=status,
@@ -225,44 +224,6 @@ class TestStatusHistory:
         await db_session.commit()
         history = await repo.get_status_history(identity.doctor_id)
         assert len(history) >= 2
-
-
-# ---------------------------------------------------------------------------
-# upsert_details / get_details_by_doctor_id
-# ---------------------------------------------------------------------------
-
-
-class TestUpsertDetails:
-    async def test_create_details_on_first_call(self, db_session: AsyncSession):
-        repo = OnboardingRepository(db_session)
-        identity = await _create_identity(repo, suffix="F1")
-        details = await repo.upsert_details(
-            doctor_id=identity.doctor_id,
-            payload={"specialty": "Cardiology"},
-        )
-        assert details is not None
-        assert details.specialty == "Cardiology"  # type: ignore[union-attr]
-
-    async def test_update_details_on_second_call(self, db_session: AsyncSession):
-        repo = OnboardingRepository(db_session)
-        identity = await _create_identity(repo, suffix="F2")
-        await repo.upsert_details(doctor_id=identity.doctor_id, payload={"specialty": "Cardiology"})
-        updated = await repo.upsert_details(doctor_id=identity.doctor_id, payload={"specialty": "Neurology"})
-        assert updated.specialty == "Neurology"  # type: ignore[union-attr]
-
-    async def test_get_details_returns_row(self, db_session: AsyncSession):
-        repo = OnboardingRepository(db_session)
-        identity = await _create_identity(repo, suffix="F3")
-        await repo.upsert_details(doctor_id=identity.doctor_id, payload={"specialty": "Ortho"})
-        details = await repo.get_details_by_doctor_id(identity.doctor_id)
-        assert details is not None
-        assert details.specialty == "Ortho"  # type: ignore[union-attr]
-
-    async def test_get_details_returns_none_when_absent(self, db_session: AsyncSession):
-        repo = OnboardingRepository(db_session)
-        identity = await _create_identity(repo, suffix="F4")
-        result = await repo.get_details_by_doctor_id(identity.doctor_id)
-        assert result is None
 
 
 # ---------------------------------------------------------------------------

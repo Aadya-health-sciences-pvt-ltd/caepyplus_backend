@@ -178,14 +178,38 @@ async def test_reject_nonexistent_doctor_returns_404(
 @pytest.mark.asyncio
 async def test_extract_resume(client: AsyncClient, auth_headers: dict[str, str]) -> None:
     """Resume extraction endpoint returns structured data (mocked)."""
+    from src.app.schemas.doctor import ResumeExtractedData
+
+    extracted = ResumeExtractedData(
+        personal_details={
+            "title": "Dr.",
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john@example.com",
+            "phone": "+919876543210",
+        },
+        professional_information={
+            "primary_specialization": "Cardiology",
+            "years_of_experience": 10,
+            "languages": ["English"],
+        },
+        registration={
+            "medical_registration_number": "REG-1",
+            "medical_council": "Maharashtra Medical Council",
+        },
+        qualifications=[{"degree": "MBBS", "institution": "AIIMS", "year": 2008}],
+        achievements={
+            "awards_recognition": ["Award"],
+            "memberships": ["IMA"],
+            "fellowships": ["FRCS"],
+        },
+    )
+
     with patch(
         "src.app.services.extraction_service.ResumeExtractionService.extract_from_file",
         new_callable=AsyncMock,
     ) as mock_extract:
-        mock_extract.return_value = (
-            {"personal_details": {"email": "john@example.com"}},
-            123.4,
-        )
+        mock_extract.return_value = (extracted, 123.4)
 
         files = {"file": ("resume.pdf", b"dummy content", "application/pdf")}
         response = await client.post(
@@ -195,7 +219,43 @@ async def test_extract_resume(client: AsyncClient, auth_headers: dict[str, str])
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["data"]["personal_details"]["email"] == "john@example.com"
+        payload = data["data"]
+        # Section 1
+        assert payload["personal_details"]["first_name"] == "John"
+        assert payload["personal_details"]["last_name"] == "Doe"
+        assert payload["personal_details"]["email"] == "john@example.com"
+        assert payload["registration"]["medical_council"] == "Maharashtra Medical Council"
+        # Section 2
+        assert payload["qualifications"][0]["year"] == 2008
+        assert payload["professional_information"]["years_of_experience"] == 10
+        assert payload["achievements"]["fellowships"] == ["FRCS"]
+
+
+@pytest.mark.asyncio
+async def test_extract_resume_accepts_docx(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """A .docx upload is accepted and routed through extraction (mocked)."""
+    from src.app.schemas.doctor import ResumeExtractedData
+
+    extracted = ResumeExtractedData(
+        personal_details={"first_name": "Word", "last_name": "Doc"},
+    )
+    docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    with patch(
+        "src.app.services.extraction_service.ResumeExtractionService.extract_from_file",
+        new_callable=AsyncMock,
+    ) as mock_extract:
+        mock_extract.return_value = (extracted, 50.0)
+
+        files = {"file": ("resume.docx", b"dummy docx", docx_mime)}
+        response = await client.post(
+            "/api/v1/onboarding/extract-resume", files=files, headers=auth_headers
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["personal_details"]["first_name"] == "Word"
 
 
 @pytest.mark.asyncio
