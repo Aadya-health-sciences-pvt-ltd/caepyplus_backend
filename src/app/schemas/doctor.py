@@ -374,6 +374,9 @@ class DoctorSummary(BaseModel):
 
 class PersonalDetails(BaseModel):
     """Extracted personal details from resume."""
+    title: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
     email: str | None = None
     phone: str | None = None
 
@@ -395,6 +398,7 @@ class Achievements(BaseModel):
     """Extracted achievements from resume."""
     awards_recognition: list[str] = Field(default_factory=list)
     memberships: list[str] = Field(default_factory=list)
+    fellowships: list[str] = Field(default_factory=list)
 
 class Media(BaseModel):
     """Extracted media and documents from resume."""

@@ -261,7 +261,7 @@ class Settings(BaseSettings):
         description="Maximum upload file size in MB"
     )
     ALLOWED_EXTENSIONS: str = Field(
-        default="pdf,png,jpg,jpeg",
+        default="pdf,png,jpg,jpeg,doc,docx",
         description="Comma-separated list of allowed file extensions"
     )
 

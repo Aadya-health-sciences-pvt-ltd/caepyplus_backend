@@ -47,6 +47,79 @@ async def test_extract_from_file_success(extraction_service, mock_gemini):
     assert time_ms > 0
     mock_gemini.generate_with_vision.assert_called_once()
 
+
+@pytest.mark.asyncio
+async def test_extract_from_file_keeps_section1_and_section2_fields(
+    extraction_service, mock_gemini
+):
+    """All Section 1 + Section 2 fields from Gemini must survive Pydantic parsing."""
+    mock_gemini.generate_with_vision.return_value = {
+        "personal_details": {
+            "title": "Dr.",
+            "first_name": "Asha",
+            "last_name": "Rao",
+            "email": "asha@example.com",
+            "phone": "+919876543210",
+        },
+        "professional_information": {
+            "primary_specialization": "Cardiology",
+            "years_of_experience": 12,
+            "languages": ["English", "Hindi"],
+        },
+        "registration": {
+            "medical_registration_number": "REG-998",
+            "medical_council": "Maharashtra Medical Council",
+            "registration_year": 2011,
+        },
+        "qualifications": [
+            {"degree": "MBBS", "institution": "AIIMS", "year": 2008},
+            {"degree": "MD Cardiology", "institution": "PGI", "year": 2012},
+        ],
+        "achievements": {
+            "awards_recognition": ["Best Resident 2010"],
+            "memberships": ["Indian Medical Association"],
+            "fellowships": ["FRCS"],
+        },
+    }
+
+    data, _ = await extraction_service.extract_from_file(b"dummy", "resume.pdf")
+
+    assert data.personal_details.title == "Dr."
+    assert data.personal_details.first_name == "Asha"
+    assert data.personal_details.last_name == "Rao"
+    assert data.professional_information.years_of_experience == 12
+    assert data.professional_information.languages == ["English", "Hindi"]
+    assert data.registration.medical_council == "Maharashtra Medical Council"
+    assert data.qualifications[0].degree == "MBBS"
+    assert data.qualifications[0].year == 2008
+    assert data.achievements.fellowships == ["FRCS"]
+    assert data.achievements.awards_recognition == ["Best Resident 2010"]
+    assert data.achievements.memberships == ["Indian Medical Association"]
+
+@pytest.mark.asyncio
+async def test_extract_from_file_routes_docx_through_text_path(
+    extraction_service, mock_gemini
+):
+    """Word documents must use the text path, not Gemini Vision."""
+    mock_gemini.generate_structured.return_value = {
+        "personal_details": {"first_name": "Word", "last_name": "Doc"},
+    }
+
+    with patch(
+        "src.app.services.extraction_service.extract_text_from_document",
+        return_value="Dr Word Doc\nCardiology",
+    ) as mock_text:
+        data, time_ms = await extraction_service.extract_from_file(
+            b"docx-bytes", "resume.docx"
+        )
+
+    mock_text.assert_called_once_with(b"docx-bytes", "docx")
+    mock_gemini.generate_structured.assert_called_once()
+    mock_gemini.generate_with_vision.assert_not_called()
+    assert data.personal_details.first_name == "Word"
+    assert time_ms > 0
+
+
 @pytest.mark.asyncio
 async def test_extract_from_file_failure(extraction_service, mock_gemini):
     mock_gemini.generate_with_vision.side_effect = Exception("API Error")
