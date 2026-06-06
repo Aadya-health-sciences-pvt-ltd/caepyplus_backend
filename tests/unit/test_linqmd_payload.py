@@ -98,7 +98,8 @@ class TestTransformDoctorData:
         assert "MBBS - AIIMS (2008)" in payload.education_details
         assert payload.yearsofexperiences == "10"
         assert payload.awards_honors == "Best Resident"
-        assert payload.overview == "Experienced cardiologist."
+        # Overview is AI-generated on LinQMD create — not mapped in transform.
+        assert payload.overview == ""
         assert "Interventional Cardiology" in payload.expertise_summary
 
     def test_generates_username_from_profile_fields(self):

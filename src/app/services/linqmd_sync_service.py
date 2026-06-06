@@ -552,8 +552,8 @@ class LinQMDSyncService:
             expertise_parts.append(f"Procedures: {', '.join(procedures[:5])}")
         expertise_summary = '\n'.join(expertise_parts)
         
-        # Get overview/about text
-        overview = details.get('professional_overview', '') or details.get('about_me', '') or ''
+        # Overview is AI-generated on LinQMD create only — not mapped here.
+        overview = ''
 
         years_value = details.get('years_post_specialisation')
         if years_value is None:
@@ -754,18 +754,55 @@ class LinQMDSyncService:
                     getattr(details, 'speciality', getattr(details, 'primary_specialization', None)),
                 ),
                 'primary_practice_location': getattr(details, 'primary_practice_location', None),
+                'centres_of_practice': getattr(details, 'centres_of_practice', []),
+                'practice_locations': getattr(details, 'practice_locations', []),
+                'languages': getattr(details, 'languages', []),
+                'consultation_fee': getattr(details, 'consultation_fee', None),
+                'medical_registration_number': getattr(
+                    details, 'medical_registration_number', None
+                ),
+                'medical_council': getattr(details, 'medical_council', None),
                 'sub_specialities': getattr(details, 'sub_specialities', []),
                 'areas_of_expertise': getattr(details, 'areas_of_clinical_interest', []),
+                'areas_of_clinical_interest': getattr(details, 'areas_of_clinical_interest', []),
+                'practice_segments': getattr(details, 'practice_segments', []),
+                'conditions_commonly_treated': getattr(
+                    details, 'conditions_commonly_treated', []
+                ),
+                'conditions_known_for': getattr(details, 'conditions_known_for', []),
+                'conditions_want_to_treat_more': getattr(
+                    details, 'conditions_want_to_treat_more', []
+                ),
                 'qualifications': getattr(details, 'qualifications', []),
+                'fellowships': getattr(details, 'fellowships', []),
+                'year_of_mbbs': getattr(details, 'year_of_mbbs', None),
+                'year_of_specialisation': getattr(details, 'year_of_specialisation', None),
+                'professional_memberships': getattr(details, 'professional_memberships', []),
                 'professional_overview': getattr(
                     details,
                     'professional_overview',
                     getattr(details, 'professional_achievement', None),
                 ),
+                'professional_achievement': getattr(details, 'professional_achievement', None),
                 'about_me': getattr(
                     details,
                     'about_me',
                     getattr(details, 'personal_achievement', None),
+                ),
+                'personal_achievement': getattr(details, 'personal_achievement', None),
+                'training_experience': getattr(details, 'training_experience', []),
+                'motivation_in_practice': getattr(details, 'motivation_in_practice', []),
+                'recognition_identity': getattr(details, 'recognition_identity', []),
+                'quality_time_interests': getattr(details, 'quality_time_interests', []),
+                'quality_time_interests_text': getattr(
+                    details, 'quality_time_interests_text', None
+                ),
+                'professional_aspiration': getattr(details, 'professional_aspiration', None),
+                'personal_aspiration': getattr(details, 'personal_aspiration', None),
+                'what_patients_value_most': getattr(details, 'what_patients_value_most', None),
+                'approach_to_care': getattr(details, 'approach_to_care', None),
+                'availability_philosophy': getattr(
+                    details, 'availability_philosophy', None
                 ),
                 'conditions_treated': getattr(details, 'conditions_treated', []),
                 'procedures_performed': getattr(details, 'procedures_performed', []),
@@ -791,12 +828,31 @@ class LinQMDSyncService:
         ]
         return identity_dict, details_dict, media_list
 
+    async def _persist_verbal_intro(
+        self,
+        doctor_id: int,
+        overview: str,
+        db_session: Any,
+    ) -> None:
+        """Save AI-generated overview to doctors.verbal_intro_file."""
+        from ..repositories.doctor_repository import DoctorRepository
+        from ..schemas.doctor import DoctorUpdate
+
+        repo = DoctorRepository(db_session)
+        await repo.update(doctor_id, DoctorUpdate(verbal_intro_file=overview))
+        logger.info(
+            "Persisted LinQMD overview to verbal_intro_file doctor_id=%s words=%d",
+            doctor_id,
+            len(overview.split()),
+        )
+
     async def sync_doctor(
         self,
         identity: dict[str, Any],
         details: dict[str, Any] | None = None,
         media: list[dict[str, Any]] | None = None,
         doctor_id: int | None = None,
+        db_session: Any | None = None,
     ) -> LinQMDSyncResult:
         """
         Sync a doctor's data to LinQMD platform.
@@ -821,10 +877,21 @@ class LinQMDSyncService:
             # Transform data to LinQMD format
             payload = self.transform_doctor_data(identity, details, media)
             payload.display_picture_file = display_picture_file
-            
+
+            from .linqmd_overview_service import get_linqmd_overview_service
+
+            overview_service = get_linqmd_overview_service()
+            payload.overview = await overview_service.generate_with_fallback(
+                identity, details
+            )
+
             status_code, response_json = await self._send_to_linqmd(payload)
             result = self._finalize_sync_result(doctor_id, status_code, response_json)
             if result.success:
+                if db_session and payload.overview:
+                    await self._persist_verbal_intro(
+                        doctor_id, payload.overview, db_session
+                    )
                 logger.info("Successfully created/synced doctor %s on LinQMD", doctor_id)
             else:
                 logger.error(
@@ -872,7 +939,13 @@ class LinQMDSyncService:
                 error_message=f"Doctor with ID {doctor_id} not found",
             )
         identity_dict, details_dict, media_list = context
-        return await self.sync_doctor(identity_dict, details_dict, media_list, doctor_id)
+        return await self.sync_doctor(
+            identity_dict,
+            details_dict,
+            media_list,
+            doctor_id,
+            db_session=db_session,
+        )
 
     async def _send_update_to_linqmd(
         self,
@@ -934,6 +1007,8 @@ class LinQMDSyncService:
                 include_theme=False,
             )
             payload.display_picture_file = display_picture_file
+            # Overview is create-only — never sent on LinQMD profile update.
+            payload.overview = ""
 
             status_code, response_json = await self._send_update_to_linqmd(
                 creds.linqmd_user_id,

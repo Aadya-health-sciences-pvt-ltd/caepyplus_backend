@@ -429,6 +429,24 @@ class PromptManager:
         formatted_system = system.format(topic=topic, keywords=", ".join(keywords))
 
         return f"{formatted_system}\n\n## REQUIRED OUTPUT FORMAT\n{schema}"
+
+    def get_linqmd_overview_prompt(self, doctor_data: dict[str, Any]) -> str:
+        """Build prompt for AI-generated LinQMD patient-facing profile overview."""
+        system = self.get("linqmd_overview.system_prompt")
+        instruction = self.get("linqmd_overview.instruction")
+        schema = self.get("linqmd_overview.response_schema")
+        doctor_json = json.dumps(doctor_data, ensure_ascii=False, indent=2)
+
+        return (
+            f"{system}\n\n"
+            f"## DOCTOR ONBOARDING DATA (JSON)\n{doctor_json}\n\n"
+            f"## REQUIRED OUTPUT FORMAT\n{schema}\n\n"
+            f"## TASK\n{instruction}\n\n"
+            "Output STRICTLY a single JSON object with one field: overview.\n"
+            "Do NOT include markdown code fences or extra commentary."
+        )
+
+
 # -----------------------------------------------------------------------------
 # Singleton Pattern with Lazy Initialization
 # -----------------------------------------------------------------------------
