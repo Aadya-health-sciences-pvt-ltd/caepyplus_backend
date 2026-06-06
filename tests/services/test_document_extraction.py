@@ -83,3 +83,37 @@ def test_doc_falls_back_to_docx_when_mislabelled() -> None:
 def test_doc_unreadable_raises() -> None:
     with pytest.raises(FileValidationError):
         extract_text_from_document(b"not a real doc file", "doc")
+
+
+def test_extract_docx_uppercase_extension() -> None:
+    content = _make_docx_bytes(["Uppercase extension"])
+
+    text = extract_text_from_document(content, "DOCX")
+
+    assert "Uppercase extension" in text
+
+
+def test_extract_docx_skips_blank_paragraphs() -> None:
+    from docx import Document
+
+    document = Document()
+    document.add_paragraph("   ")
+    document.add_paragraph("Visible line")
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    text = extract_text_from_document(buffer.getvalue(), "docx")
+
+    assert text == "Visible line"
+
+
+def test_extract_docx_whitespace_only_raises() -> None:
+    from docx import Document
+
+    document = Document()
+    document.add_paragraph("   ")
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    with pytest.raises(FileValidationError, match="No readable text"):
+        extract_text_from_document(buffer.getvalue(), "docx")
