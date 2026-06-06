@@ -86,9 +86,9 @@ async def test_update_user_role(client: AsyncClient, auth_headers: dict[str, str
     create_resp = await client.post("/api/v1/admin/users", json={"phone": "+5544332211", "role": "user"}, headers=auth_headers)
     user_id = create_resp.json()["data"]["user"]["id"]
 
-    response = await client.patch(f"/api/v1/admin/users/{user_id}/role", json={"role": "operational"}, headers=auth_headers)
+    response = await client.patch(f"/api/v1/admin/users/{user_id}/role", json={"role": "operation"}, headers=auth_headers)
     assert response.status_code == 200
-    assert response.json()["data"]["user"]["role"] == "operational"
+    assert response.json()["data"]["user"]["role"] == "operation"
 
 @pytest.mark.asyncio
 async def test_update_user_status(client: AsyncClient, auth_headers: dict[str, str]) -> None:

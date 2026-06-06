@@ -44,8 +44,7 @@ async def _seed_doctor(client: "AsyncClient") -> int:
     gen = override_get_db()
     session: AsyncSession = await gen.__anext__()
     doc = Doctor(
-        first_name="John",
-        last_name="Smith",
+        full_name="John Smith",
         email="john.smith.doctors@hospital.com",
         phone="+919876540001",
         primary_specialization="Cardiology",
@@ -154,13 +153,13 @@ async def test_update_doctor(
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
-    assert data["data"]["first_name"] == sample_update_data["first_name"]
+    assert data["data"]["full_name"] == sample_update_data["full_name"]
 
 
 @pytest.mark.asyncio
 async def test_update_doctor_requires_auth(client: AsyncClient) -> None:
     """PUT /doctors/{id} without auth returns 401."""
-    response = await client.put("/api/v1/doctors/1", json={"first_name": "X"})
+    response = await client.put("/api/v1/doctors/1", json={"full_name": "X"})
     assert response.status_code == 401
 
 

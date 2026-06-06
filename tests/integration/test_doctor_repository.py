@@ -45,11 +45,10 @@ class TestCreateFromPhone:
         doctor = await repo.create_from_phone("9800000002")
         assert doctor.phone == "+919800000002"
 
-    async def test_first_and_last_name_empty_strings(self, db_session: AsyncSession):
+    async def test_full_name_is_none_until_onboarding(self, db_session: AsyncSession):
         repo = DoctorRepository(db_session)
         doctor = await repo.create_from_phone("+919800000003")
-        assert doctor.first_name == ""
-        assert doctor.last_name == ""
+        assert doctor.full_name is None
 
     async def test_email_is_none(self, db_session: AsyncSession):
         repo = DoctorRepository(db_session)
@@ -84,23 +83,21 @@ class TestCreateFromEmail:
         doctor = await repo.create_from_email("DOCTOR@Example.COM")
         assert doctor.email == "doctor@example.com"
 
-    async def test_name_is_split(self, db_session: AsyncSession):
+    async def test_name_param_does_not_set_full_name_at_signup(self, db_session: AsyncSession):
+        """Google display name is collected at signup but stored during onboarding."""
         repo = DoctorRepository(db_session)
         doctor = await repo.create_from_email("x@y.com", name="Anjali Sharma")
-        assert doctor.first_name == "Anjali"
-        assert doctor.last_name == "Sharma"
+        assert doctor.full_name is None
 
-    async def test_single_word_name(self, db_session: AsyncSession):
+    async def test_single_word_name_leaves_full_name_none(self, db_session: AsyncSession):
         repo = DoctorRepository(db_session)
         doctor = await repo.create_from_email("mono@y.com", name="Mono")
-        assert doctor.first_name == "Mono"
-        assert doctor.last_name == ""
+        assert doctor.full_name is None
 
-    async def test_no_name_leaves_empty_strings(self, db_session: AsyncSession):
+    async def test_no_name_leaves_full_name_none(self, db_session: AsyncSession):
         repo = DoctorRepository(db_session)
         doctor = await repo.create_from_email("noname@y.com")
-        assert doctor.first_name == ""
-        assert doctor.last_name == ""
+        assert doctor.full_name is None
 
 
 # ---------------------------------------------------------------------------

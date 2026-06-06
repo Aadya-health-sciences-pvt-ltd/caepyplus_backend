@@ -35,22 +35,13 @@ from src.app.schemas.onboarding import DoctorIdentityResponse
 
 
 def _make_doctor(**overrides) -> MagicMock:
-    """Return a Doctor-like MagicMock with sensible defaults, optionally overridden.
-
-    MagicMock(spec=Doctor) is used instead of a bare Doctor() instance because
-    SQLAlchemy 2.x requires the ORM session-state machinery to be initialised
-    before mapped attributes can be set on an out-of-session object.
-    MagicMock(spec=Doctor) is duck-typed correctly by synthesise_identity which
-    only accesses plain attribute values.
-    """
+    """Return a Doctor-like MagicMock with sensible defaults, optionally overridden."""
     now = datetime.now(UTC)
     defaults = {
         "id": 1,
-        "first_name": "Anjali",
-        "last_name": "Sharma",
+        "full_name": "Anjali Sharma",
         "email": "anjali@example.com",
         "phone": "+919876543210",
-        "title": "Dr.",
         "onboarding_status": "pending",
         "created_at": now,
         "updated_at": now,
@@ -115,6 +106,13 @@ class TestSyntheticIdentityFields:
     def test_real_email_is_not_synthetic(self):
         assert not is_synthetic_identity_email("dr@example.com")
 
+    def test_displaced_email_is_synthetic(self):
+        assert is_synthetic_identity_email("_displaced_abcd1234@placeholder")
+
+    def test_empty_email_is_synthetic(self):
+        assert is_synthetic_identity_email("")
+        assert is_synthetic_identity_email(None)
+
     def test_doctor_placeholder_name_is_synthetic(self):
         assert is_synthetic_identity_full_name("Doctor 42", doctor_id=42)
         assert is_synthetic_identity_full_name("doctor 7")
@@ -152,6 +150,41 @@ class TestResolveDisplayFields:
             doctor_id=3,
         ) == "+918888888888"
 
+    def test_resolve_display_email_prefers_real_identity_email(self):
+        assert resolve_display_email("real@example.com", "other@example.com") == "real@example.com"
+
+    def test_resolve_display_email_skips_pending_doctor_email(self):
+        assert resolve_display_email(
+            "placeholder_1@caepy.com",
+            "pending_user@example.com",
+        ) == "placeholder_1@caepy.com"
+
+    def test_resolve_display_full_name_falls_back_to_identity(self):
+        assert resolve_display_full_name(
+            "Priya Nair",
+            "Doctor 9",
+            doctor_id=9,
+        ) == "Priya Nair"
+
+    def test_resolve_display_phone_falls_back_to_identity(self):
+        assert resolve_display_phone(
+            "+919111111111",
+            "UNKNOWN_9",
+            doctor_id=9,
+        ) == "+919111111111"
+
+
+class TestNormalizeOnboardingStatusValue:
+
+    def test_none_returns_empty_string(self):
+        assert normalize_onboarding_status_value(None) == ""
+
+    def test_enum_like_value_is_lowercased(self):
+        class _Status:
+            value = "Verified"
+
+        assert normalize_onboarding_status_value(_Status()) == "verified"
+
 
 # ---------------------------------------------------------------------------
 # synthesise_identity — correctness
@@ -171,11 +204,10 @@ class TestSynthesiseIdentity:
         assert result.id == "99"
         assert result.doctor_id == 99
 
-    def test_first_and_last_name_preserved(self):
-        doctor = _make_doctor(first_name="Priya", last_name="Nair")
+    def test_full_name_preserved(self):
+        doctor = _make_doctor(full_name="Priya Nair")
         result = synthesise_identity(doctor)
-        assert result.first_name == "Priya"
-        assert result.last_name == "Nair"
+        assert result.full_name == "Priya Nair"
 
     def test_email_preserved(self):
         doctor = _make_doctor(email="priya@example.com")
@@ -186,11 +218,6 @@ class TestSynthesiseIdentity:
         doctor = _make_doctor(phone="+918888888888")
         result = synthesise_identity(doctor)
         assert result.phone_number == "+918888888888"
-
-    def test_title_preserved(self):
-        doctor = _make_doctor(title="Prof.")
-        result = synthesise_identity(doctor)
-        assert result.title == "Prof."
 
     def test_onboarding_status_preserved(self):
         doctor = _make_doctor(onboarding_status="submitted")
@@ -203,7 +230,6 @@ class TestSynthesiseIdentity:
         assert result.onboarding_status == "pending"
 
     def test_is_active_always_true(self):
-        """Synthesised identities are always marked active."""
         doctor = _make_doctor()
         result = synthesise_identity(doctor)
         assert result.is_active is True
@@ -226,22 +252,16 @@ class TestSynthesiseIdentity:
         assert result.updated_at == fixed
 
     def test_null_created_at_falls_back_to_utc_now(self):
-        """If doctor.created_at is None, timestamps fall back to datetime.now(UTC)."""
         before = datetime.now(UTC)
         doctor = _make_doctor(created_at=None, updated_at=None)
         result = synthesise_identity(doctor)
         after = datetime.now(UTC)
         assert before <= result.created_at <= after
 
-    def test_null_first_name_becomes_empty_string(self):
-        doctor = _make_doctor(first_name=None)
+    def test_null_full_name_becomes_empty_string(self):
+        doctor = _make_doctor(full_name=None)
         result = synthesise_identity(doctor)
-        assert result.first_name == ""
-
-    def test_null_last_name_becomes_empty_string(self):
-        doctor = _make_doctor(last_name=None)
-        result = synthesise_identity(doctor)
-        assert result.last_name == ""
+        assert result.full_name == ""
 
     def test_null_phone_becomes_empty_string(self):
         doctor = _make_doctor(phone=None)

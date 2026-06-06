@@ -22,6 +22,11 @@ if TYPE_CHECKING:
     from httpx import AsyncClient
 
 
+def _unwrap(body: dict) -> dict:
+    """Auth endpoints return GenericResponse; payload lives under ``data``."""
+    return body["data"] if "data" in body and isinstance(body["data"], dict) else body
+
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/auth/otp/request
 # ---------------------------------------------------------------------------
@@ -38,8 +43,9 @@ async def test_otp_request_success(client: AsyncClient) -> None:
         payload = {"mobile_number": "9999999999"}
         response = await client.post("/api/v1/auth/otp/request", json=payload)
     assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
+    body = response.json()
+    assert body["success"] is True
+    data = _unwrap(body)
     assert "mobile_number" in data
     assert "expires_in_seconds" in data
 
@@ -74,8 +80,9 @@ async def test_otp_verify_success(client: AsyncClient) -> None:
         response = await client.post("/api/v1/auth/otp/verify", json=payload)
 
     assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
+    body = response.json()
+    assert body["success"] is True
+    data = _unwrap(body)
     assert "access_token" in data
     assert "doctor_id" in data
     assert "role" in data
@@ -129,9 +136,9 @@ async def test_otp_resend_success(client: AsyncClient) -> None:
         response = await client.post("/api/v1/auth/otp/resend", json=payload)
 
     assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    assert data["message"] == "OTP resent successfully"
+    body = response.json()
+    assert body["success"] is True
+    assert body["message"] == "OTP sent successfully"
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +159,9 @@ async def test_admin_otp_verify_success(client: AsyncClient) -> None:
         response = await client.post("/api/v1/auth/admin/otp/verify", json=payload)
 
     assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
+    body = response.json()
+    assert body["success"] is True
+    data = _unwrap(body)
     assert "access_token" in data
     assert data["role"] == "admin"
 
@@ -198,8 +206,9 @@ async def test_google_verify_success(client: AsyncClient, mock_firebase: None) -
     payload = {"id_token": "mock_firebase_id_token"}
     response = await client.post("/api/v1/auth/google/verify", json=payload)
     assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
+    body = response.json()
+    assert body["success"] is True
+    data = _unwrap(body)
     assert "access_token" in data
 
 
