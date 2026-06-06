@@ -23,6 +23,15 @@ settings = get_settings()
 from src.app.db.session import Base, get_db
 from src.app.main import app
 
+
+@pytest.fixture(autouse=True)
+def _disable_skip_verify_for_tests(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    """Ensure OTP send/verify tests exercise real service paths, not SKIP_VERIFY bypass."""
+    monkeypatch.setenv("SKIP_VERIFY", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -185,12 +194,9 @@ def sample_doctor_data() -> dict:
     Matches the current DoctorCreate schema.
     """
     return {
-        "first_name": "John",
-        "last_name": "Smith",
+        "full_name": "John Smith",
         "email": "john.smith@hospital.com",
         "phone_number": "+1-555-0123",
-        "title": "Dr.",
-        "gender": "Male",
         "primary_specialization": "Cardiology",
         "medical_registration_number": "MED-12345",
         "medical_council": "Medical Council of India",
@@ -219,7 +225,7 @@ def sample_doctor_data() -> dict:
 def sample_update_data() -> dict:
     """Sample update data for tests."""
     return {
-        "first_name": "Jonathan",
+        "full_name": "Jonathan Smith",
         "phone_number": "+1-555-9999",
         "years_of_experience": 16,
     }

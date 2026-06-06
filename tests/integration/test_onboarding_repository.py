@@ -18,8 +18,13 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.app.core.doctor_utils import is_synthetic_identity_email
 from src.app.models.onboarding import OnboardingStatus
-from src.app.repositories.onboarding_repository import OnboardingRepository
+from src.app.repositories.doctor_repository import DoctorRepository
+from src.app.repositories.onboarding_repository import (
+    PHONE_REQUIRED_FOR_IDENTITY,
+    OnboardingRepository,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -34,8 +39,7 @@ async def _create_identity(
     status: OnboardingStatus = OnboardingStatus.PENDING,
 ) -> object:
     return await repo.create_identity(
-        first_name="Test",
-        last_name=f"Doctor{suffix}",
+        full_name=f"Test Doctor{suffix}",
         email=f"dr{suffix}@example.com",
         phone_number=f"+9198000{suffix}",
         onboarding_status=status,
@@ -223,41 +227,62 @@ class TestStatusHistory:
 
 
 # ---------------------------------------------------------------------------
-# upsert_details / get_details_by_doctor_id
+# ensure_identity_for_doctor (early onboarding / profile photo)
 # ---------------------------------------------------------------------------
 
 
-class TestUpsertDetails:
-    async def test_create_details_on_first_call(self, db_session: AsyncSession):
+class TestEnsureIdentityForDoctor:
+    async def test_bootstraps_identity_for_phone_only_doctor(
+        self, db_session: AsyncSession
+    ) -> None:
+        doc_repo = DoctorRepository(db_session)
+        doctor = await doc_repo.create_from_phone("+919876543299")
         repo = OnboardingRepository(db_session)
-        identity = await _create_identity(repo, suffix="F1")
-        details = await repo.upsert_details(
-            doctor_id=identity.doctor_id,
-            payload={"specialty": "Cardiology"},
+
+        identity = await repo.ensure_identity_for_doctor(doctor)
+
+        assert identity.doctor_id == doctor.id
+        assert identity.phone_number == doctor.phone
+        assert is_synthetic_identity_email(identity.email)
+
+        media = await repo.add_media(
+            doctor_id=doctor.id,
+            media_type="image",
+            media_category="profile_photo",
+            field_name="profile_photo",
+            file_name="photo.jpg",
+            file_uri=f"doctors/{doctor.id}/profile_photo/test.jpg",
         )
-        assert details is not None
-        assert details.specialty == "Cardiology"  # type: ignore[union-attr]
+        assert media.doctor_id == doctor.id
 
-    async def test_update_details_on_second_call(self, db_session: AsyncSession):
+    async def test_returns_existing_identity_without_placeholder_overwrite(
+        self, db_session: AsyncSession
+    ) -> None:
+        doc_repo = DoctorRepository(db_session)
+        doctor = await doc_repo.create_from_phone("+919876543298")
         repo = OnboardingRepository(db_session)
-        identity = await _create_identity(repo, suffix="F2")
-        await repo.upsert_details(doctor_id=identity.doctor_id, payload={"specialty": "Cardiology"})
-        updated = await repo.upsert_details(doctor_id=identity.doctor_id, payload={"specialty": "Neurology"})
-        assert updated.specialty == "Neurology"  # type: ignore[union-attr]
+        created = await repo.create_identity(
+            doctor_id=doctor.id,
+            email="real.doctor@hospital.com",
+            phone_number=doctor.phone or "",
+            full_name="Dr Real",
+        )
 
-    async def test_get_details_returns_row(self, db_session: AsyncSession):
-        repo = OnboardingRepository(db_session)
-        identity = await _create_identity(repo, suffix="F3")
-        await repo.upsert_details(doctor_id=identity.doctor_id, payload={"specialty": "Ortho"})
-        details = await repo.get_details_by_doctor_id(identity.doctor_id)
-        assert details is not None
-        assert details.specialty == "Ortho"  # type: ignore[union-attr]
+        identity = await repo.ensure_identity_for_doctor(doctor)
 
-    async def test_get_details_returns_none_when_absent(self, db_session: AsyncSession):
+        assert identity.id == created.id
+        assert identity.email == "real.doctor@hospital.com"
+
+    async def test_raises_when_phone_missing(self, db_session: AsyncSession) -> None:
+        doc_repo = DoctorRepository(db_session)
+        doctor = await doc_repo.create_from_email(
+            "google.only@hospital.com",
+            name="Google User",
+        )
         repo = OnboardingRepository(db_session)
-        identity = await _create_identity(repo, suffix="F4")
-        result = await repo.get_details_by_doctor_id(identity.doctor_id)
-        assert result is None
+
+        with pytest.raises(ValueError, match=PHONE_REQUIRED_FOR_IDENTITY):
+            await repo.ensure_identity_for_doctor(doctor)
 
 
 # ---------------------------------------------------------------------------

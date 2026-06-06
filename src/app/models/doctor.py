@@ -256,9 +256,9 @@ class Doctor(Base):
     )
 
     verbal_intro_file: Mapped[str | None] = mapped_column(
-        String(500),
+        Text,
         nullable=True,
-        comment="Verbal introduction file URL",
+        comment="AI-generated patient-facing profile overview (LinQMD create only)",
     )
 
     professional_documents: Mapped[list[str]] = mapped_column(

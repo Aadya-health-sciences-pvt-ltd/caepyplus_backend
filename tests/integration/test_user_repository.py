@@ -112,16 +112,16 @@ class TestUpdateFieldsAtomicity:
         )
         updated = await repo.update_fields(
             user.id,
-            role=UserRole.OPERATIONAL.value,
+            role=UserRole.OPERATION.value,
             is_active=False,
         )
         assert updated is not None
-        assert updated.role == UserRole.OPERATIONAL.value
+        assert updated.role == UserRole.OPERATION.value
         assert updated.is_active is False
 
         # Re-fetch proves the commit landed
         refetched = await repo.get_by_id(user.id)
-        assert refetched.role == UserRole.OPERATIONAL.value
+        assert refetched.role == UserRole.OPERATION.value
         assert refetched.is_active is False
 
     async def test_partial_update_leaves_other_fields_unchanged(self, db_session: AsyncSession):
@@ -145,7 +145,7 @@ class TestUpdateFieldsAtomicity:
         repo = UserRepository(db_session)
         user = await repo.create(phone="+919800000022", role=UserRole.USER.value)
         # updated_at may be None on a fresh record (set only on first update)
-        updated = await repo.update_fields(user.id, role=UserRole.OPERATIONAL.value)
+        updated = await repo.update_fields(user.id, role=UserRole.OPERATION.value)
         assert updated is not None
         assert updated.updated_at is not None
 
@@ -238,7 +238,7 @@ class TestAuthorizationHelpers:
 
     async def test_can_access_admin_true_for_operational(self, db_session: AsyncSession):
         repo = UserRepository(db_session)
-        await repo.create(phone="+919800000063", role=UserRole.OPERATIONAL.value, is_active=True)
+        await repo.create(phone="+919800000063", role=UserRole.OPERATION.value, is_active=True)
         assert await repo.can_access_admin("+919800000063") is True
 
     async def test_can_access_admin_false_for_plain_user(self, db_session: AsyncSession):

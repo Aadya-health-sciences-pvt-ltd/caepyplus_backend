@@ -153,7 +153,10 @@ class DoctorBase(BaseModel):
     awards_recognition: list[str] = Field(default_factory=list, description="Awards and recognition")
     memberships: list[str] = Field(default_factory=list, description="Professional memberships")
     profile_photo: str | None = Field(default=None, description="Profile photo URL")
-    verbal_intro_file: str | None = Field(default=None, description="Verbal introduction file URL")
+    verbal_intro_file: str | None = Field(
+        default=None,
+        description="AI-generated patient-facing profile overview (LinQMD create only)",
+    )
     professional_documents: list[str] = Field(default_factory=list, description="Professional document URLs")
     achievement_images: list[str] = Field(default_factory=list, description="Achievement image URLs")
     external_links: list[str] = Field(default_factory=list, description="External profile links")
@@ -250,7 +253,10 @@ class DoctorUpdate(BaseModel):
     awards_recognition: list[str] | None = None
     memberships: list[str] | None = None
     profile_photo: str | None = None
-    verbal_intro_file: str | None = None
+    verbal_intro_file: str | None = Field(
+        default=None,
+        description="AI-generated patient-facing profile overview (LinQMD create only)",
+    )
     professional_documents: list[str] | None = None
     achievement_images: list[str] | None = None
     external_links: list[str] | None = None
@@ -302,6 +308,13 @@ class DoctorResponse(BaseModel):
     has_linqmd_profile: bool = Field(
         default=False,
         description="True when LinQMD credentials exist for this doctor",
+    )
+    public_profile_url: str | None = Field(
+        default=None,
+        description=(
+            "LinQMD public profile URL when verified "
+            "(LINQMD_PRACTICE_HUB_API_URL + /doctor/{username})"
+        ),
     )
 
     # Block 1: Professional Identity
@@ -367,6 +380,9 @@ class DoctorSummary(BaseModel):
 
 class PersonalDetails(BaseModel):
     """Extracted personal details from resume."""
+    title: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
     email: str | None = None
     phone: str | None = None
 
@@ -388,6 +404,7 @@ class Achievements(BaseModel):
     """Extracted achievements from resume."""
     awards_recognition: list[str] = Field(default_factory=list)
     memberships: list[str] = Field(default_factory=list)
+    fellowships: list[str] = Field(default_factory=list)
 
 class Media(BaseModel):
     """Extracted media and documents from resume."""

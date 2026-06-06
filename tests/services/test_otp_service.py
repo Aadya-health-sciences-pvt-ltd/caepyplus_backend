@@ -114,6 +114,7 @@ def otp_service():
     service.settings.SMS_USER_PASS = "test_pass"
     service.settings.SMS_OTP_MESSAGE_TEMPLATE = "Your OTP is {otp}"
     service.settings.REDIS_ENABLED = False
+    service.settings.SKIP_VERIFY = False
     service._memory_store = InMemoryOTPStore()
     service._initialized = True
     return service
@@ -161,3 +162,26 @@ async def test_send_otp_timeout(otp_service):
         success, msg = await otp_service.send_otp("1234567890")
         assert success is False
         assert "timeout" in msg
+
+
+@pytest.mark.asyncio
+async def test_send_otp_skip_verify_bypasses_sms():
+    service = OTPService()
+    service.settings.SKIP_VERIFY = True
+    service._initialized = True
+
+    success, msg = await service.send_otp("1234567890")
+
+    assert success is True
+    assert "SKIP_VERIFY" in msg
+
+
+def test_mask_mobile_masks_long_numbers():
+    service = OTPService()
+    assert service.mask_mobile("9876543210").endswith("3210")
+    assert "****" in service.mask_mobile("9876543210")
+
+
+def test_mask_mobile_short_number():
+    service = OTPService()
+    assert service.mask_mobile("123") == "****"

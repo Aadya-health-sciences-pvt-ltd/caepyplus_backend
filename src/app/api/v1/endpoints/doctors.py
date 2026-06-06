@@ -29,7 +29,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ....core.config import Settings, get_settings
-from ....core.doctor_utils import synthesise_identity as _synthesise_identity
+from ....core.doctor_utils import (
+    resolve_display_email,
+    resolve_display_full_name,
+    resolve_display_phone,
+    resolve_onboarding_status_for_response,
+    synthesise_identity as _synthesise_identity,
+)
 from ....core.rbac import AdminOrOperationUser, CurrentUser
 from ....core.security import decode_bearer_jwt_from_request, subject_effective_doctor_id
 from ....core.responses import GenericResponse, PaginatedResponse, PaginationMeta
@@ -37,7 +43,11 @@ from ....db.session import DbSession
 from ....models.doctor import Doctor as DoctorModel
 from ....models.onboarding import DoctorIdentity, DoctorStatusHistory, OnboardingStatus
 from ....repositories.doctor_repository import DoctorRepository
-from ....repositories.onboarding_repository import OnboardingRepository
+from ....repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
+from ....repositories.onboarding_repository import (
+    PHONE_REQUIRED_FOR_IDENTITY,
+    OnboardingRepository,
+)
 from ....schemas.doctor import DoctorResponse, DoctorUpdate
 from ....schemas.onboarding import (
     DoctorIdentityResponse,
@@ -74,6 +84,17 @@ async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorRespo
     if not isinstance(blob_service, S3BlobStorageService) or not blob_service.use_signed_urls:
         return response
 
+    def _looks_like_storage_uri(value: str) -> bool:
+        """True when value is an S3/HTTP storage path, not prose overview text."""
+        if value.startswith("http://") or value.startswith("https://"):
+            return True
+        if ".amazonaws.com/" in value:
+            return True
+        # Bare S3 keys: short path-like strings (e.g. doctors/42/profile/x.jpg)
+        if "/" in value and " " not in value and len(value) < 300:
+            return True
+        return False
+
     async def _sign(uri: str | None) -> str | None:
         """Sign a URI that is either:
           - a full S3 HTTPS URL: https://{bucket}.s3.{region}.amazonaws.com/{key}
@@ -105,7 +126,8 @@ async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorRespo
         return uri
 
     response.profile_photo = await _sign(response.profile_photo)
-    response.verbal_intro_file = await _sign(response.verbal_intro_file)
+    if response.verbal_intro_file and _looks_like_storage_uri(response.verbal_intro_file):
+        response.verbal_intro_file = await _sign(response.verbal_intro_file)
 
     response.professional_documents = [
         signed for doc in response.professional_documents
@@ -119,6 +141,44 @@ async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorRespo
         signed for link in response.external_links
         if (signed := await _sign(link))
     ]
+
+    return response
+
+
+async def _enrich_doctor_response(
+    doctor_id: int,
+    response: DoctorResponse,
+    db: DbSession,
+    settings: Settings,
+) -> DoctorResponse:
+    """Merge identity onboarding status and LinQMD public profile URL."""
+    doctor_row_status = response.onboarding_status
+    onboarding_repo = OnboardingRepository(db)
+    identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
+    identity_status: str | None = None
+    if identity is not None:
+        status = identity.onboarding_status
+        identity_status = (
+            status.value if hasattr(status, "value") else str(status)
+        )
+    response.onboarding_status = resolve_onboarding_status_for_response(
+        identity_status,
+        doctor_row_status,
+        has_identity_row=identity is not None,
+    )
+
+    creds_repo = LinqmdCredentialsRepository(db)
+    creds = await creds_repo.get_by_doctor_id(doctor_id)
+    response.has_linqmd_profile = creds is not None
+
+    is_verified = (response.onboarding_status or "").lower() == "verified"
+    if is_verified and creds and creds.linqmd_username.strip():
+        username = creds.linqmd_username.strip().lstrip("/")
+        response.public_profile_url = settings.linqmd_practice_hub_url(
+            f"/doctor/{username}"
+        )
+    else:
+        response.public_profile_url = None
 
     return response
 
@@ -356,6 +416,21 @@ async def lookup_doctor(
 
     if identity:
         identity_resp = DoctorIdentityResponse.model_validate(identity)
+        if doctor:
+            identity_resp.email = resolve_display_email(
+                identity_resp.email,
+                doctor.email,
+            )
+            identity_resp.full_name = resolve_display_full_name(
+                identity_resp.full_name,
+                doctor.full_name,
+                doctor_id=resolved_id,
+            )
+            identity_resp.phone_number = resolve_display_phone(
+                identity_resp.phone_number,
+                doctor.phone,
+                doctor_id=resolved_id,
+            )
     else:
         assert doctor is not None
         identity_resp = _synthesise_identity(doctor)
@@ -446,13 +521,16 @@ async def check_phone_availability_for_current_doctor(
 async def get_doctor(
     doctor_id: int,
     repo: DoctorRepoDep,
+    db: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> GenericResponse[DoctorResponse]:
     """Fetch a doctor record by its numeric ID."""
     doctor = await repo.get_by_id_or_raise(doctor_id)
     signed_doctor = await _sign_doctor_urls(doctor)
+    enriched = await _enrich_doctor_response(doctor_id, signed_doctor, db, settings)
     return GenericResponse(
         message="Doctor retrieved successfully",
-        data=signed_doctor,
+        data=enriched,
     )
 
 
@@ -483,10 +561,23 @@ async def update_doctor(
             detail="You do not have permission to update this doctor profile.",
         )
     doctor = await repo.update(doctor_id, data)
+    onboarding_repo = OnboardingRepository(repo.session)
+    await onboarding_repo.sync_identity_from_doctor(
+        doctor_id,
+        email=doctor.email,
+        phone_number=doctor.phone,
+        full_name=doctor.full_name,
+    )
+    from ....services.linqmd_sync_service import sync_linqmd_profile_update_if_credentials_exist
+
+    await sync_linqmd_profile_update_if_credentials_exist(doctor_id, repo.session)
     signed_doctor = await _sign_doctor_urls(doctor)
+    enriched = await _enrich_doctor_response(
+        doctor_id, signed_doctor, repo.session, settings
+    )
     return GenericResponse(
         message="Doctor updated successfully",
-        data=signed_doctor,
+        data=enriched,
     )
 
 
@@ -645,20 +736,17 @@ async def upload_profile_photo(
     await repo.session.commit()
     await repo.session.refresh(doctor)
 
-    # Update doctor_media table for Admin view compatibility
+    # doctor_media FK requires doctor_identity (OTP users may not have one yet).
     onboarding_repo = OnboardingRepository(db)
-    identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
-
-    if not identity:
-        # Lazy initialization: If a doctor is uploading a profile photo outside the formal
-        # onboarding flow, we bootstrap a basic identity so the media tracking doesn't fail.
-        # This keeps the User App and Admin Dashboard in sync.
-        identity = await onboarding_repo.create_identity(
-            doctor_id=doctor_id,
-            email=doctor.email or f"placeholder_{doctor_id}@caepy.com",
-            phone_number=doctor.phone or f"UNKNOWN_{doctor_id}",
-            full_name=doctor.full_name or f"Doctor {doctor_id}",
-        )
+    try:
+        await onboarding_repo.ensure_identity_for_doctor(doctor)
+    except ValueError as exc:
+        if str(exc) == PHONE_REQUIRED_FOR_IDENTITY:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Complete phone verification before uploading a profile photo.",
+            ) from exc
+        raise
 
     media_category = "profile_photo"
     media_type = (
@@ -683,6 +771,10 @@ async def upload_profile_photo(
         doctor_id=doctor_id,
         file_uri=upload_result.file_uri,
     )
+
+    from ....services.linqmd_sync_service import sync_linqmd_profile_update_if_credentials_exist
+
+    await sync_linqmd_profile_update_if_credentials_exist(doctor_id, db)
 
     signed_doctor = await _sign_doctor_urls(doctor)
 

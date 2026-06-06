@@ -11,6 +11,7 @@ from sqlalchemy import select, delete
 
 from ....core.security import require_authentication
 from ....core.prompts import get_prompt_manager
+from ....core.exceptions import AIServiceError, ExtractionError
 from ....services.gemini_service import get_gemini_service
 from ....db.session import DbSession
 from ....models.blog import Blog, BlogKeyword, BlogComment
@@ -19,6 +20,8 @@ from ....schemas.blog import (
     BlogCreate,
     BlogUpdate,
     BlogPublishConfig,
+    BlogPublishPracticeHubRequest,
+    BlogPublishPracticeHubResponse,
     BlogCommentResponse,
     CommentStatusUpdate,
     AITopicsResponse,
@@ -26,6 +29,15 @@ from ....schemas.blog import (
     AITopicCard,
     AIBlogContentGenerateRequest,
     AIBlogContentResponse,
+)
+from ....repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
+from ....repositories.onboarding_repository import OnboardingRepository
+from ....services.linqmd_practice_hub_service import (
+    LinqmdLoginError,
+    LinqmdPublishError,
+    PracticeHubBlogPayload,
+    extract_image_alt_from_html,
+    get_linqmd_practice_hub_service,
 )
 from ....models.enums import BlogStatus, CommentStatus, CommentAuthorType
 
@@ -77,21 +89,41 @@ async def _resolve_image_urls(image_urls: list | None) -> list[str]:
 # AI Suggestions (Static Paths First)
 # ---------------------------------------------------------------------------
 
+_TOPICS_MAX_TOKENS = 8192
+
+
+def _topics_http_exception(exc: Exception) -> HTTPException:
+    """Map AI failures to actionable API errors for the Blog Studio UI."""
+    if isinstance(exc, AIServiceError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=exc.message,
+        )
+    if isinstance(exc, ExtractionError):
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=exc.message,
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to generate topics: {str(exc)}",
+    )
+
+
 @router.get("/insights/topics", response_model=AITopicsResponse)
 async def get_ai_topics() -> AITopicsResponse:
     """Get AI suggested blog topics for the doctor using Gemini."""
     try:
         gemini = get_gemini_service()
         prompts = get_prompt_manager()
-        
+
         prompt = prompts.get_blog_topics_prompt()
-        result = await gemini.generate_structured(prompt)
+        result = await gemini.generate_structured(prompt, max_tokens=_TOPICS_MAX_TOKENS)
         return AITopicsResponse(**result)
+    except (AIServiceError, ExtractionError, HTTPException):
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate topics: {str(e)}"
-        )
+        raise _topics_http_exception(e) from e
 
 @router.get("/insights/keywords", response_model=AIKeywordSuggestionResponse)
 async def get_ai_keywords(topic: str) -> AIKeywordSuggestionResponse:
@@ -294,6 +326,148 @@ async def update_blog(
     await db.refresh(blog)
     
     return blog
+
+async def _doctor_onboarding_status(db: DbSession, doctor_id: int) -> str:
+    """Prefer doctor_identity status; fall back to doctors.onboarding_status."""
+    onboarding_repo = OnboardingRepository(db)
+    identity = await onboarding_repo.get_identity_by_doctor_id(doctor_id)
+    if identity is not None:
+        status = identity.onboarding_status
+        return (status.value if hasattr(status, "value") else str(status)).lower()
+    from ....repositories.doctor_repository import DoctorRepository
+
+    doctor = await DoctorRepository(db).get_by_id(doctor_id)
+    if doctor is None:
+        return "pending"
+    return (doctor.onboarding_status or "pending").lower()
+
+
+@router.post(
+    "/{blog_id}/publish-practice-hub",
+    response_model=BlogPublishPracticeHubResponse,
+)
+async def publish_blog_to_practice_hub(
+    blog_id: int,
+    payload: BlogPublishPracticeHubRequest,
+    db: DbSession,
+    doctor_id_str: str = Depends(require_authentication),
+) -> BlogPublishPracticeHubResponse:
+    """Login to Practice Hub and publish blog; mark local blog as published."""
+    doctor_id = int(doctor_id_str)
+
+    onboarding_status = await _doctor_onboarding_status(db, doctor_id)
+    if onboarding_status != "verified":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Doctor verification pending. Publishing is available after verification.",
+        )
+
+    result = await db.execute(
+        select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
+    )
+    blog = result.scalar_one_or_none()
+    if blog is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
+
+    creds_repo = LinqmdCredentialsRepository(db)
+    stored_creds = await creds_repo.get_by_doctor_id(doctor_id)
+    if stored_creds is None and payload.credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No LinQMD Practice Hub profile found. Contact admin to sync your profile.",
+        )
+
+    using_override = payload.credentials is not None
+    if using_override:
+        username = payload.credentials.username.strip()
+        password = payload.credentials.password
+    elif stored_creds:
+        username = stored_creds.linqmd_username
+        password = stored_creds.linqmd_password
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="LinQMD credentials are required.",
+        )
+
+    hub_service = get_linqmd_practice_hub_service()
+    try:
+        login_result = await hub_service.login(username, password)
+    except LinqmdLoginError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "linqmd_credentials_invalid",
+                "message": (
+                    "Practice Hub login failed. Please update your credentials and try again."
+                ),
+                "error": str(exc),
+            },
+        ) from exc
+
+    if using_override:
+        if stored_creds is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No LinQMD profile to update. Contact admin to sync your profile first.",
+            )
+        await creds_repo.update_credentials(doctor_id, username, password)
+
+    image_bytes = None
+    image_filename = None
+    image_content_type = None
+    if blog.image_urls and len(blog.image_urls) > 0:
+        loaded = await hub_service.load_blog_image_from_storage(blog.image_urls[0])
+        if loaded:
+            image_bytes, image_filename, image_content_type = loaded
+
+    image_alt = extract_image_alt_from_html(blog.content)
+    hub_payload = PracticeHubBlogPayload(
+        title=blog.title or "Untitled Blog",
+        subtitle=blog.subtitle,
+        content=blog.content,
+        image_bytes=image_bytes,
+        image_filename=image_filename,
+        image_content_type=image_content_type,
+        image_alt=image_alt,
+    )
+
+    try:
+        practice_hub_response = await hub_service.publish_blog(
+            login_result.access_token,
+            hub_payload,
+        )
+    except LinqmdPublishError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "linqmd_publish_failed",
+                "message": str(exc),
+            },
+        ) from exc
+
+    drupal_node_id = None
+    if isinstance(practice_hub_response, dict):
+        for key in ("nid", "node_id", "drupal_node_id", "id", "uid"):
+            val = practice_hub_response.get(key)
+            if val is not None:
+                drupal_node_id = str(val)
+                break
+
+    blog.status = BlogStatus.PUBLISHED.value
+    blog.published_at = datetime.now()
+    if drupal_node_id:
+        blog.drupal_node_id = drupal_node_id
+    await db.commit()
+    await db.refresh(blog)
+
+    return BlogPublishPracticeHubResponse(
+        blog_id=blog_id,
+        status=blog.status,
+        drupal_node_id=drupal_node_id,
+        practice_hub_response=practice_hub_response,
+    )
+
 
 @router.post("/{blog_id}/publish")
 async def publish_blog(

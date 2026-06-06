@@ -11,12 +11,16 @@ from __future__ import annotations
 import logging
 import time
 
-from ..core.exceptions import ExtractionError, FileValidationError
+from ..core.config import get_settings
+from ..core.exceptions import AIServiceError, ExtractionError, FileValidationError
 from ..core.prompts import get_prompt_manager
 from ..schemas.doctor import ResumeExtractedData
-from .gemini_service import get_gemini_service
+from .document_extraction import OFFICE_EXTENSIONS, extract_text_from_document
+from .gemini_service import gemini_remediation_hint, get_gemini_service, mask_api_key
 
 logger = logging.getLogger(__name__)
+
+_RESUME_MODEL_CONFIG_KEY = "GEMINI_RESUME_MODEL"
 
 
 class ResumeExtractionService:
@@ -96,6 +100,31 @@ class ResumeExtractionService:
             ExtractionError: If data extraction fails
             AIServiceError: If AI service is unavailable
         """
+        extension = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+        settings = get_settings()
+        extraction_path = "text" if extension in OFFICE_EXTENSIONS else "vision"
+        logger.info(
+            "Resume extraction starting: filename=%s extension=%s path=%s "
+            "model=%s api_key=%s file_size_bytes=%d",
+            filename,
+            extension or "<none>",
+            extraction_path,
+            settings.GEMINI_RESUME_MODEL,
+            mask_api_key(settings.GOOGLE_API_KEY),
+            len(file_content),
+        )
+
+        # Word documents are not supported by Gemini Vision — extract their text
+        # first and run the text-based extraction path instead.
+        if extension in OFFICE_EXTENSIONS:
+            document_text = extract_text_from_document(file_content, extension)
+            logger.info(
+                "Extracted %d chars of text from %s for resume parsing",
+                len(document_text),
+                filename,
+            )
+            return await self.extract_from_text(document_text)
+
         start_time = time.time()
 
         mime_type = self._get_mime_type(filename)
@@ -112,6 +141,10 @@ class ResumeExtractionService:
                 file_content=file_content,
                 mime_type=mime_type,
                 temperature=0.1,  # Low temperature for consistent extraction
+                max_tokens=settings.GEMINI_RESUME_MAX_TOKENS,
+                model=settings.GEMINI_RESUME_MODEL,
+                config_key=_RESUME_MODEL_CONFIG_KEY,
+                json_mode=True,
             )
 
             # Validate and create response object
@@ -125,13 +158,52 @@ class ResumeExtractionService:
 
         except ExtractionError:
             raise
-        except Exception as e:
-            logger.error("Failed to extract from %s: %s", filename, e)
+        except AIServiceError as e:
+            original = (e.details or {}).get("original_error", str(e))
+            remediation = gemini_remediation_hint(
+                original,
+                settings.GEMINI_RESUME_MODEL,
+                config_key=_RESUME_MODEL_CONFIG_KEY,
+            )
+            logger.error(
+                "Resume extraction Gemini failure: filename=%s model=%s api_key=%s "
+                "gemini_error=%s remediation=%s",
+                filename,
+                settings.GEMINI_RESUME_MODEL,
+                mask_api_key(settings.GOOGLE_API_KEY),
+                original,
+                remediation,
+            )
             raise ExtractionError(
                 message="Failed to extract data from resume",
                 source="resume",
-                details={"filename": filename, "error": str(e)},
+                details={
+                    "filename": filename,
+                    "model": settings.GEMINI_RESUME_MODEL,
+                    "api_key": mask_api_key(settings.GOOGLE_API_KEY),
+                    "gemini_error": original,
+                    "remediation": remediation,
+                },
+            ) from e
+        except Exception as e:
+            logger.error(
+                "Failed to extract from %s (model=%s api_key=%s): %s",
+                filename,
+                settings.GEMINI_RESUME_MODEL,
+                mask_api_key(settings.GOOGLE_API_KEY),
+                e,
+                exc_info=True,
             )
+            raise ExtractionError(
+                message="Failed to extract data from resume",
+                source="resume",
+                details={
+                    "filename": filename,
+                    "model": settings.GEMINI_RESUME_MODEL,
+                    "api_key": mask_api_key(settings.GOOGLE_API_KEY),
+                    "error": str(e),
+                },
+            ) from e
 
     async def extract_from_text(
         self,
@@ -150,7 +222,12 @@ class ResumeExtractionService:
         """
         start_time = time.time()
 
-        logger.info("Extracting from text (%d chars)", len(text_content))
+        settings = get_settings()
+        logger.info(
+            "Extracting from text (%d chars) model=%s",
+            len(text_content),
+            settings.GEMINI_RESUME_MODEL,
+        )
 
         try:
             extraction_prompt = self._get_extraction_prompt()
@@ -159,6 +236,10 @@ class ResumeExtractionService:
             parsed_data = await self.gemini.generate_structured(
                 prompt=full_prompt,
                 temperature=0.1,
+                max_tokens=settings.GEMINI_RESUME_MAX_TOKENS,
+                model=settings.GEMINI_RESUME_MODEL,
+                config_key=_RESUME_MODEL_CONFIG_KEY,
+                json_mode=True,
             )
 
             extracted_data = ResumeExtractedData(**parsed_data)
@@ -170,13 +251,38 @@ class ResumeExtractionService:
 
         except ExtractionError:
             raise
+        except AIServiceError as e:
+            original = (e.details or {}).get("original_error", str(e))
+            remediation = gemini_remediation_hint(
+                original,
+                settings.GEMINI_RESUME_MODEL,
+                config_key=_RESUME_MODEL_CONFIG_KEY,
+            )
+            logger.error(
+                "Resume text extraction Gemini failure: model=%s api_key=%s "
+                "gemini_error=%s remediation=%s",
+                settings.GEMINI_RESUME_MODEL,
+                mask_api_key(settings.GOOGLE_API_KEY),
+                original,
+                remediation,
+            )
+            raise ExtractionError(
+                message="Failed to extract data from text",
+                source="text",
+                details={
+                    "model": settings.GEMINI_RESUME_MODEL,
+                    "api_key": mask_api_key(settings.GOOGLE_API_KEY),
+                    "gemini_error": original,
+                    "remediation": remediation,
+                },
+            ) from e
         except Exception as e:
-            logger.error("Text extraction failed: %s", e)
+            logger.error("Text extraction failed: %s", e, exc_info=True)
             raise ExtractionError(
                 message="Failed to extract data from text",
                 source="text",
                 details={"error": str(e)},
-            )
+            ) from e
 
 
 # Singleton instance

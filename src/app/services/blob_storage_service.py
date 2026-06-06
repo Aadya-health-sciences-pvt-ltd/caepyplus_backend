@@ -870,6 +870,25 @@ class S3BlobStorageService:
             )
         return str(url)
 
+    async def get_object_bytes(self, s3_key: str) -> tuple[bytes, str, str]:
+        """Download object content from S3 by key.
+
+        Returns:
+            Tuple of (content bytes, filename, content-type).
+        """
+        async with self.session.client("s3") as s3_client:
+            response = await s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+            )
+            content = await response["Body"].read()
+            content_type = response.get("ContentType") or self._detect_mime_type(
+                Path(s3_key).name,
+                content,
+            )
+            filename = Path(s3_key).name or "profile_photo.jpg"
+            return content, filename, content_type
+
     async def blob_exists(self, blob_id: str, doctor_id: int, media_category: str, extension: str) -> bool:
         """Check if blob exists in S3."""
         try:

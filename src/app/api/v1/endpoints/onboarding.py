@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import BaseModel, Field
 
 from ....core.config import Settings, get_settings
+from ....core.doctor_utils import should_preserve_verified_on_profile_resubmit
 from ....core.exceptions import FileValidationError
 from ....core.rbac import AdminOrOperationUser, CurrentUser
 from ....core.security import decode_bearer_jwt_from_request, subject_effective_doctor_id
@@ -24,6 +25,7 @@ from ....repositories.onboarding_repository import OnboardingRepository
 from ....schemas.doctor import ExtractionResponse
 from ....services.email_service import EmailService, get_email_service
 from ....services.extraction_service import get_extraction_service
+from ....services.gemini_service import mask_api_key
 
 log = structlog.get_logger(__name__)
 
@@ -86,6 +88,12 @@ def validate_file(
         "image/png",
         "image/jpeg",
         "image/jpg",
+        # Word documents (.doc / .docx)
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        # Some browsers send a generic content type for Office uploads; the
+        # extension check above is the authoritative gate in that case.
+        "application/octet-stream",
     ]
     if file.content_type and file.content_type not in valid_content_types:
         raise FileValidationError(
@@ -104,9 +112,9 @@ def validate_file(
     response_model=ExtractionResponse,
     summary="Extract data from resume",
     description="""
-Upload a doctor's resume (PDF or Image) and extract structured professional data.
+Upload a doctor's resume (PDF, Image, or Word document) and extract structured professional data.
 
-**Supported formats:** PDF, PNG, JPG, JPEG
+**Supported formats:** PDF, PNG, JPG, JPEG, DOC, DOCX
 
 **Max file size:** 10MB
 
@@ -137,7 +145,7 @@ The response can be used to pre-fill the doctor registration form.
     },
 )
 async def extract_resume(
-    file: Annotated[UploadFile, File(description="Resume file (PDF, PNG, JPG)")],
+    file: Annotated[UploadFile, File(description="Resume file (PDF, PNG, JPG, DOC, DOCX)")],
     settings: Annotated[Settings, Depends(get_settings)],
     extraction_service: Annotated[Any, Depends(get_extraction_service)],
 ) -> ExtractionResponse:
@@ -165,7 +173,13 @@ async def extract_resume(
             filename=file.filename,
         )
 
-    log.info("resume_processing", filename=file.filename, size_bytes=len(content))
+    log.info(
+        "resume_processing",
+        filename=file.filename,
+        size_bytes=len(content),
+        gemini_resume_model=settings.GEMINI_RESUME_MODEL,
+        google_api_key=mask_api_key(settings.GOOGLE_API_KEY),
+    )
 
     # Extract data
     extracted_data, processing_time = await extraction_service.extract_from_file(
@@ -223,13 +237,59 @@ async def submit_profile(
 
     now = datetime.now(UTC)
     previous_status = doctor.onboarding_status
+    identity = await repo.get_identity_by_doctor_id(doctor_id)
+    preserve_verified = should_preserve_verified_on_profile_resubmit(
+        doctor.onboarding_status,
+        identity.onboarding_status if identity else None,
+    )
+
+    if preserve_verified:
+        doctor.onboarding_status = OnboardingStatus.VERIFIED.value
+        doctor.updated_at = now
+        if identity is None:
+            import uuid as _uuid
+
+            from ....models.onboarding import DoctorIdentity as _DoctorIdentity
+
+            identity = _DoctorIdentity(
+                id=str(_uuid.uuid4()),
+                doctor_id=doctor_id,
+                full_name=getattr(doctor, "full_name", None) or "",
+                email=doctor.email or "",
+                phone_number=doctor.phone or "",
+                onboarding_status=OnboardingStatus.VERIFIED,
+            )
+            db.add(identity)
+            await db.flush()
+        else:
+            identity.onboarding_status = OnboardingStatus.VERIFIED
+            identity.updated_at = now
+        await repo.sync_identity_from_doctor(
+            doctor_id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
+        await db.commit()
+        await db.refresh(doctor)
+        if identity is not None:
+            await db.refresh(identity)
+
+        return GenericResponse(
+            message="Profile updated successfully",
+            data={
+                "doctor_id": doctor.id,
+                "previous_status": previous_status,
+                "new_status": doctor.onboarding_status,
+                "status_unchanged": True,
+            },
+        )
 
     doctor.onboarding_status = OnboardingStatus.SUBMITTED.value
     doctor.updated_at = now
 
     # Ensure a doctor_identity row exists (required for FK in doctor_status_history).
     # OTP-created doctors may not have one yet — auto-create a minimal identity.
-    identity = await repo.get_identity_by_doctor_id(doctor_id)
     if identity is None:
         import uuid as _uuid
 
@@ -248,6 +308,12 @@ async def submit_profile(
         identity.onboarding_status = OnboardingStatus.SUBMITTED
         identity.updated_at = now
         identity.status_updated_at = now
+        await repo.sync_identity_from_doctor(
+            doctor_id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
 
     # Audit trail
     await repo.log_status_change(
@@ -431,6 +497,12 @@ async def verify_profile(
         identity.status_updated_at = now
         identity.status_updated_by = str(current_user.id)
         identity.updated_at = now
+        await repo.sync_identity_from_doctor(
+            doctor_id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
 
     # Audit trail
     await repo.log_status_change(
@@ -584,6 +656,12 @@ async def reject_profile(
         identity.status_updated_at = now
         identity.status_updated_by = str(current_user.id)
         identity.updated_at = now
+        await repo.sync_identity_from_doctor(
+            doctor_id,
+            email=doctor.email,
+            phone_number=doctor.phone,
+            full_name=doctor.full_name,
+        )
 
     # Audit trail
     await repo.log_status_change(

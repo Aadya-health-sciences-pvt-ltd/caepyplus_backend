@@ -35,6 +35,11 @@ VALID_MOBILE = "9876543210"
 VALID_MOBILE_NORMALISED = "9876543210"
 
 
+def _unwrap(body: dict) -> dict:
+    """Auth endpoints return GenericResponse; payload lives under ``data``."""
+    return body["data"] if "data" in body and isinstance(body["data"], dict) else body
+
+
 def _mock_otp_service(
     *,
     send_result: tuple[bool, str] = (True, "OTP sent successfully"),
@@ -83,7 +88,7 @@ class TestRequestOtp:
         mock_svc = _mock_otp_service()
         with _override_otp_service(mock_svc):
             resp = await client.post(REQUEST_URL, json={"mobile_number": VALID_MOBILE})
-        data = resp.json()
+        data = _unwrap(resp.json())
         assert "mobile_number" in data
         # The real number must NOT appear verbatim in the response
         assert VALID_MOBILE not in data["mobile_number"]
@@ -130,7 +135,7 @@ class TestVerifyOtp:
                 VERIFY_URL,
                 json={"mobile_number": VALID_MOBILE, "otp": "123456"},
             )
-        data = resp.json()
+        data = _unwrap(resp.json())
         assert "access_token" in data
         assert data["token_type"] == "bearer"
 
@@ -142,7 +147,7 @@ class TestVerifyOtp:
                 VERIFY_URL,
                 json={"mobile_number": VALID_MOBILE, "otp": "123456"},
             )
-        token = resp.json()["access_token"]
+        token = _unwrap(resp.json())["access_token"]
         assert len(token.split(".")) == 3, "JWT must have 3 dot-separated segments"
 
     async def test_is_new_user_true_on_first_login(self, client: AsyncClient):
@@ -152,7 +157,7 @@ class TestVerifyOtp:
                 VERIFY_URL,
                 json={"mobile_number": "9700000001", "otp": "000000"},
             )
-        assert resp.json()["is_new_user"] is True
+        assert _unwrap(resp.json())["is_new_user"] is True
 
     async def test_is_new_user_false_on_second_login(self, client: AsyncClient):
         """Verifying twice with the same number must return is_new_user=False second time."""
@@ -166,7 +171,7 @@ class TestVerifyOtp:
                 VERIFY_URL,
                 json={"mobile_number": "9700000002", "otp": "000000"},
             )
-        assert resp2.json()["is_new_user"] is False
+        assert _unwrap(resp2.json())["is_new_user"] is False
 
     async def test_returns_401_for_invalid_otp(self, client: AsyncClient):
         mock_svc = _mock_otp_service(verify_result=(False, "Invalid OTP"))
