@@ -84,6 +84,17 @@ async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorRespo
     if not isinstance(blob_service, S3BlobStorageService) or not blob_service.use_signed_urls:
         return response
 
+    def _looks_like_storage_uri(value: str) -> bool:
+        """True when value is an S3/HTTP storage path, not prose overview text."""
+        if value.startswith("http://") or value.startswith("https://"):
+            return True
+        if ".amazonaws.com/" in value:
+            return True
+        # Bare S3 keys: short path-like strings (e.g. doctors/42/profile/x.jpg)
+        if "/" in value and " " not in value and len(value) < 300:
+            return True
+        return False
+
     async def _sign(uri: str | None) -> str | None:
         """Sign a URI that is either:
           - a full S3 HTTPS URL: https://{bucket}.s3.{region}.amazonaws.com/{key}
@@ -115,7 +126,8 @@ async def _sign_doctor_urls(doctor: DoctorResponse | DoctorModel) -> DoctorRespo
         return uri
 
     response.profile_photo = await _sign(response.profile_photo)
-    response.verbal_intro_file = await _sign(response.verbal_intro_file)
+    if response.verbal_intro_file and _looks_like_storage_uri(response.verbal_intro_file):
+        response.verbal_intro_file = await _sign(response.verbal_intro_file)
 
     response.professional_documents = [
         signed for doc in response.professional_documents

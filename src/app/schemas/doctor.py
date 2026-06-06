@@ -153,7 +153,10 @@ class DoctorBase(BaseModel):
     awards_recognition: list[str] = Field(default_factory=list, description="Awards and recognition")
     memberships: list[str] = Field(default_factory=list, description="Professional memberships")
     profile_photo: str | None = Field(default=None, description="Profile photo URL")
-    verbal_intro_file: str | None = Field(default=None, description="Verbal introduction file URL")
+    verbal_intro_file: str | None = Field(
+        default=None,
+        description="AI-generated patient-facing profile overview (LinQMD create only)",
+    )
     professional_documents: list[str] = Field(default_factory=list, description="Professional document URLs")
     achievement_images: list[str] = Field(default_factory=list, description="Achievement image URLs")
     external_links: list[str] = Field(default_factory=list, description="External profile links")
@@ -250,7 +253,10 @@ class DoctorUpdate(BaseModel):
     awards_recognition: list[str] | None = None
     memberships: list[str] | None = None
     profile_photo: str | None = None
-    verbal_intro_file: str | None = None
+    verbal_intro_file: str | None = Field(
+        default=None,
+        description="AI-generated patient-facing profile overview (LinQMD create only)",
+    )
     professional_documents: list[str] | None = None
     achievement_images: list[str] | None = None
     external_links: list[str] | None = None

@@ -489,6 +489,69 @@ validation:
       Return JSON: {{"valid": true/false, "format": "detected format", "council": "issuing body if identifiable"}}
 
 # =============================================================================
+# LINQMD OVERVIEW GENERATION (patient-facing profile bio at LinQMD create)
+# =============================================================================
+
+linqmd_overview:
+  system_prompt: |
+    You are an expert medical copywriter creating patient-facing doctor profile
+    overviews for Indian healthcare platforms (LinQMD).
+
+    Your writing should be warm, authoritative, and reassuring — helping patients
+    understand who the doctor is, what they specialise in, and why they can be
+    trusted with their care.
+
+    STYLE REFERENCE (tone and structure only — do NOT copy facts from these):
+
+    Sample A:
+    "Dr. Balachandra is a distinguished Consultant Pediatrician and Allergy Asthma
+    Specialist with around 17 years of extensive experience in providing top-tier
+    medical care to infants, children, and adolescents. Renowned for his expertise
+    in diagnosing and managing allergies and asthma for all age groups from infants
+    to children, Adolescent, Adult and Old age, Dr. Balachandra is dedicated to
+    educating patients and their families on managing these conditions through
+    trigger avoidance, proper medication use, and lifestyle adjustments. His holistic
+    approach involves collaborating with multidisciplinary teams to ensure
+    comprehensive care, with a strong emphasis on preventive health measures like
+    vaccinations and nutritional counseling. Fluent in English, Kannada, Hindi,
+    Telugu, Tamil. he is committed to fostering long-term, compassionate
+    relationships with his patients and their families, ensuring continuous and
+    personalized care."
+
+    Sample B:
+    "Dr Deepa Chandran is a practising neuroanaesthesiologist presently working at
+    Sparsh Hospital Hennur. Bangalore. Having completed 19 years of practice in the
+    field of anaesthesia she has vast experience in handling anaesthesia for a
+    variety of neurosurgical procedures like tumour excisions, scoliosis surgeries
+    and neuro interventional procedures like aneurysm coiling. Her clinical skills
+    are not only limited to the field of Neuro anaesthesia but she's also a
+    competent practising Pediatric anaesthesiologist and an interventional pain
+    specialist. She has been a part of Smile Train programme which is one of the
+    worlds largest cleft focused organisations."
+
+  instruction: |
+    Write a single patient-facing PROFESSIONAL OVERVIEW paragraph for the doctor
+    described in the JSON data below.
+
+    RULES:
+    1. Use ONLY information present in the JSON. Never invent degrees, hospitals,
+       years of experience, awards, or affiliations.
+    2. If a field is missing or empty, simply omit it — write a compelling overview
+       from whatever data is available.
+    3. Write in third person, starting with the doctor's name and title (e.g. "Dr. ...").
+    4. Weave together: specialty, experience, areas of expertise, conditions treated,
+       qualifications, practice location, languages, care approach, and notable
+       achievements when available.
+    5. Tone: accessible, reassuring, professional — appealing to patients and families.
+    6. Length: MINIMUM 80 words, MAXIMUM 200 words. Count carefully.
+    7. Plain prose only — no headings, bullet points, or markdown.
+
+  response_schema: |
+    {
+      "overview": "A single paragraph of plain text, 80-200 words, third-person patient-facing bio."
+    }
+
+# =============================================================================
 # PROFILE CONTENT GENERATION PROMPTS
 # =============================================================================
 # Each section has 3 prompt variants that are cycled through when users refresh.
