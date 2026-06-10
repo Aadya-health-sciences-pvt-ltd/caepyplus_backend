@@ -27,6 +27,11 @@ from tenacity import (
 
 from ..core.config import get_settings
 from ..core.exceptions import AIServiceError, ExtractionError
+from .gemini_client_factory import (
+    create_genai_client,
+    normalize_model_id,
+    should_use_vertex,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,27 +113,40 @@ class GeminiService:
         """Initialize the Gemini client with API configuration."""
         self.settings = get_settings()
         self._client: genai.Client | None = None
+        self._use_vertex: bool = False
 
     @property
     def client(self) -> genai.Client:
-        """Get or create the Gemini client instance."""
+        """Get or create the Gemini client instance (Vertex or AI Studio)."""
         if self._client is None:
-            if not self.settings.GOOGLE_API_KEY:
-                raise AIServiceError(
-                    message="Google API key not configured",
-                    original_error="GOOGLE_API_KEY environment variable is empty",
-                )
-            self._client = genai.Client(api_key=self.settings.GOOGLE_API_KEY)
-            logger.info(
-                "Initialized Gemini client model=%s api_key=%s",
-                self.settings.GEMINI_MODEL,
-                mask_api_key(self.settings.GOOGLE_API_KEY),
+            # Same backend selection as voice onboarding (see gemini_client_factory).
+            primary_model = self.settings.GEMINI_MODEL
+            self._use_vertex = should_use_vertex(self.settings, primary_model)
+            self._client = create_genai_client(
+                self.settings, use_vertex=self._use_vertex
             )
+            if self._use_vertex:
+                logger.info(
+                    "Initialized Gemini client backend=vertex project=%s location=%s",
+                    self.settings.GOOGLE_CLOUD_PROJECT,
+                    self.settings.GOOGLE_CLOUD_LOCATION,
+                )
+            else:
+                logger.info(
+                    "Initialized Gemini client backend=ai_studio model=%s api_key=%s",
+                    primary_model,
+                    mask_api_key(self.settings.GOOGLE_API_KEY),
+                )
         return self._client
 
     def _resolve_model(self, model: str | None) -> str:
-        """Use explicit model override when provided, else default GEMINI_MODEL."""
-        return model or self.settings.GEMINI_MODEL
+        """Resolve and normalize model id for Vertex or AI Studio."""
+        raw = model or self.settings.GEMINI_MODEL
+        # Per-request gemini-3.1 fallback mirrors voice: use AI Studio model prefix when needed.
+        use_vertex = self._use_vertex
+        if raw and "gemini-3.1" in raw and getattr(self.settings, "GOOGLE_API_KEY", None):
+            use_vertex = False
+        return normalize_model_id(raw, use_vertex=use_vertex)
 
     def _log_request_context(
         self,
@@ -142,11 +160,15 @@ class GeminiService:
     ) -> None:
         """Log model + masked API key for every Gemini call."""
         resolved_model = self._resolve_model(model)
+        backend = "vertex" if self._use_vertex else "ai_studio"
         logger.info(
-            "Gemini %s: model=%s api_key=%s%s%s",
+            "Gemini %s: backend=%s model=%s auth=%s%s%s",
             operation,
+            backend,
             resolved_model,
-            mask_api_key(self.settings.GOOGLE_API_KEY),
+            f"project={self.settings.GOOGLE_CLOUD_PROJECT}"
+            if self._use_vertex
+            else f"api_key={mask_api_key(self.settings.GOOGLE_API_KEY)}",
             f" mime_type={mime_type}" if mime_type else "",
             f" file_size_bytes={file_size_bytes}" if file_size_bytes is not None else "",
         )
