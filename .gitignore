@@ -84,6 +84,12 @@ celerybeat.pid
 .env
 .env.*
 !.env.example
+
+# Google Cloud service account key files (never commit)
+linqmd-*.json
+*vertexai*.json
+*-????????????.json
+
 .venv
 env/
 venv/

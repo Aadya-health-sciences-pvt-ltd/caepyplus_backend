@@ -28,10 +28,10 @@ from tenacity import (
 from ..core.config import get_settings
 from ..core.exceptions import AIServiceError, ExtractionError
 from .gemini_client_factory import (
-    create_genai_client,
+    create_genai_client_with_fallback,
     normalize_model_id,
-    should_use_vertex,
 )
+from .gcp_credentials import vertex_auth_label
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,13 @@ def mask_api_key(api_key: str) -> str:
     if len(key) <= 8:
         return "<set>"
     return f"{key[:4]}...{key[-4:]}"
+
+
+def gemini_auth_log_label(settings: Any) -> str:
+    """Log-safe label for configured Gemini auth (Vertex JSON or AI Studio key)."""
+    if settings.has_vertex_credentials():
+        return f"backend=vertex project={settings.resolved_vertex_project()}"
+    return f"backend=ai_studio api_key={mask_api_key(settings.GOOGLE_API_KEY)}"
 
 
 def gemini_remediation_hint(
@@ -119,17 +126,16 @@ class GeminiService:
     def client(self) -> genai.Client:
         """Get or create the Gemini client instance (Vertex or AI Studio)."""
         if self._client is None:
-            # Same backend selection as voice onboarding (see gemini_client_factory).
             primary_model = self.settings.GEMINI_MODEL
-            self._use_vertex = should_use_vertex(self.settings, primary_model)
-            self._client = create_genai_client(
-                self.settings, use_vertex=self._use_vertex
+            self._client, self._use_vertex = create_genai_client_with_fallback(
+                self.settings
             )
             if self._use_vertex:
                 logger.info(
-                    "Initialized Gemini client backend=vertex project=%s location=%s",
-                    self.settings.GOOGLE_CLOUD_PROJECT,
+                    "Initialized Gemini client backend=vertex project=%s location=%s auth=%s",
+                    self.settings.resolved_vertex_project(),
                     self.settings.GOOGLE_CLOUD_LOCATION,
+                    vertex_auth_label(self.settings),
                 )
             else:
                 logger.info(
@@ -141,12 +147,10 @@ class GeminiService:
 
     def _resolve_model(self, model: str | None) -> str:
         """Resolve and normalize model id for Vertex or AI Studio."""
+        # Client init sets _use_vertex; must run before model id normalization.
+        _ = self.client
         raw = model or self.settings.GEMINI_MODEL
-        # Per-request gemini-3.1 fallback mirrors voice: use AI Studio model prefix when needed.
-        use_vertex = self._use_vertex
-        if raw and "gemini-3.1" in raw and getattr(self.settings, "GOOGLE_API_KEY", None):
-            use_vertex = False
-        return normalize_model_id(raw, use_vertex=use_vertex)
+        return normalize_model_id(raw, use_vertex=self._use_vertex)
 
     def _log_request_context(
         self,
@@ -166,7 +170,7 @@ class GeminiService:
             operation,
             backend,
             resolved_model,
-            f"project={self.settings.GOOGLE_CLOUD_PROJECT}"
+            f"project={self.settings.resolved_vertex_project()}"
             if self._use_vertex
             else f"api_key={mask_api_key(self.settings.GOOGLE_API_KEY)}",
             f" mime_type={mime_type}" if mime_type else "",
@@ -197,10 +201,10 @@ class GeminiService:
             error_text, resolved_model, config_key=config_key
         )
         logger.error(
-            "Gemini %s failed: model=%s api_key=%s error=%s remediation=%s",
+            "Gemini %s failed: backend=%s model=%s error=%s remediation=%s",
             operation,
+            "vertex" if self._use_vertex else "ai_studio",
             resolved_model,
-            mask_api_key(self.settings.GOOGLE_API_KEY),
             error_text,
             remediation,
             exc_info=True,

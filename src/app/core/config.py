@@ -8,11 +8,12 @@ Environment file loading priority:
 2. Falls back to .env if specific file doesn't exist
 3. Environment variables always override file values
 """
+import json
 import os
 import warnings
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -168,9 +169,12 @@ class Settings(BaseSettings):
         default="us-central1",
         description="Google Cloud region for Vertex AI Live API"
     )
-    GOOGLE_APPLICATION_CREDENTIALS: str = Field(
+    GCP_SERVICE_ACCOUNT_JSON: str = Field(
         default="",
-        description="Path to the Google Cloud service account JSON key file"
+        description=(
+            "Inline service account JSON for Vertex AI "
+            "(e.g. from AWS Secrets Manager on ECS)"
+        ),
     )
 
     GEMINI_MODEL: str = Field(
@@ -646,6 +650,47 @@ class Settings(BaseSettings):
         if normalized.endswith(legacy_suffix):
             return normalized[: -len(legacy_suffix)]
         return normalized
+
+    _GCP_SA_REQUIRED_KEYS = frozenset(
+        {"type", "project_id", "private_key", "client_email"}
+    )
+
+    def parsed_gcp_service_account(self) -> dict[str, Any] | None:
+        """Parse inline service account JSON from GCP_SERVICE_ACCOUNT_JSON."""
+        raw = (self.GCP_SERVICE_ACCOUNT_JSON or "").strip()
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        if not self._GCP_SA_REQUIRED_KEYS.issubset(data.keys()):
+            return None
+        if not all(isinstance(data[k], str) and data[k].strip() for k in self._GCP_SA_REQUIRED_KEYS):
+            return None
+        return data
+
+    def gcp_service_account_project_id(self) -> str | None:
+        """Project id from inline service account JSON, if configured."""
+        data = self.parsed_gcp_service_account()
+        if not data:
+            return None
+        project_id = str(data.get("project_id", "")).strip()
+        return project_id or None
+
+    def has_vertex_credentials(self) -> bool:
+        """True when Vertex can authenticate via GCP_SERVICE_ACCOUNT_JSON."""
+        return self.parsed_gcp_service_account() is not None
+
+    def resolved_vertex_project(self) -> str:
+        """GCP project for Vertex API calls."""
+        return (
+            (self.GOOGLE_CLOUD_PROJECT or "").strip()
+            or self.gcp_service_account_project_id()
+            or ""
+        )
 
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
