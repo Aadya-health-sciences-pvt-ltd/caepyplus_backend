@@ -16,7 +16,11 @@ from ..core.exceptions import AIServiceError, ExtractionError, FileValidationErr
 from ..core.prompts import get_prompt_manager
 from ..schemas.doctor import ResumeExtractedData
 from .document_extraction import OFFICE_EXTENSIONS, extract_text_from_document
-from .gemini_service import gemini_remediation_hint, get_gemini_service, mask_api_key
+from .gemini_service import (
+    gemini_auth_log_label,
+    gemini_remediation_hint,
+    get_gemini_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,12 +109,12 @@ class ResumeExtractionService:
         extraction_path = "text" if extension in OFFICE_EXTENSIONS else "vision"
         logger.info(
             "Resume extraction starting: filename=%s extension=%s path=%s "
-            "model=%s api_key=%s file_size_bytes=%d",
+            "model=%s %s file_size_bytes=%d",
             filename,
             extension or "<none>",
             extraction_path,
             settings.GEMINI_RESUME_MODEL,
-            mask_api_key(settings.GOOGLE_API_KEY),
+            gemini_auth_log_label(settings),
             len(file_content),
         )
 
@@ -166,11 +170,11 @@ class ResumeExtractionService:
                 config_key=_RESUME_MODEL_CONFIG_KEY,
             )
             logger.error(
-                "Resume extraction Gemini failure: filename=%s model=%s api_key=%s "
+                "Resume extraction Gemini failure: filename=%s model=%s %s "
                 "gemini_error=%s remediation=%s",
                 filename,
                 settings.GEMINI_RESUME_MODEL,
-                mask_api_key(settings.GOOGLE_API_KEY),
+                gemini_auth_log_label(settings),
                 original,
                 remediation,
             )
@@ -180,17 +184,17 @@ class ResumeExtractionService:
                 details={
                     "filename": filename,
                     "model": settings.GEMINI_RESUME_MODEL,
-                    "api_key": mask_api_key(settings.GOOGLE_API_KEY),
+                    "auth": gemini_auth_log_label(settings),
                     "gemini_error": original,
                     "remediation": remediation,
                 },
             ) from e
         except Exception as e:
             logger.error(
-                "Failed to extract from %s (model=%s api_key=%s): %s",
+                "Failed to extract from %s (model=%s %s): %s",
                 filename,
                 settings.GEMINI_RESUME_MODEL,
-                mask_api_key(settings.GOOGLE_API_KEY),
+                gemini_auth_log_label(settings),
                 e,
                 exc_info=True,
             )
@@ -200,7 +204,7 @@ class ResumeExtractionService:
                 details={
                     "filename": filename,
                     "model": settings.GEMINI_RESUME_MODEL,
-                    "api_key": mask_api_key(settings.GOOGLE_API_KEY),
+                    "auth": gemini_auth_log_label(settings),
                     "error": str(e),
                 },
             ) from e
@@ -259,10 +263,10 @@ class ResumeExtractionService:
                 config_key=_RESUME_MODEL_CONFIG_KEY,
             )
             logger.error(
-                "Resume text extraction Gemini failure: model=%s api_key=%s "
+                "Resume text extraction Gemini failure: model=%s %s "
                 "gemini_error=%s remediation=%s",
                 settings.GEMINI_RESUME_MODEL,
-                mask_api_key(settings.GOOGLE_API_KEY),
+                gemini_auth_log_label(settings),
                 original,
                 remediation,
             )
@@ -271,7 +275,7 @@ class ResumeExtractionService:
                 source="text",
                 details={
                     "model": settings.GEMINI_RESUME_MODEL,
-                    "api_key": mask_api_key(settings.GOOGLE_API_KEY),
+                    "auth": gemini_auth_log_label(settings),
                     "gemini_error": original,
                     "remediation": remediation,
                 },

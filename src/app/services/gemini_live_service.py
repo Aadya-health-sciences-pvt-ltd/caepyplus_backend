@@ -9,8 +9,12 @@ from google.genai.types import FunctionResponse
 
 from ..core.config import get_settings
 from ..core.logger import logger, session_context, cost_tracker
-from .voice_tools import get_update_form_tool
 from ..core.prompts import get_prompt_manager
+from .gemini_client_factory import (
+    create_genai_client_with_fallback,
+    normalize_model_id,
+)
+from .voice_tools import get_update_form_tool
 
 
 class GeminiLiveService:
@@ -30,35 +34,9 @@ class GeminiLiveService:
         self.context = context or {}
         self.settings = get_settings()
         self.model_id = getattr(self.settings, "GEMINI_MODEL")
-        
-        # Determine whether to use Vertex AI or AI Studio
-        use_vertex = False
-        if getattr(self.settings, "GOOGLE_APPLICATION_CREDENTIALS", None):
-            import os
-            cred_path = self.settings.GOOGLE_APPLICATION_CREDENTIALS
-            if os.path.exists(cred_path):
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
-                use_vertex = True
-                
-        # Vertex AI doesn't support gemini-3.1 yet, so fallback to AI Studio if that model is requested
-        if self.model_id and "gemini-3.1" in self.model_id and getattr(self.settings, "GOOGLE_API_KEY", None):
-            use_vertex = False
-            
-        if use_vertex:
-            self.client = genai.Client(
-                vertexai=True,
-                project=self.settings.GOOGLE_CLOUD_PROJECT,
-                location=self.settings.GOOGLE_CLOUD_LOCATION,
-                http_options={'api_version': 'v1beta1'}
-            )
-            # Vertex AI expects no prefix
-            if self.model_id.startswith("models/"):
-                self.model_id = self.model_id.replace("models/", "")
-        else:
-            self.client = genai.Client(api_key=self.settings.GOOGLE_API_KEY)
-            # AI Studio expects 'models/' prefix
-            if not self.model_id.startswith("models/"):
-                self.model_id = f"models/{self.model_id}"
+
+        self.client, use_vertex = create_genai_client_with_fallback(self.settings)
+        self.model_id = normalize_model_id(self.model_id, use_vertex=use_vertex)
         
         self.turn_start_time = None
 
