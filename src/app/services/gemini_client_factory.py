@@ -6,45 +6,35 @@ so backend selection stays identical across services.
 """
 from __future__ import annotations
 
-import os
+import logging
 from typing import TYPE_CHECKING
 
 from google import genai
 
 from ..core.exceptions import AIServiceError
+from .gcp_credentials import build_vertex_credentials, verify_vertex_connection
 
 if TYPE_CHECKING:
     from ..core.config import Settings
 
+logger = logging.getLogger(__name__)
 
-def should_use_vertex(settings: Settings, model_id: str) -> bool:
-    """
-    Decide whether to use Vertex AI or Google AI Studio.
 
-    Matches voice onboarding logic:
-    - Vertex when GOOGLE_APPLICATION_CREDENTIALS file exists
-    - Fall back to AI Studio when model is gemini-3.1* and GOOGLE_API_KEY is set
-    """
-    use_vertex = False
-    cred_path = getattr(settings, "GOOGLE_APPLICATION_CREDENTIALS", None) or ""
-    if cred_path and os.path.exists(cred_path):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
-        use_vertex = True
-
-    # Vertex AI doesn't support gemini-3.1 yet, so fallback to AI Studio if that model is requested
-    if model_id and "gemini-3.1" in model_id and getattr(settings, "GOOGLE_API_KEY", None):
-        use_vertex = False
-
-    return use_vertex
+def should_use_vertex(settings: Settings, model_id: str = "") -> bool:
+    """True when GCP_SERVICE_ACCOUNT_JSON is configured (Vertex will be attempted)."""
+    return settings.has_vertex_credentials()
 
 
 def create_genai_client(settings: Settings, *, use_vertex: bool) -> genai.Client:
     """Create a google-genai Client for Vertex or AI Studio."""
     if use_vertex:
+        credentials = build_vertex_credentials(settings)
+        project = settings.resolved_vertex_project()
         return genai.Client(
             vertexai=True,
-            project=settings.GOOGLE_CLOUD_PROJECT,
+            project=project,
             location=settings.GOOGLE_CLOUD_LOCATION,
+            credentials=credentials,
             http_options={"api_version": "v1beta1"},
         )
 
@@ -55,6 +45,26 @@ def create_genai_client(settings: Settings, *, use_vertex: bool) -> genai.Client
             original_error="GOOGLE_API_KEY environment variable is empty",
         )
     return genai.Client(api_key=api_key)
+
+
+def create_genai_client_with_fallback(settings: Settings) -> tuple[genai.Client, bool]:
+    """
+    Create a Gemini client, preferring Vertex when GCP_SERVICE_ACCOUNT_JSON is set.
+
+    Attempts to authenticate with Vertex first. On failure, falls back to AI Studio
+    when GOOGLE_API_KEY is configured.
+    """
+    if settings.has_vertex_credentials():
+        try:
+            verify_vertex_connection(settings)
+            return create_genai_client(settings, use_vertex=True), True
+        except Exception as exc:
+            logger.warning(
+                "Vertex AI connection failed (%s); falling back to Google AI Studio",
+                exc,
+            )
+
+    return create_genai_client(settings, use_vertex=False), False
 
 
 def normalize_model_id(model_id: str, *, use_vertex: bool) -> str:

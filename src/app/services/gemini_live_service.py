@@ -11,9 +11,8 @@ from ..core.config import get_settings
 from ..core.logger import logger, session_context, cost_tracker
 from ..core.prompts import get_prompt_manager
 from .gemini_client_factory import (
-    create_genai_client,
+    create_genai_client_with_fallback,
     normalize_model_id,
-    should_use_vertex,
 )
 from .voice_tools import get_update_form_tool
 
@@ -36,8 +35,7 @@ class GeminiLiveService:
         self.settings = get_settings()
         self.model_id = getattr(self.settings, "GEMINI_MODEL")
 
-        use_vertex = should_use_vertex(self.settings, self.model_id)
-        self.client = create_genai_client(self.settings, use_vertex=use_vertex)
+        self.client, use_vertex = create_genai_client_with_fallback(self.settings)
         self.model_id = normalize_model_id(self.model_id, use_vertex=use_vertex)
         
         self.turn_start_time = None
