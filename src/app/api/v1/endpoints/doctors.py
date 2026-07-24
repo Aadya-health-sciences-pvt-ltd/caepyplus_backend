@@ -268,6 +268,7 @@ class CsvUploadResponse(BaseModel):
 async def list_doctors(
     db: DbSession,
     repo: DoctorRepoDep,
+    current_user: CurrentUser,
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
     specialization: str | None = Query(default=None, description="Filter by specialization (partial match, no status filter)"),
@@ -286,6 +287,19 @@ async def list_doctors(
     skip = (page - 1) * page_size
 
     if onboarding_status is not None:
+        from ....models.enums import UserRole
+
+        portal_roles = (
+            UserRole.ADMIN.value,
+            UserRole.OPERATION.value,
+            UserRole.CONTENT_CREATOR.value,
+        )
+        if current_user.role not in portal_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Status filter requires admin portal access",
+            )
+
         # Enriched admin view — sourced from doctor_identity with eager-loaded
         # related rows (3 fixed-cost IN-clause queries via selectinload).
         onboarding_repo = OnboardingRepository(db)

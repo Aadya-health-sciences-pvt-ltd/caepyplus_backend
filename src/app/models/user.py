@@ -155,6 +155,20 @@ class User(Base):
         return self.role == UserRole.OPERATION.value and self.is_active
 
     @property
+    def is_content_creator(self) -> bool:
+        """Check if user has content creator role."""
+        return self.role == UserRole.CONTENT_CREATOR.value and self.is_active
+
+    @property
     def can_access_admin(self) -> bool:
         """Check if user can access admin endpoints."""
         return self.is_active and self.role in (UserRole.ADMIN.value, UserRole.OPERATION.value)
+
+    @property
+    def can_access_admin_portal(self) -> bool:
+        """Check if user can sign in via the admin portal (OTP)."""
+        return self.is_active and self.role in (
+            UserRole.ADMIN.value,
+            UserRole.OPERATION.value,
+            UserRole.CONTENT_CREATOR.value,
+        )

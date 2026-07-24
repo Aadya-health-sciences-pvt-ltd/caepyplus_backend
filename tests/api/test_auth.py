@@ -167,6 +167,38 @@ async def test_admin_otp_verify_success(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_admin_otp_verify_content_creator_success(client: AsyncClient) -> None:
+    """Admin OTP verify returns access_token for content_creator role."""
+    with patch(
+        "src.app.services.otp_service.OTPService.verify_otp",
+        new_callable=AsyncMock,
+        return_value=(True, "OTP verified"),
+    ):
+        payload = {"mobile_number": "+919888888888", "otp": "123456"}
+        response = await client.post("/api/v1/auth/admin/otp/verify", json=payload)
+
+    assert response.status_code == 200
+    data = _unwrap(response.json())
+    assert data["role"] == "content_creator"
+    assert "access_token" in data
+
+
+@pytest.mark.asyncio
+async def test_admin_otp_verify_doctor_user_role_forbidden(client: AsyncClient) -> None:
+    """Doctor app user (role=user) cannot use admin portal OTP verify."""
+    with patch(
+        "src.app.services.otp_service.OTPService.verify_otp",
+        new_callable=AsyncMock,
+        return_value=(True, "OTP verified"),
+    ):
+        payload = {"mobile_number": "+919777777777", "otp": "123456"}
+        response = await client.post("/api/v1/auth/admin/otp/verify", json=payload)
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error_code"] == "INSUFFICIENT_PERMISSIONS"
+
+
+@pytest.mark.asyncio
 async def test_admin_otp_verify_invalid_otp_returns_400(client: AsyncClient) -> None:
     """Invalid OTP for admin verify returns 400 Bad Request."""
     with patch(
