@@ -35,7 +35,6 @@ def create_genai_client(settings: Settings, *, use_vertex: bool) -> genai.Client
             project=project,
             location=settings.GOOGLE_CLOUD_LOCATION,
             credentials=credentials,
-            http_options={"api_version": "v1beta1"},
         )
 
     api_key = (settings.GOOGLE_API_KEY or "").strip()
