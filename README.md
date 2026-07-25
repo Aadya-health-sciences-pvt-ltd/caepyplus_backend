@@ -235,7 +235,7 @@ caepy_plus_back_end/
 │   │   ├── otp_service.py            # OTP generation + Redis/in-memory store
 │   │   └── voice_service.py          # Voice conversation state machine
 │   └── static/
-│       └── doctor_bulk_upload_template.csv  # Bundled CSV template (48 columns, 2 sample rows)
+│       └── doctor_bulk_upload_template.csv  # Core Sections 1–2 CSV template (~17 columns, 2 sample rows)
 ├── alembic/                          # Database migrations (sole schema owner)
 │   ├── env.py
 │   └── versions/
@@ -1164,59 +1164,39 @@ curl -X POST \
 
 ##### CSV Template — Column Reference
 
-The template contains 48 columns. Required columns are marked ✱.
+The downloadable template focuses on **Sections 1–2** (Professional Identity + Credentials). **Legacy 48-column** spreadsheets remain supported: extra columns and legacy header names are mapped during upload.
 
-| Column | Required | Notes |
-|--------|----------|-------|
-| `first_name` | ✱ | |
-| `last_name` | ✱ | |
-| `phone` | ✱ | Auto-normalised to E.164 |
-| `email` | | If provided, creates `doctor_identity` row with PENDING status |
-| `title` | | `Dr.`, `Prof.`, etc. |
-| `gender` | | |
-| `primary_specialization` | | |
-| `medical_registration_number` | | |
-| `medical_council` | | Full name of the issuing medical council |
-| `registration_year` | | Numeric |
-| `registration_authority` | | |
-| `years_of_experience` | | Numeric 0–100 |
-| `consultation_fee` | | Numeric ≥ 0 |
-| `year_of_mbbs` | | Numeric 1900–2100 |
-| `year_of_specialisation` | | Numeric 1900–2100 |
-| `years_of_clinical_experience` | | Numeric 0–100 |
-| `years_post_specialisation` | | Numeric 0–100 |
-| `specialty` | | |
-| `primary_practice_location` | | |
-| `sub_specialties` | | Pipe-separated |
-| `areas_of_expertise` | | Pipe-separated |
-| `languages` | | Pipe-separated |
-| `conditions_treated` | | Pipe-separated |
-| `procedures_performed` | | Pipe-separated |
-| `age_groups_treated` | | Pipe-separated |
-| `awards_recognition` | | Pipe-separated |
-| `memberships` | | Pipe-separated |
-| `publications` | | Pipe-separated |
-| `qualifications` | | Pipe-separated |
-| `fellowships` | | Pipe-separated |
-| `professional_memberships` | | Pipe-separated |
-| `awards_academic_honours` | | Pipe-separated |
-| `areas_of_clinical_interest` | | Pipe-separated |
-| `practice_segments` | | |
-| `conditions_commonly_treated` | | Pipe-separated |
-| `conditions_known_for` | | Pipe-separated |
-| `conditions_want_to_treat_more` | | Pipe-separated |
-| `full_name` | | Display name |
-| `professional_achievement` | | Free text |
-| `personal_achievement` | | Free text |
-| `professional_aspiration` | | Free text |
-| `personal_aspiration` | | Free text |
-| `what_patients_value_most` | | Free text |
-| `approach_to_care` | | Free text |
-| `availability_philosophy` | | Free text |
-| `quality_time_interests_text` | | Free text |
-| `professional_overview` | | Free text |
-| `about_me` | | Free text |
-| `professional_tagline` | | Free text |
+**Required columns (✱):** `phone`, `email`, `full_name`, `specialty`, `medical_registration_number`, `medical_council`.
+
+**Section 1 — Professional Identity**
+
+| Column | Required | Maps to | Notes |
+|--------|----------|---------|-------|
+| `phone` | ✱ | `phone_number` | Auto-normalised to E.164 (+91…) |
+| `email` | ✱ | `email` + `doctor_identity` | Lowercased; creates PENDING identity on new doctors |
+| `full_name` | ✱ | `full_name` | Include title in this cell if desired (e.g. `Dr. Anjali Sharma`) |
+| `specialty` | ✱ | `specialty` | Legacy alias: `primary_specialization` |
+| `city` | | `primary_practice_location` | Legacy alias: column name `primary_practice_location` |
+| `languages` | | `languages` | List: `\|` or `,` |
+| `medical_registration_number` | ✱ | `medical_registration_number` | |
+| `medical_council` | ✱ | `medical_council` | |
+| `practice_location` | | `practice_locations`, `centres_of_practice` | Each site: `Hospital \| Address \| City \| State`; multiple sites in one cell separated by `;`. Legacy: `practice_location_1` … `practice_location_3` |
+
+**Section 2 — Credentials**
+
+| Column | Required | Maps to | Notes |
+|--------|----------|---------|-------|
+| `year_of_mbbs` | | `year_of_mbbs` | 1950–current year |
+| `year_of_specialisation` | | `year_of_specialisation` | Optional; must be ≥ MBBS year |
+| `qualifications` | | `qualifications` | List: `\|` or `,` |
+| `awards_academic_honours` | | `awards_academic_honours` | Legacy alias: `awards_recognition` |
+| `years_of_clinical_experience` | | `years_of_clinical_experience` | **Auto-filled** from MBBS year when blank |
+| `years_post_specialisation` | | `years_post_specialisation` | **Auto-filled** from specialisation year when blank |
+| `theme` | | *(reserved)* | LinQMD profile theme (e.g. `dp_1`, `dp_2`, `dp_3`); sample rows use `dp_3`. Not applied on upload yet |
+
+**Legacy-only columns (48-col uploads, not in core template)**
+
+Pipe- or comma-separated list fields such as `fellowships`, `memberships`, `professional_memberships`, `conditions_treated`, onboarding blocks 3–6, and split names `first_name` / `last_name` / `title` (merged into `full_name` when `full_name` is empty) are still accepted when present in the file.
 
 ---
 

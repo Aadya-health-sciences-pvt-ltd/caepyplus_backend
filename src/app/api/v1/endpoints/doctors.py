@@ -20,14 +20,19 @@ from __future__ import annotations
 
 import csv
 import io
-from pathlib import Path
 from typing import Annotated, Any, Union
 
 import structlog
+from sqlalchemy import select
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
+from ....core.bulk_csv_enrichment import (
+    enrich_bulk_csv_row,
+    validate_enriched_bulk_row,
+)
+from ....core.bulk_upload_template import get_bulk_upload_template_csv
 from ....core.config import Settings, get_settings
 from ....core.doctor_utils import (
     resolve_display_email,
@@ -817,9 +822,42 @@ def _normalise_phone(raw: str) -> str:
     return f"+91{digits}"
 
 
+_DOCTOR_MODEL_FIELD_MAP: dict[str, str] = {
+    "awards_recognition": "awards_academic_honours",
+    "memberships": "professional_memberships",
+    "phone_number": "phone",
+}
+
+
+def _doctor_update_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a ``DoctorUpdate`` kwargs dict from an enriched CSV row."""
+    payload: dict[str, Any] = {}
+    for col, val in row.items():
+        if col.startswith("_") or col == "phone":
+            continue
+        if col not in _DOCTOR_UPDATE_FIELDS:
+            continue
+        if val is None or val == "" or val == []:
+            continue
+        payload[col] = val
+    return payload
+
+
+def _apply_doctor_update_payload(model: DoctorModel, payload: dict[str, Any]) -> None:
+    """Apply validated ``DoctorUpdate`` fields onto a ``Doctor`` ORM instance."""
+    if not payload:
+        return
+    for field, value in DoctorUpdate(**payload).model_dump(
+        exclude_unset=True, exclude_none=True
+    ).items():
+        model_field = _DOCTOR_MODEL_FIELD_MAP.get(field, field)
+        if hasattr(model, model_field):
+            setattr(model, model_field, value)
+
+
 def _parse_and_validate_csv(
     raw_bytes: bytes,
-) -> tuple[list[dict[str, str]], list[CsvRowValidationError]]:
+) -> tuple[list[dict[str, Any]], list[CsvRowValidationError]]:
     """Decode, header-check, and row-validate a CSV upload.
 
     Pure function — performs no DB access.
@@ -881,7 +919,7 @@ def _parse_and_validate_csv(
 
     # --- Row-level validation ---
     errors: list[CsvRowValidationError] = []
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
 
     for row_num, raw_row in enumerate(raw_rows, start=2):  # row 1 = header
         row: dict[str, str] = {
@@ -944,10 +982,18 @@ def _parse_and_validate_csv(
                         error=f"'{raw_val}' is not a valid number.",
                     ))
 
-        # Attach the normalised row even if it has errors — the validation
-        # endpoint returns the full error list regardless.
-        row["_row_num"] = str(row_num)
-        rows.append(row)
+        enriched = enrich_bulk_csv_row(row)
+        for bulk_err in validate_enriched_bulk_row(row_num, row, enriched):
+            errors.append(CsvRowValidationError(
+                row=row_num, field=bulk_err.field, error=bulk_err.error,
+            ))
+
+        # Attach enriched DoctorUpdate-shaped fields; keep phone for E.164 normalisation.
+        stored: dict[str, Any] = {"_row_num": row_num, "phone": phone_raw}
+        if email_val:
+            stored["email"] = email_val.lower()
+        stored.update(enriched)
+        rows.append(stored)
 
     return rows, errors
 
@@ -964,14 +1010,6 @@ async def _read_upload_file(file: UploadFile) -> bytes:
                 detail="Only CSV files are accepted (.csv extension required).",
             )
     return await file.read()
-
-
-# Path to the bundled template CSV shipped with the application source.
-_TEMPLATE_CSV_PATH: Path = (
-    Path(__file__).parent.parent.parent.parent  # src/app
-    / "static"
-    / "doctor_bulk_upload_template.csv"
-)
 
 
 # ---------------------------------------------------------------------------
@@ -992,22 +1030,23 @@ _TEMPLATE_CSV_PATH: Path = (
             "content": {"text/csv": {}},
             "description": "CSV template file",
         },
-        404: {"description": "Template file not found on server"},
     },
 )
 async def download_bulk_upload_template(
     _current_user: AdminOrOperationUser,
-) -> FileResponse:
+) -> Response:
     """Return the doctor bulk-upload CSV template as a file download."""
-    if not _TEMPLATE_CSV_PATH.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Template file not found. Contact the platform team.",
-        )
-    return FileResponse(
-        path=str(_TEMPLATE_CSV_PATH),
-        media_type="text/csv",
-        filename="doctor_bulk_upload_template.csv",
+    content = get_bulk_upload_template_csv()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="doctor_bulk_upload_template.csv"'
+            ),
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
     )
 
 
@@ -1175,9 +1214,10 @@ async def bulk_upload_doctors_csv(
 
     for row in rows:
         row_num = int(row["_row_num"])
-        phone_raw = row.get("phone", "")
+        phone_raw = str(row.get("phone", ""))
         phone = _normalise_phone(phone_raw)
-        email_val = row.get("email", "") or None
+        email_val = row.get("email") or None
+        update_payload = _doctor_update_payload_from_row(row)
 
         # Each row runs in its own savepoint so a DB-level error on one row
         # (e.g. unique-constraint violation on email) is isolated and rolled
@@ -1195,31 +1235,27 @@ async def bulk_upload_doctors_csv(
 
                 if existing:
                     # ── UPDATE existing doctor (flush only, no commit) ───────
-                    update_data: dict[str, Any] = {}
-                    # Only fill email if the record has none yet — avoid
-                    # overwriting an existing verified email.
                     if email_val and not existing.email:
-                        update_data["email"] = email_val
+                        update_payload["email"] = email_val
 
-                    for col, val in row.items():
-                        if col.startswith("_"):
-                            continue
-                        if col in _DOCTOR_UPDATE_FIELDS and val:
-                            update_data[col] = val
-
-                    if update_data:
-                        for field, value in DoctorUpdate(**update_data).model_dump(
-                            exclude_unset=True, exclude_none=True
-                        ).items():
-                            # Respect the field_mapping from DoctorRepository
-                            model_field = {
-                                "awards_recognition": "achievements",
-                                "memberships": "professional_memberships",
-                                "phone_number": "phone",
-                            }.get(field, field)
-                            if hasattr(existing, model_field):
-                                setattr(existing, model_field, value)
+                    _apply_doctor_update_payload(existing, update_payload)
+                    if update_payload:
                         db.add(existing)
+                        await db.flush()
+
+                    identity = await db.scalar(
+                        select(DoctorIdentity).where(
+                            DoctorIdentity.doctor_id == existing.id
+                        )
+                    )
+                    if identity:
+                        full_name = row.get("full_name")
+                        if full_name:
+                            identity.full_name = str(full_name)
+                        identity.phone_number = phone
+                        if email_val:
+                            identity.email = email_val
+                        db.add(identity)
                         await db.flush()
 
                     results.append(CsvUploadRow(
@@ -1236,25 +1272,7 @@ async def bulk_upload_doctors_csv(
                         email=email_val,
                         role="user",
                     )
-                    # Apply extra DoctorUpdate fields from the CSV row
-                    raw_extra: dict[str, Any] = {}
-                    for col, val in row.items():
-                        if col.startswith("_"):
-                            continue
-                        if col in _DOCTOR_UPDATE_FIELDS and val:
-                            raw_extra[col] = val
-
-                    if raw_extra:
-                        for field, value in DoctorUpdate(**raw_extra).model_dump(
-                            exclude_unset=True, exclude_none=True
-                        ).items():
-                            model_field = {
-                                "awards_recognition": "achievements",
-                                "memberships": "professional_memberships",
-                                "phone_number": "phone",
-                            }.get(field, field)
-                            if hasattr(new_doctor, model_field):
-                                setattr(new_doctor, model_field, value)
+                    _apply_doctor_update_payload(new_doctor, update_payload)
 
                     db.add(new_doctor)
                     await db.flush()  # get new_doctor.id without committing
@@ -1266,7 +1284,7 @@ async def bulk_upload_doctors_csv(
                     if email_val:
                         identity = DoctorIdentity(
                             doctor_id=new_doctor.id,
-                            full_name=new_doctor.full_name or "",
+                            full_name=str(row.get("full_name") or new_doctor.full_name or ""),
                             email=email_val,
                             phone_number=phone,
                             onboarding_status=OnboardingStatus.PENDING,

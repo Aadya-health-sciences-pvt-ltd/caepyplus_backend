@@ -282,3 +282,58 @@ async def test_csv_template_returns_200(
     )
     assert response.status_code == 200
     assert "text/csv" in response.headers.get("content-type", "")
+    assert "full_name" in response.text
+    assert "practice_location" in response.text
+    assert "practice_location_1" not in next(
+        ln for ln in response.text.splitlines() if ln.startswith("phone,")
+    )
+    assert "first_name,last_name" not in response.text.splitlines()[0]
+    header_line = next(
+        (ln for ln in response.text.splitlines() if ln.startswith("phone,")),
+        "",
+    )
+    assert header_line.startswith("phone,email,full_name")
+    assert ",theme" in header_line
+
+
+@pytest.mark.asyncio
+async def test_bulk_csv_validate_core_sample(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    """Phase 1 validate accepts a minimal core-template CSV row."""
+    csv_body = (
+        "phone,email,full_name,specialty,city,languages,medical_registration_number,"
+        "medical_council,year_of_mbbs\n"
+        "9876500011,core.upload@example.com,Dr. Core Upload,Cardiology,Bangalore,"
+        "English|Hindi,REG-CORE-1,Karnataka Medical Council,2012\n"
+    )
+    response = await client.post(
+        "/api/v1/doctors/bulk-upload/csv/validate",
+        headers=auth_headers,
+        files={"file": ("core.csv", csv_body.encode("utf-8"), "text/csv")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is True
+    assert data["error_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_csv_validate_rejects_missing_specialty(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    csv_body = (
+        "phone,email,full_name,medical_registration_number,medical_council\n"
+        "9876500022,bad@example.com,Dr. No Specialty,REG1,Council\n"
+    )
+    response = await client.post(
+        "/api/v1/doctors/bulk-upload/csv/validate",
+        headers=auth_headers,
+        files={"file": ("bad.csv", csv_body.encode("utf-8"), "text/csv")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is False
+    assert any(e["field"] == "specialty" for e in data["errors"])

@@ -33,6 +33,8 @@ from ..core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+LINQMD_PROFILE_THEMES: frozenset[str] = frozenset({"dp_1", "dp_2", "dp_3"})
+
 
 @dataclass
 class LinQMDUserPayload:
@@ -64,7 +66,7 @@ class LinQMDUserPayload:
     # Profile photo file for LinQMD multipart upload: (filename, bytes, content_type)
     display_picture_file: tuple[str, bytes, str] | None = None
 
-    # Practice hub theme (dp_1 | dp_2)
+    # Practice hub theme (dp_1 | dp_2 | dp_3)
     theme: str = "dp_1"
     
     def to_form_data(self, *, include_theme: bool = True) -> dict[str, str]:
@@ -449,6 +451,7 @@ class LinQMDSyncService:
         linqmd_username: str | None = None,
         linqmd_password: str | None = None,
         include_theme: bool = True,
+        theme: str | None = None,
     ) -> LinQMDUserPayload:
         """
         Transform internal doctor data to LinQMD API format.
@@ -579,7 +582,13 @@ class LinQMDSyncService:
         awards_honors = ', '.join(awards_parts)
         
         password = linqmd_password or self._generate_password()
-        theme = secrets.choice(('dp_1', 'dp_2')) if include_theme else 'dp_1'
+        if include_theme:
+            if theme and theme in LINQMD_PROFILE_THEMES:
+                chosen_theme = theme
+            else:
+                chosen_theme = secrets.choice(tuple(LINQMD_PROFILE_THEMES))
+        else:
+            chosen_theme = "dp_1"
 
         return LinQMDUserPayload(
             name=username,
@@ -587,7 +596,7 @@ class LinQMDSyncService:
             password=password,
             fullname=fullname,
             phone_number=identity.get('phone_number', ''),
-            theme=theme,
+            theme=chosen_theme,
             degree=degree,
             speciality=speciality,
             overview=overview,
@@ -853,6 +862,7 @@ class LinQMDSyncService:
         media: list[dict[str, Any]] | None = None,
         doctor_id: int | None = None,
         db_session: Any | None = None,
+        theme: str | None = None,
     ) -> LinQMDSyncResult:
         """
         Sync a doctor's data to LinQMD platform.
@@ -875,7 +885,9 @@ class LinQMDSyncService:
             )
 
             # Transform data to LinQMD format
-            payload = self.transform_doctor_data(identity, details, media)
+            payload = self.transform_doctor_data(
+                identity, details, media, theme=theme
+            )
             payload.display_picture_file = display_picture_file
 
             from .linqmd_overview_service import get_linqmd_overview_service
@@ -927,6 +939,8 @@ class LinQMDSyncService:
         self,
         doctor_id: int,
         db_session: Any,
+        *,
+        theme: str | None = None,
     ) -> LinQMDSyncResult:
         """
         Create a LinQMD user by internal doctor ID (admin initial profile creation).
@@ -945,6 +959,7 @@ class LinQMDSyncService:
             media_list,
             doctor_id,
             db_session=db_session,
+            theme=theme,
         )
 
     async def _send_update_to_linqmd(
