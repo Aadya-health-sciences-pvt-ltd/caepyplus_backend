@@ -1,6 +1,7 @@
 """Content Creator blog routes — act on behalf of verified doctors."""
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from typing import Annotated, Any
@@ -35,6 +36,8 @@ from ....services.linqmd_practice_hub_service import (
     extract_image_alt_from_html,
     get_linqmd_practice_hub_service,
 )
+from ....services.practice_hub_publish_helpers import get_blog_for_practice_hub_publish
+from ....core.blog_auth import linqmd_login_error_code
 from .blogs import (
     _doctor_onboarding_status,
     _resolve_image_urls,
@@ -42,6 +45,8 @@ from .blogs import (
     get_ai_keywords,
     get_ai_topics,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/content/doctors/{doctor_id}/blogs",
@@ -237,22 +242,30 @@ async def content_publish_blog_to_practice_hub(
     db: DbSession,
     doctor_id: VerifiedDoctorId,
 ) -> BlogPublishPracticeHubResponse:
-    result = await db.execute(
-        select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
+    blog = await get_blog_for_practice_hub_publish(
+        db,
+        blog_id=blog_id,
+        doctor_id=doctor_id,
+        route="POST /content/doctors/{doctor_id}/blogs/{blog_id}/publish-practice-hub",
     )
-    blog = result.scalar_one_or_none()
-    if blog is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
 
     creds_repo = LinqmdCredentialsRepository(db)
     stored_creds = await creds_repo.get_by_doctor_id(doctor_id)
+    using_override = payload.credentials is not None
+    logger.info(
+        "practice_hub_publish creds route=content doctor_id=%s blog_id=%s "
+        "stored_creds=%s using_override=%s",
+        doctor_id,
+        blog_id,
+        stored_creds is not None,
+        using_override,
+    )
     if stored_creds is None and payload.credentials is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No LinQMD Practice Hub profile found. Contact admin to sync profile.",
         )
 
-    using_override = payload.credentials is not None
     if using_override:
         username = payload.credentials.username.strip()
         password = payload.credentials.password
@@ -266,17 +279,35 @@ async def content_publish_blog_to_practice_hub(
         )
 
     hub_service = get_linqmd_practice_hub_service()
+    logger.info(
+        "practice_hub_publish login route=content doctor_id=%s blog_id=%s username=%s",
+        doctor_id,
+        blog_id,
+        username,
+    )
     try:
         login_result = await hub_service.login(username, password)
     except LinqmdLoginError as exc:
+        logger.warning(
+            "practice_hub_publish login_failed route=content doctor_id=%s blog_id=%s error=%s",
+            doctor_id,
+            blog_id,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "linqmd_credentials_invalid",
+                "code": linqmd_login_error_code(exc),
                 "message": "Practice Hub login failed.",
                 "error": str(exc),
             },
         ) from exc
+
+    logger.info(
+        "practice_hub_publish login_ok route=content doctor_id=%s blog_id=%s",
+        doctor_id,
+        blog_id,
+    )
 
     if using_override:
         if stored_creds is None:
@@ -305,12 +336,24 @@ async def content_publish_blog_to_practice_hub(
         image_alt=image_alt,
     )
 
+    logger.info(
+        "practice_hub_publish calling_hub route=content doctor_id=%s blog_id=%s has_image=%s",
+        doctor_id,
+        blog_id,
+        image_bytes is not None,
+    )
     try:
         practice_hub_response = await hub_service.publish_blog(
             login_result.access_token,
             hub_payload,
         )
     except LinqmdPublishError as exc:
+        logger.warning(
+            "practice_hub_publish hub_failed route=content doctor_id=%s blog_id=%s error=%s",
+            doctor_id,
+            blog_id,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"code": "linqmd_publish_failed", "message": str(exc)},
@@ -330,6 +373,13 @@ async def content_publish_blog_to_practice_hub(
         blog.drupal_node_id = drupal_node_id
     await db.commit()
     await db.refresh(blog)
+
+    logger.info(
+        "practice_hub_publish success route=content doctor_id=%s blog_id=%s drupal_node_id=%s",
+        doctor_id,
+        blog_id,
+        drupal_node_id,
+    )
 
     return BlogPublishPracticeHubResponse(
         blog_id=blog_id,

@@ -20,9 +20,16 @@ logger = logging.getLogger(__name__)
 class LinqmdLoginError(Exception):
     """Practice Hub login failed (invalid credentials or API error)."""
 
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        code: str = "linqmd_credentials_invalid",
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
 
 
 class LinqmdPublishError(Exception):
@@ -87,6 +94,42 @@ def _stored_uri_to_s3_key(stored_uri: str) -> str | None:
     return None
 
 
+def parse_practice_hub_login_tokens(body: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Extract tokens from Practice Hub login JSON (flat or ``data`` wrapper)."""
+    access_token = body.get("access_token")
+    refresh_token = body.get("refresh_token")
+
+    nested = body.get("data")
+    if isinstance(nested, dict):
+        if not access_token:
+            access_token = nested.get("access_token")
+        if refresh_token is None:
+            refresh_token = nested.get("refresh_token")
+
+    if not isinstance(access_token, str) or not access_token.strip():
+        return None, None
+    if refresh_token is not None and not isinstance(refresh_token, str):
+        refresh_token = None
+    elif isinstance(refresh_token, str) and not refresh_token.strip():
+        refresh_token = None
+
+    return access_token.strip(), refresh_token
+
+
+def _practice_hub_error_message(body: dict[str, Any], fallback: str) -> str:
+    for key in ("error", "message", "msg"):
+        val = body.get(key)
+        if val:
+            return str(val)
+    nested = body.get("data")
+    if isinstance(nested, dict):
+        for key in ("error", "message", "msg"):
+            val = nested.get(key)
+            if val:
+                return str(val)
+    return fallback
+
+
 class LinqmdPracticeHubService:
     """Client for Practice Hub login and blog publish."""
 
@@ -126,22 +169,31 @@ class LinqmdPracticeHubService:
             body = {"raw_response": response.text[:500]}
 
         if response.status_code != 200:
-            detail = body.get("error") or body.get("message") or response.text[:200]
+            detail = _practice_hub_error_message(body, response.text[:200])
+            logger.warning(
+                "Practice Hub login HTTP error status=%s url=%s body_keys=%s",
+                response.status_code,
+                url,
+                sorted(body.keys()) if isinstance(body, dict) else [],
+            )
             raise LinqmdLoginError(
                 f"Practice Hub login failed: {detail}",
                 status_code=response.status_code,
             )
 
-        access_token = body.get("access_token")
-        if not access_token or not isinstance(access_token, str):
+        access_token, refresh_token = parse_practice_hub_login_tokens(body)
+        if not access_token:
+            logger.warning(
+                "Practice Hub login missing access_token url=%s status=%s body_keys=%s",
+                url,
+                response.status_code,
+                sorted(body.keys()) if isinstance(body, dict) else [],
+            )
             raise LinqmdLoginError(
                 "Practice Hub login succeeded but access_token was missing",
                 status_code=response.status_code,
+                code="linqmd_login_response_invalid",
             )
-
-        refresh_token = body.get("refresh_token")
-        if refresh_token is not None and not isinstance(refresh_token, str):
-            refresh_token = None
 
         logger.info("Practice Hub login successful for username=%s", username)
         return PracticeHubLoginResult(
@@ -216,6 +268,13 @@ class LinqmdPracticeHubService:
 
         if response.status_code < 200 or response.status_code >= 300:
             detail = body.get("error") or body.get("message") or response.text[:200]
+            logger.warning(
+                "Practice Hub blog publish HTTP error status=%s url=%s detail=%s body_keys=%s",
+                response.status_code,
+                url,
+                str(detail)[:300],
+                sorted(body.keys()) if isinstance(body, dict) else [],
+            )
             raise LinqmdPublishError(
                 f"Practice Hub blog publish failed: {detail}",
                 status_code=response.status_code,

@@ -3,12 +3,14 @@
 Handles generic CRUD for Blogs, Comments, and AI/Drupal stubs.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File
-from typing import Any
+from typing import Annotated, Any
 from datetime import datetime
+import logging
 import re
 
 from sqlalchemy import select, delete
 
+from ....core.blog_auth import AuthenticatedDoctorId, linqmd_login_error_code
 from ....core.security import require_authentication
 from ....core.prompts import get_prompt_manager
 from ....core.exceptions import AIServiceError, ExtractionError
@@ -39,7 +41,13 @@ from ....services.linqmd_practice_hub_service import (
     extract_image_alt_from_html,
     get_linqmd_practice_hub_service,
 )
+from ....services.practice_hub_publish_helpers import (
+    get_blog_for_practice_hub_publish,
+    get_owned_blog,
+)
 from ....models.enums import BlogStatus, CommentStatus, CommentAuthorType
+
+logger = logging.getLogger(__name__)
 
 # We will create two routers: one for authenticated user actions, one for webhooks
 router = APIRouter(tags=["Blogs"], dependencies=[Depends(require_authentication)])
@@ -166,11 +174,10 @@ async def generate_ai_blog_content(
 @router.get("/comments", response_model=list[BlogCommentResponse])
 async def get_comments(
     db: DbSession,
+    doctor_id: AuthenticatedDoctorId,
     status: str | None = None,
-    doctor_id_str: str = Depends(require_authentication),
 ) -> Any:
     """Get all comments for the authenticated doctor's blogs."""
-    doctor_id = int(doctor_id_str)
 
     # Join with blogs to ensure we only get comments for the doctor's blogs
     query = (
@@ -192,10 +199,9 @@ async def update_comment_status(
     comment_id: int,
     payload: CommentStatusUpdate,
     db: DbSession,
-    doctor_id_str: str = Depends(require_authentication),
+    doctor_id: AuthenticatedDoctorId,
 ) -> dict[str, Any]:
     """Approve or reject a comment."""
-    doctor_id = int(doctor_id_str)
 
     # Subquery to check ownership
     result = await db.execute(
@@ -224,11 +230,10 @@ async def update_comment_status(
 @router.get("", response_model=list[BlogResponse])
 async def get_blogs(
     db: DbSession,
+    doctor_id: AuthenticatedDoctorId,
     status: str | None = None,
-    doctor_id_str: str = Depends(require_authentication),
 ) -> Any:
     """List blogs for the authenticated doctor, optionally filtered by status."""
-    doctor_id = int(doctor_id_str)
     
     query = select(Blog).where(Blog.doctor_id == doctor_id).order_by(Blog.created_at.desc())
     if status:
@@ -249,10 +254,9 @@ async def get_blogs(
 async def create_blog(
     db: DbSession,
     payload: BlogCreate,
-    doctor_id_str: str = Depends(require_authentication),
+    doctor_id: AuthenticatedDoctorId,
 ) -> Any:
     """Create a new draft blog for the authenticated doctor."""
-    doctor_id = int(doctor_id_str)
 
     blog = Blog(
         doctor_id=doctor_id,
@@ -270,19 +274,15 @@ async def create_blog(
 async def get_blog(
     blog_id: int,
     db: DbSession,
-    doctor_id_str: str = Depends(require_authentication),
+    doctor_id: AuthenticatedDoctorId,
 ) -> Any:
     """Get an existing blog by ID."""
-    doctor_id = int(doctor_id_str)
-
-    result = await db.execute(
-        select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
+    return await get_owned_blog(
+        db,
+        blog_id=blog_id,
+        doctor_id=doctor_id,
+        route="GET /blogs/{blog_id}",
     )
-    blog = result.scalar_one_or_none()
-    if blog is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
-
-    return blog
 
 
 @router.put("/{blog_id}", response_model=BlogResponse)
@@ -290,17 +290,21 @@ async def update_blog(
     blog_id: int,
     payload: BlogUpdate,
     db: DbSession,
-    doctor_id_str: str = Depends(require_authentication),
+    doctor_id: AuthenticatedDoctorId,
 ) -> Any:
     """Update a draft blog. Replaces keywords atomically."""
-    doctor_id = int(doctor_id_str)
-
-    result = await db.execute(
-        select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
+    logger.info(
+        "blog_update doctor_id=%s blog_id=%s",
+        doctor_id,
+        blog_id,
     )
-    blog = result.scalar_one_or_none()
-    if blog is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
+
+    blog = await get_owned_blog(
+        db,
+        blog_id=blog_id,
+        doctor_id=doctor_id,
+        route="PUT /blogs/{blog_id}",
+    )
 
     if payload.title is not None:
         blog.title = payload.title
@@ -350,34 +354,51 @@ async def publish_blog_to_practice_hub(
     blog_id: int,
     payload: BlogPublishPracticeHubRequest,
     db: DbSession,
-    doctor_id_str: str = Depends(require_authentication),
+    doctor_id: AuthenticatedDoctorId,
 ) -> BlogPublishPracticeHubResponse:
     """Login to Practice Hub and publish blog; mark local blog as published."""
-    doctor_id = int(doctor_id_str)
+    logger.info(
+        "practice_hub_publish doctor_id=%s blog_id=%s",
+        doctor_id,
+        blog_id,
+    )
 
     onboarding_status = await _doctor_onboarding_status(db, doctor_id)
     if onboarding_status != "verified":
+        logger.warning(
+            "practice_hub_publish blocked_not_verified doctor_id=%s blog_id=%s status=%s",
+            doctor_id,
+            blog_id,
+            onboarding_status,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Doctor verification pending. Publishing is available after verification.",
         )
 
-    result = await db.execute(
-        select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
+    blog = await get_blog_for_practice_hub_publish(
+        db,
+        blog_id=blog_id,
+        doctor_id=doctor_id,
+        route="POST /blogs/{blog_id}/publish-practice-hub",
     )
-    blog = result.scalar_one_or_none()
-    if blog is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
 
     creds_repo = LinqmdCredentialsRepository(db)
     stored_creds = await creds_repo.get_by_doctor_id(doctor_id)
+    using_override = payload.credentials is not None
+    logger.info(
+        "practice_hub_publish creds doctor_id=%s blog_id=%s stored_creds=%s using_override=%s",
+        doctor_id,
+        blog_id,
+        stored_creds is not None,
+        using_override,
+    )
     if stored_creds is None and payload.credentials is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No LinQMD Practice Hub profile found. Contact admin to sync your profile.",
         )
 
-    using_override = payload.credentials is not None
     if using_override:
         username = payload.credentials.username.strip()
         password = payload.credentials.password
@@ -391,22 +412,49 @@ async def publish_blog_to_practice_hub(
         )
 
     hub_service = get_linqmd_practice_hub_service()
+    logger.info(
+        "practice_hub_publish login doctor_id=%s blog_id=%s username=%s",
+        doctor_id,
+        blog_id,
+        username,
+    )
     try:
         login_result = await hub_service.login(username, password)
     except LinqmdLoginError as exc:
+        logger.warning(
+            "practice_hub_publish login_failed doctor_id=%s blog_id=%s username=%s error=%s",
+            doctor_id,
+            blog_id,
+            username,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "linqmd_credentials_invalid",
+                "code": linqmd_login_error_code(exc),
                 "message": (
                     "Practice Hub login failed. Please update your credentials and try again."
+                    if linqmd_login_error_code(exc) == "linqmd_credentials_invalid"
+                    else "Practice Hub returned an unexpected login response. Contact support or try again later."
                 ),
                 "error": str(exc),
             },
         ) from exc
 
+    logger.info(
+        "practice_hub_publish login_ok doctor_id=%s blog_id=%s has_refresh_token=%s",
+        doctor_id,
+        blog_id,
+        login_result.refresh_token is not None,
+    )
+
     if using_override:
         if stored_creds is None:
+            logger.warning(
+                "practice_hub_publish creds_override_no_profile doctor_id=%s blog_id=%s",
+                doctor_id,
+                blog_id,
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No LinQMD profile to update. Contact admin to sync your profile first.",
@@ -420,6 +468,13 @@ async def publish_blog_to_practice_hub(
         loaded = await hub_service.load_blog_image_from_storage(blog.image_urls[0])
         if loaded:
             image_bytes, image_filename, image_content_type = loaded
+        else:
+            logger.warning(
+                "practice_hub_publish image_load_failed doctor_id=%s blog_id=%s uri=%r",
+                doctor_id,
+                blog_id,
+                blog.image_urls[0][:120],
+            )
 
     image_alt = extract_image_alt_from_html(blog.content)
     hub_payload = PracticeHubBlogPayload(
@@ -432,12 +487,26 @@ async def publish_blog_to_practice_hub(
         image_alt=image_alt,
     )
 
+    logger.info(
+        "practice_hub_publish calling_hub doctor_id=%s blog_id=%s has_image=%s "
+        "content_len=%s",
+        doctor_id,
+        blog_id,
+        image_bytes is not None,
+        len(blog.content or ""),
+    )
     try:
         practice_hub_response = await hub_service.publish_blog(
             login_result.access_token,
             hub_payload,
         )
     except LinqmdPublishError as exc:
+        logger.warning(
+            "practice_hub_publish hub_failed doctor_id=%s blog_id=%s error=%s",
+            doctor_id,
+            blog_id,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
@@ -461,6 +530,13 @@ async def publish_blog_to_practice_hub(
     await db.commit()
     await db.refresh(blog)
 
+    logger.info(
+        "practice_hub_publish success doctor_id=%s blog_id=%s drupal_node_id=%s",
+        doctor_id,
+        blog_id,
+        drupal_node_id,
+    )
+
     return BlogPublishPracticeHubResponse(
         blog_id=blog_id,
         status=blog.status,
@@ -474,10 +550,9 @@ async def publish_blog(
     blog_id: int,
     payload: BlogPublishConfig,
     db: DbSession,
-    doctor_id_str: str = Depends(require_authentication),
+    doctor_id: AuthenticatedDoctorId,
 ) -> dict[str, Any]:
     """Mark a blog as published."""
-    doctor_id = int(doctor_id_str)
 
     result = await db.execute(
         select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
@@ -501,10 +576,9 @@ async def publish_blog(
 async def delete_blog(
     blog_id: int,
     db: DbSession,
-    doctor_id_str: str = Depends(require_authentication),
+    doctor_id: AuthenticatedDoctorId,
 ) -> dict[str, Any]:
     """Delete a blog (draft or published)."""
-    doctor_id = int(doctor_id_str)
 
     result = await db.execute(
         select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
@@ -531,8 +605,8 @@ async def delete_blog(
 async def upload_blog_image(
     blog_id: int,
     db: DbSession,
+    doctor_id: AuthenticatedDoctorId,
     file: UploadFile = File(...),
-    doctor_id_str: str = Depends(require_authentication),
 ) -> dict[str, str]:
     """Upload an image for a blog post and store it in blob storage."""
     from fastapi import HTTPException
@@ -541,17 +615,12 @@ async def upload_blog_image(
     import mimetypes
     from ....services.blob_storage_service import get_blob_storage_service
 
-    doctor_id = int(doctor_id_str)
-    
-    # Verify ownership
-    result = await db.execute(
-        select(Blog).where(Blog.id == blog_id, Blog.doctor_id == doctor_id)
+    blog = await get_owned_blog(
+        db,
+        blog_id=blog_id,
+        doctor_id=doctor_id,
+        route="POST /blogs/{blog_id}/images",
     )
-    blog = result.scalar_one_or_none()
-    if not blog:
-        raise HTTPException(status_code=404, detail="Blog not found")
-
-    blob_service = get_blob_storage_service()
     
     file_bytes = await file.read()
     original_filename = file.filename or "image.jpg"
