@@ -14,6 +14,7 @@ from src.app.services.linqmd_practice_hub_service import (
     PracticeHubLoginResult,
     _stored_uri_to_s3_key,
     build_field_blog_title,
+    build_blog_title_slug,
     extract_image_alt_from_html,
     parse_practice_hub_login_tokens,
 )
@@ -31,6 +32,25 @@ class TestPracticeHubHelpers:
 
     def test_build_field_blog_title_defaults_when_empty(self):
         assert build_field_blog_title("!!!") == "Blog"
+
+    def test_build_blog_title_slug_seo_format(self):
+        assert build_blog_title_slug("Heart Health: Tips for 2026") == (
+            "heart-health-tips-for-2026"
+        )
+
+    def test_build_blog_title_slug_strips_punctuation(self):
+        assert build_blog_title_slug("Heart Health: Tips & Tricks!!!") == (
+            "heart-health-tips-tricks"
+        )
+
+    def test_build_blog_title_slug_defaults_when_empty(self):
+        assert build_blog_title_slug("!!!") == "blog"
+
+    def test_build_blog_title_slug_truncates_at_hyphen_boundary(self):
+        long_title = "word " * 30
+        slug = build_blog_title_slug(long_title, max_len=40)
+        assert len(slug) <= 40
+        assert not slug.endswith("-")
 
     def test_extract_image_alt_from_html(self):
         html = '<p>Hi</p><img src="/x.jpg" alt="Doctor portrait" />'
@@ -181,7 +201,7 @@ class TestPracticeHubPublishBlog:
         mock_client.post.assert_awaited_once()
         call_kwargs = mock_client.post.await_args.kwargs
         assert call_kwargs["headers"]["Authorization"] == "Bearer tok-abc"
-        assert call_kwargs["data"]["Title"] == "Heart Health Tips"
+        assert call_kwargs["data"]["Title"] == "heart-health-tips"
         assert call_kwargs["data"]["field_blog_title"] == "Heart Health Tips"
         assert call_kwargs["data"]["short_description"] == "Stay active"
         assert "files" not in call_kwargs

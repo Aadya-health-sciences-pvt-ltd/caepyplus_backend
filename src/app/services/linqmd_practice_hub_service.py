@@ -72,6 +72,21 @@ def build_field_blog_title(title: str, max_len: int = 50) -> str:
     return truncated.strip() or "Blog"
 
 
+def build_blog_title_slug(title: str, max_len: int = 80) -> str:
+    """SEO-friendly URL slug for Practice Hub ``Title`` (lowercase, hyphen-separated)."""
+    text = re.sub(r"[^0-9A-Za-z]+", " ", (title or "").strip())
+    words = [w.lower() for w in text.split() if w]
+    if not words:
+        return "blog"
+    slug = "-".join(words)
+    if len(slug) <= max_len:
+        return slug
+    truncated = slug[:max_len].rstrip("-")
+    if "-" in truncated:
+        truncated = truncated.rsplit("-", 1)[0]
+    return truncated or "blog"
+
+
 def extract_image_alt_from_html(content: str | None) -> str | None:
     """Return alt text from the first img tag in HTML content."""
     if not content:
@@ -205,7 +220,7 @@ class LinqmdPracticeHubService:
     def _build_multipart_form(self, blog: PracticeHubBlogPayload) -> dict[str, Any]:
         title = blog.title or "Untitled Blog"
         form: dict[str, Any] = {
-            "Title": title,
+            "Title": build_blog_title_slug(title),
             "field_blog_title": build_field_blog_title(title),
             "short_description": blog.subtitle or "",
             "body": blog.content or "",
