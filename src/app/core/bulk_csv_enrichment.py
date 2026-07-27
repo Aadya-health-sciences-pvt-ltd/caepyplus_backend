@@ -12,6 +12,9 @@ from datetime import date
 from typing import Any, get_args, get_origin
 
 from ..schemas.doctor import DoctorUpdate, PracticeLocationBase
+from ..services.linqmd_sync_service import LINQMD_PROFILE_THEMES
+
+DEFAULT_BULK_LINQMD_THEME = "dp_3"
 
 # Mirror caepy_plus_front_end/src/lib/validation.ts
 CREDENTIALS_YEAR_MIN = 1950
@@ -277,6 +280,7 @@ def enrich_bulk_csv_row(raw: dict[str, str]) -> dict[str, Any]:
         "primary_specialization",
         "full_name",
         "email",
+        "theme",
     }
     for col, val in raw.items():
         if col.startswith("_") or col in skip_keys or not val:
@@ -374,3 +378,25 @@ def validate_enriched_bulk_row(
         ))
 
     return errors
+
+
+def validate_bulk_csv_theme(raw: dict[str, str]) -> BulkCsvRowError | None:
+    """Return a row error if ``theme`` is present but not a valid LinQMD profile theme."""
+    theme_cell = (raw.get("theme") or "").strip().lower()
+    if not theme_cell:
+        return None
+    if theme_cell not in LINQMD_PROFILE_THEMES:
+        allowed = ", ".join(sorted(LINQMD_PROFILE_THEMES))
+        return BulkCsvRowError(
+            "theme",
+            f"Invalid theme '{theme_cell}'. Must be one of: {allowed}.",
+        )
+    return None
+
+
+def resolve_bulk_linqmd_theme(stored_row: dict[str, Any]) -> str:
+    """LinQMD theme for bulk confirm — from ``_linqmd_theme`` or template default."""
+    theme = stored_row.get("_linqmd_theme")
+    if isinstance(theme, str) and theme.strip():
+        return theme.strip().lower()
+    return DEFAULT_BULK_LINQMD_THEME

@@ -1112,6 +1112,8 @@ curl -X POST \
 - **Existing doctor** (phone already in DB): Updates profile fields in-place; onboarding status is **not** changed (they may already be `SUBMITTED` or `VERIFIED`).
 - **DB-level error** (e.g. unique constraint race condition): The row is rolled back via savepoint; all other rows continue. The skipped row appears in `rows[].status = "skipped"`.
 
+When **`BULK_VERIFY=true`** (see `.env.example`), phase 2 confirm additionally attempts **auto-verify** and **LinQMD profile creation** per persisted row using the CSV `theme` column (`dp_1`, `dp_2`, or `dp_3`; default `dp_3` if empty). Theme is not stored on the doctor record. Verify/LinQMD failures are reported in `rows[].warnings` without rolling back the doctor row; LinQMD failures leave the doctor **VERIFIED** for manual admin sync.
+
 **Entire batch is atomic** — the outer transaction commits only after all rows have been processed. An unexpected system error rolls back everything.
 
 **Response (all rows successful):**

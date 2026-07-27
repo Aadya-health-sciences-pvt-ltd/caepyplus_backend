@@ -29,7 +29,9 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from ....core.bulk_csv_enrichment import (
+    DEFAULT_BULK_LINQMD_THEME,
     enrich_bulk_csv_row,
+    validate_bulk_csv_theme,
     validate_enriched_bulk_row,
 )
 from ....core.bulk_upload_template import get_bulk_upload_template_csv
@@ -62,6 +64,7 @@ from ....schemas.onboarding import (
     OnboardingStatusEnum,
 )
 from ....services.blob_storage_service import S3BlobStorageService, get_blob_storage_service
+from ....services.bulk_csv_post_upload import apply_bulk_verify_and_linqmd
 
 logger = structlog.get_logger(__name__)
 
@@ -226,6 +229,8 @@ class CsvUploadRow(BaseModel):
     doctor_id: int | None = None
     phone: str | None = None
     email: str | None = None
+    warnings: list[str] = []
+    onboarding_status: str | None = None
 
 
 class CsvUploadResponse(BaseModel):
@@ -242,6 +247,7 @@ class CsvUploadResponse(BaseModel):
     created: int
     updated: int
     skipped: int
+    warning_count: int = 0
     rows: list[CsvUploadRow]
     skipped_errors: list[CsvRowValidationError] = []
 
@@ -988,10 +994,18 @@ def _parse_and_validate_csv(
                 row=row_num, field=bulk_err.field, error=bulk_err.error,
             ))
 
+        theme_err = validate_bulk_csv_theme(row)
+        if theme_err:
+            errors.append(CsvRowValidationError(
+                row=row_num, field=theme_err.field, error=theme_err.error,
+            ))
+
         # Attach enriched DoctorUpdate-shaped fields; keep phone for E.164 normalisation.
         stored: dict[str, Any] = {"_row_num": row_num, "phone": phone_raw}
         if email_val:
             stored["email"] = email_val.lower()
+        theme_cell = (row.get("theme") or "").strip().lower()
+        stored["_linqmd_theme"] = theme_cell if theme_cell else DEFAULT_BULK_LINQMD_THEME
         stored.update(enriched)
         rows.append(stored)
 
@@ -1170,6 +1184,7 @@ back so the database is never left in a partial state.
 async def bulk_upload_doctors_csv(
     db: DbSession,
     current_user: AdminOrOperationUser,
+    settings: Annotated[Settings, Depends(get_settings)],
     file: UploadFile = File(
         ...,
         description="CSV file using the doctor onboarding template (UTF-8, max 500 rows)",
@@ -1210,6 +1225,7 @@ async def bulk_upload_doctors_csv(
 
     results: list[CsvUploadRow] = []
     created = updated = skipped = 0
+    warning_count = 0
     row_errors: list[CsvRowValidationError] = []
 
     for row in rows:
@@ -1258,9 +1274,27 @@ async def bulk_upload_doctors_csv(
                         db.add(identity)
                         await db.flush()
 
+                    row_warnings: list[str] = []
+                    row_onboarding_status: str | None = None
+                    if settings.BULK_VERIFY:
+                        outcome = await apply_bulk_verify_and_linqmd(
+                            db=db,
+                            row=row,
+                            doctor=existing,
+                            identity=identity,
+                            is_create=False,
+                            changed_by=str(current_user.id),
+                            changed_by_email=current_user.phone or "",
+                        )
+                        row_warnings = outcome.warnings
+                        row_onboarding_status = outcome.onboarding_status
+                        warning_count += len(row_warnings)
+
                     results.append(CsvUploadRow(
                         row=row_num, status="updated",
                         doctor_id=existing.id, phone=phone, email=email_val,
+                        warnings=row_warnings,
+                        onboarding_status=row_onboarding_status,
                     ))
                     updated += 1
 
@@ -1271,6 +1305,7 @@ async def bulk_upload_doctors_csv(
                         phone=phone,
                         email=email_val,
                         role="user",
+                        onboarding_source="bulk_csv",
                     )
                     _apply_doctor_update_payload(new_doctor, update_payload)
 
@@ -1278,6 +1313,7 @@ async def bulk_upload_doctors_csv(
                     await db.flush()  # get new_doctor.id without committing
                     await db.refresh(new_doctor)
 
+                    identity = None
                     # ── doctor_identity with PENDING status (flush only) ─────
                     # The identity row drives the onboarding workflow:
                     # PENDING → SUBMITTED → VERIFIED / REJECTED
@@ -1303,9 +1339,27 @@ async def bulk_upload_doctors_csv(
                         db.add(history)
                         await db.flush()
 
+                    row_warnings = []
+                    row_onboarding_status = None
+                    if settings.BULK_VERIFY:
+                        outcome = await apply_bulk_verify_and_linqmd(
+                            db=db,
+                            row=row,
+                            doctor=new_doctor,
+                            identity=identity,
+                            is_create=True,
+                            changed_by=str(current_user.id),
+                            changed_by_email=current_user.phone or "",
+                        )
+                        row_warnings = outcome.warnings
+                        row_onboarding_status = outcome.onboarding_status
+                        warning_count += len(row_warnings)
+
                     results.append(CsvUploadRow(
                         row=row_num, status="created",
                         doctor_id=new_doctor.id, phone=phone, email=email_val,
+                        warnings=row_warnings,
+                        onboarding_status=row_onboarding_status,
                     ))
                     created += 1
 
@@ -1351,12 +1405,14 @@ async def bulk_upload_doctors_csv(
             f"Processed {total} row(s): "
             f"{created} created, {updated} updated"
             + (f", {skipped} row(s) skipped due to errors" if skipped else "")
+            + (f", {warning_count} post-upload warning(s)" if warning_count else "")
             + "."
         ),
         total_rows=total,
         created=created,
         updated=updated,
         skipped=skipped,
+        warning_count=warning_count,
         rows=results,
         skipped_errors=row_errors,
     )
