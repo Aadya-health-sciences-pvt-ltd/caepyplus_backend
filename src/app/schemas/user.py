@@ -48,7 +48,7 @@ class UserCreate(BaseModel):
     )
     role: str = Field(
         default=UserRole.USER.value,
-        description="User role: admin, operation, user",
+        description="User role: admin, operation, content_creator, user",
         examples=["user", "admin"],
     )
     is_active: bool = Field(

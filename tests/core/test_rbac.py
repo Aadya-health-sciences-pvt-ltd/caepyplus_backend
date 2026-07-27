@@ -12,6 +12,7 @@ from src.app.core.rbac import (
     get_current_user,
     require_admin,
     require_admin_or_operation,
+    require_content_creator,
 )
 from src.app.models.enums import UserRole
 from src.app.models.user import User
@@ -54,6 +55,15 @@ def operational_user():
         id=4,
         phone="+916666666666",
         role=UserRole.OPERATION.value,
+        is_active=True,
+    )
+
+@pytest.fixture
+def content_creator_user():
+    return User(
+        id=5,
+        phone="+919888888888",
+        role=UserRole.CONTENT_CREATOR.value,
         is_active=True,
     )
 
@@ -166,6 +176,22 @@ async def test_require_admin_or_operation_success(admin_user, operational_user):
 async def test_require_admin_or_operation_failure(active_user):
     with pytest.raises(ForbiddenError):
         await require_admin_or_operation(current_user=active_user)
+
+
+@pytest.mark.asyncio
+async def test_require_content_creator_success(content_creator_user):
+    user = await require_content_creator(current_user=content_creator_user)
+    assert user.id == content_creator_user.id
+
+
+@pytest.mark.asyncio
+async def test_require_content_creator_failure(admin_user, operational_user, active_user):
+    with pytest.raises(ForbiddenError):
+        await require_content_creator(current_user=admin_user)
+    with pytest.raises(ForbiddenError):
+        await require_content_creator(current_user=operational_user)
+    with pytest.raises(ForbiddenError):
+        await require_content_creator(current_user=active_user)
 
 
 # --- JWT doctor_id parsing ---

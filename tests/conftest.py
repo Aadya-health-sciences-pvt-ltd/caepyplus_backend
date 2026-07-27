@@ -93,6 +93,18 @@ def auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.fixture
+def content_creator_headers() -> dict[str, str]:
+    """JWT for pre-seeded content creator user (+919888888888)."""
+    token = _create_test_jwt(
+        subject="+919888888888",
+        doctor_id=None,
+        email="content@example.com",
+        role="content_creator",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
 @pytest_asyncio.fixture(scope="function")
 async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
     """Create a test database engine."""
@@ -165,6 +177,35 @@ async def client(test_engine: AsyncEngine) -> AsyncGenerator[AsyncClient, None]:
                     email="admin@example.com",
                     role=UserRole.ADMIN.value,
                     is_active=True,
+                )
+            )
+            await seed_session.commit()
+
+        result_cc = await seed_session.execute(
+            _select(User).where(User.phone == "+919888888888")
+        )
+        if result_cc.scalar_one_or_none() is None:
+            seed_session.add(
+                User(
+                    phone="+919888888888",
+                    email="content@example.com",
+                    role=UserRole.CONTENT_CREATOR.value,
+                    is_active=True,
+                )
+            )
+            await seed_session.commit()
+
+        result_doc = await seed_session.execute(
+            _select(User).where(User.phone == "+919777777777")
+        )
+        if result_doc.scalar_one_or_none() is None:
+            seed_session.add(
+                User(
+                    phone="+919777777777",
+                    email="doctor@example.com",
+                    role=UserRole.USER.value,
+                    is_active=True,
+                    doctor_id=1,
                 )
             )
             await seed_session.commit()

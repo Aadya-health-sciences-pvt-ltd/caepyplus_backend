@@ -14,7 +14,9 @@ from src.app.services.linqmd_practice_hub_service import (
     PracticeHubLoginResult,
     _stored_uri_to_s3_key,
     build_field_blog_title,
+    build_blog_title_slug,
     extract_image_alt_from_html,
+    parse_practice_hub_login_tokens,
 )
 
 
@@ -31,6 +33,25 @@ class TestPracticeHubHelpers:
     def test_build_field_blog_title_defaults_when_empty(self):
         assert build_field_blog_title("!!!") == "Blog"
 
+    def test_build_blog_title_slug_seo_format(self):
+        assert build_blog_title_slug("Heart Health: Tips for 2026") == (
+            "heart-health-tips-for-2026"
+        )
+
+    def test_build_blog_title_slug_strips_punctuation(self):
+        assert build_blog_title_slug("Heart Health: Tips & Tricks!!!") == (
+            "heart-health-tips-tricks"
+        )
+
+    def test_build_blog_title_slug_defaults_when_empty(self):
+        assert build_blog_title_slug("!!!") == "blog"
+
+    def test_build_blog_title_slug_truncates_at_hyphen_boundary(self):
+        long_title = "word " * 30
+        slug = build_blog_title_slug(long_title, max_len=40)
+        assert len(slug) <= 40
+        assert not slug.endswith("-")
+
     def test_extract_image_alt_from_html(self):
         html = '<p>Hi</p><img src="/x.jpg" alt="Doctor portrait" />'
         assert extract_image_alt_from_html(html) == "Doctor portrait"
@@ -44,6 +65,28 @@ class TestPracticeHubHelpers:
 
     def test_stored_uri_to_s3_key_from_bare_key(self):
         assert _stored_uri_to_s3_key("doctors/1/profile.jpg") == "doctors/1/profile.jpg"
+
+    def test_parse_login_tokens_nested_data_wrapper(self):
+        body = {
+            "status_code": 200,
+            "msg": "Login successful",
+            "data": {
+                "access_token": "eyJ.test",
+                "refresh_token": "eyJ.refresh",
+                "expires_in": 600,
+                "token_type": "Bearer",
+            },
+        }
+        access, refresh = parse_practice_hub_login_tokens(body)
+        assert access == "eyJ.test"
+        assert refresh == "eyJ.refresh"
+
+    def test_parse_login_tokens_flat_legacy(self):
+        access, refresh = parse_practice_hub_login_tokens(
+            {"access_token": "a", "refresh_token": "r"}
+        )
+        assert access == "a"
+        assert refresh == "r"
 
 
 @pytest.fixture
@@ -82,6 +125,27 @@ class TestPracticeHubLogin:
         mock_client.post.assert_awaited_once()
         call_kwargs = mock_client.post.await_args.kwargs
         assert call_kwargs["json"] == {"username": "dr-user", "password": "secret"}
+
+    @pytest.mark.asyncio
+    async def test_login_success_parses_nested_data_tokens(
+        self, hub_service: LinqmdPracticeHubService
+    ):
+        mock_response = _mock_http_response(
+            json_body={
+                "status_code": 200,
+                "msg": "Login successful",
+                "data": {
+                    "access_token": "nested-tok",
+                    "refresh_token": "nested-ref",
+                },
+            },
+        )
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        hub_service._client = mock_client
+        result = await hub_service.login("dr-user", "secret")
+        assert result.access_token == "nested-tok"
+        assert result.refresh_token == "nested-ref"
 
     @pytest.mark.asyncio
     async def test_login_raises_on_non_200(self, hub_service: LinqmdPracticeHubService):
@@ -137,7 +201,7 @@ class TestPracticeHubPublishBlog:
         mock_client.post.assert_awaited_once()
         call_kwargs = mock_client.post.await_args.kwargs
         assert call_kwargs["headers"]["Authorization"] == "Bearer tok-abc"
-        assert call_kwargs["data"]["Title"] == "Heart Health Tips"
+        assert call_kwargs["data"]["Title"] == "heart-health-tips"
         assert call_kwargs["data"]["field_blog_title"] == "Heart Health Tips"
         assert call_kwargs["data"]["short_description"] == "Stay active"
         assert "files" not in call_kwargs

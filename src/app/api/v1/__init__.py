@@ -31,6 +31,7 @@ from .endpoints import (
     lead_doctors,
     onboarding,
     onboarding_admin,
+    content_blogs,
     otp,
     voice,
     blogs,
@@ -127,6 +128,11 @@ router.include_router(
 router.include_router(
     blogs.router,
     prefix="/blogs",
+)
+
+router.include_router(
+    content_blogs.router,
+    dependencies=[Depends(require_authentication)],
 )
 
 # Webhooks from external systems (Drupal)

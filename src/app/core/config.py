@@ -520,6 +520,14 @@ class Settings(BaseSettings):
             "MUST be False (or absent) in production."
         ),
     )
+    BULK_VERIFY: bool = Field(
+        default=False,
+        description=(
+            "When True, bulk CSV confirm (phase 2) auto-verifies each persisted row "
+            "and attempts LinQMD profile creation using the CSV theme column. "
+            "Does not change verify/submit API behavior."
+        ),
+    )
 
 
     # ========================================

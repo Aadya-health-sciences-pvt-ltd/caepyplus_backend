@@ -435,12 +435,25 @@ async def sync_doctor_to_linqmd(
     doctor_id: int,
     db: DbSession,
     current_user: AdminOrOperationUser,
+    theme: str = Query(
+        "dp_1",
+        description="Practice hub profile theme: dp_1, dp_2, or dp_3",
+    ),
 ) -> GenericResponse[dict]:
     """Trigger a sync of a doctor's profile to the LinQMD platform.
 
     Requires Admin or Operation role.
     """
-    from ....services.linqmd_sync_service import get_linqmd_sync_service
+    from ....services.linqmd_sync_service import (
+        LINQMD_PROFILE_THEMES,
+        get_linqmd_sync_service,
+    )
+
+    if theme not in LINQMD_PROFILE_THEMES:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid theme. Must be one of: {', '.join(sorted(LINQMD_PROFILE_THEMES))}",
+        )
 
     creds_repo = LinqmdCredentialsRepository(db)
     if await creds_repo.exists_for_doctor(doctor_id):
@@ -454,7 +467,7 @@ async def sync_doctor_to_linqmd(
     doctor_name = (identity.full_name if identity else "").strip() or f"Doctor {doctor_id}"
 
     sync_service = get_linqmd_sync_service()
-    result = await sync_service.sync_doctor_by_id(doctor_id, db)
+    result = await sync_service.sync_doctor_by_id(doctor_id, db, theme=theme)
 
     if not result.success:
         detail = result.error_message or "LinQMD sync failed."

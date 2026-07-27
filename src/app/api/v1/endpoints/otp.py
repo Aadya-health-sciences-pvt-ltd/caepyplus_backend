@@ -42,7 +42,13 @@ from ....services.otp_service import OTPService, get_otp_service, otp_verbose_di
 logger = structlog.get_logger(__name__)
 
 # Roles permitted to use the admin OTP endpoint
-_ADMIN_ROLES: frozenset[str] = frozenset({UserRole.ADMIN.value, UserRole.OPERATION.value})
+_ADMIN_PORTAL_ROLES: frozenset[str] = frozenset(
+    {
+        UserRole.ADMIN.value,
+        UserRole.OPERATION.value,
+        UserRole.CONTENT_CREATOR.value,
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -416,8 +422,8 @@ async def resend_otp(
     status_code=status.HTTP_200_OK,
     summary="Verify Admin OTP",
     description=(
-        "Verify OTP for admin/operation users. "
-        "Strict RBAC: user must already exist with admin or operation role. "
+        "Verify OTP for admin portal users (admin, operation, content_creator). "
+        "Strict RBAC: user must already exist with an allowed portal role. "
         "New users are NEVER auto-created via this endpoint."
     ),
     responses={
@@ -432,10 +438,10 @@ async def verify_admin_otp(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> GenericResponse[OTPVerifyResponse]:
-    """Verify OTP and authenticate a pre-registered admin or operation user.
+    """Verify OTP and authenticate a pre-registered admin portal user.
 
     No user creation occurs here — the user must already exist in the ``users``
-    table with ``admin`` or ``operation`` role.
+    table with an allowed admin portal role.
     """
     logger.info("Admin OTP verify request", mobile=otp_service.mask_mobile(request.mobile_number))
 
@@ -477,8 +483,8 @@ async def verify_admin_otp(
             },
         )
 
-    # 3. RBAC — only admin and operation roles are permitted
-    if user.role not in _ADMIN_ROLES:
+    # 3. RBAC — only admin portal roles are permitted
+    if user.role not in _ADMIN_PORTAL_ROLES:
         logger.warning(
             "Admin login failed: insufficient role",
             user_id=user.id,

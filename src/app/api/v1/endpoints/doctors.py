@@ -20,14 +20,21 @@ from __future__ import annotations
 
 import csv
 import io
-from pathlib import Path
 from typing import Annotated, Any, Union
 
 import structlog
+from sqlalchemy import select
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
+from ....core.bulk_csv_enrichment import (
+    DEFAULT_BULK_LINQMD_THEME,
+    enrich_bulk_csv_row,
+    validate_bulk_csv_theme,
+    validate_enriched_bulk_row,
+)
+from ....core.bulk_upload_template import get_bulk_upload_template_csv
 from ....core.config import Settings, get_settings
 from ....core.doctor_utils import (
     resolve_display_email,
@@ -57,6 +64,7 @@ from ....schemas.onboarding import (
     OnboardingStatusEnum,
 )
 from ....services.blob_storage_service import S3BlobStorageService, get_blob_storage_service
+from ....services.bulk_csv_post_upload import apply_bulk_verify_and_linqmd
 
 logger = structlog.get_logger(__name__)
 
@@ -221,6 +229,8 @@ class CsvUploadRow(BaseModel):
     doctor_id: int | None = None
     phone: str | None = None
     email: str | None = None
+    warnings: list[str] = []
+    onboarding_status: str | None = None
 
 
 class CsvUploadResponse(BaseModel):
@@ -237,6 +247,7 @@ class CsvUploadResponse(BaseModel):
     created: int
     updated: int
     skipped: int
+    warning_count: int = 0
     rows: list[CsvUploadRow]
     skipped_errors: list[CsvRowValidationError] = []
 
@@ -268,6 +279,7 @@ class CsvUploadResponse(BaseModel):
 async def list_doctors(
     db: DbSession,
     repo: DoctorRepoDep,
+    current_user: CurrentUser,
     page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page"),
     specialization: str | None = Query(default=None, description="Filter by specialization (partial match, no status filter)"),
@@ -286,6 +298,19 @@ async def list_doctors(
     skip = (page - 1) * page_size
 
     if onboarding_status is not None:
+        from ....models.enums import UserRole
+
+        portal_roles = (
+            UserRole.ADMIN.value,
+            UserRole.OPERATION.value,
+            UserRole.CONTENT_CREATOR.value,
+        )
+        if current_user.role not in portal_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Status filter requires admin portal access",
+            )
+
         # Enriched admin view — sourced from doctor_identity with eager-loaded
         # related rows (3 fixed-cost IN-clause queries via selectinload).
         onboarding_repo = OnboardingRepository(db)
@@ -803,9 +828,42 @@ def _normalise_phone(raw: str) -> str:
     return f"+91{digits}"
 
 
+_DOCTOR_MODEL_FIELD_MAP: dict[str, str] = {
+    "awards_recognition": "awards_academic_honours",
+    "memberships": "professional_memberships",
+    "phone_number": "phone",
+}
+
+
+def _doctor_update_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a ``DoctorUpdate`` kwargs dict from an enriched CSV row."""
+    payload: dict[str, Any] = {}
+    for col, val in row.items():
+        if col.startswith("_") or col == "phone":
+            continue
+        if col not in _DOCTOR_UPDATE_FIELDS:
+            continue
+        if val is None or val == "" or val == []:
+            continue
+        payload[col] = val
+    return payload
+
+
+def _apply_doctor_update_payload(model: DoctorModel, payload: dict[str, Any]) -> None:
+    """Apply validated ``DoctorUpdate`` fields onto a ``Doctor`` ORM instance."""
+    if not payload:
+        return
+    for field, value in DoctorUpdate(**payload).model_dump(
+        exclude_unset=True, exclude_none=True
+    ).items():
+        model_field = _DOCTOR_MODEL_FIELD_MAP.get(field, field)
+        if hasattr(model, model_field):
+            setattr(model, model_field, value)
+
+
 def _parse_and_validate_csv(
     raw_bytes: bytes,
-) -> tuple[list[dict[str, str]], list[CsvRowValidationError]]:
+) -> tuple[list[dict[str, Any]], list[CsvRowValidationError]]:
     """Decode, header-check, and row-validate a CSV upload.
 
     Pure function — performs no DB access.
@@ -867,7 +925,7 @@ def _parse_and_validate_csv(
 
     # --- Row-level validation ---
     errors: list[CsvRowValidationError] = []
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
 
     for row_num, raw_row in enumerate(raw_rows, start=2):  # row 1 = header
         row: dict[str, str] = {
@@ -930,10 +988,26 @@ def _parse_and_validate_csv(
                         error=f"'{raw_val}' is not a valid number.",
                     ))
 
-        # Attach the normalised row even if it has errors — the validation
-        # endpoint returns the full error list regardless.
-        row["_row_num"] = str(row_num)
-        rows.append(row)
+        enriched = enrich_bulk_csv_row(row)
+        for bulk_err in validate_enriched_bulk_row(row_num, row, enriched):
+            errors.append(CsvRowValidationError(
+                row=row_num, field=bulk_err.field, error=bulk_err.error,
+            ))
+
+        theme_err = validate_bulk_csv_theme(row)
+        if theme_err:
+            errors.append(CsvRowValidationError(
+                row=row_num, field=theme_err.field, error=theme_err.error,
+            ))
+
+        # Attach enriched DoctorUpdate-shaped fields; keep phone for E.164 normalisation.
+        stored: dict[str, Any] = {"_row_num": row_num, "phone": phone_raw}
+        if email_val:
+            stored["email"] = email_val.lower()
+        theme_cell = (row.get("theme") or "").strip().lower()
+        stored["_linqmd_theme"] = theme_cell if theme_cell else DEFAULT_BULK_LINQMD_THEME
+        stored.update(enriched)
+        rows.append(stored)
 
     return rows, errors
 
@@ -950,14 +1024,6 @@ async def _read_upload_file(file: UploadFile) -> bytes:
                 detail="Only CSV files are accepted (.csv extension required).",
             )
     return await file.read()
-
-
-# Path to the bundled template CSV shipped with the application source.
-_TEMPLATE_CSV_PATH: Path = (
-    Path(__file__).parent.parent.parent.parent  # src/app
-    / "static"
-    / "doctor_bulk_upload_template.csv"
-)
 
 
 # ---------------------------------------------------------------------------
@@ -978,22 +1044,23 @@ _TEMPLATE_CSV_PATH: Path = (
             "content": {"text/csv": {}},
             "description": "CSV template file",
         },
-        404: {"description": "Template file not found on server"},
     },
 )
 async def download_bulk_upload_template(
     _current_user: AdminOrOperationUser,
-) -> FileResponse:
+) -> Response:
     """Return the doctor bulk-upload CSV template as a file download."""
-    if not _TEMPLATE_CSV_PATH.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Template file not found. Contact the platform team.",
-        )
-    return FileResponse(
-        path=str(_TEMPLATE_CSV_PATH),
-        media_type="text/csv",
-        filename="doctor_bulk_upload_template.csv",
+    content = get_bulk_upload_template_csv()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                'attachment; filename="doctor_bulk_upload_template.csv"'
+            ),
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
     )
 
 
@@ -1117,6 +1184,7 @@ back so the database is never left in a partial state.
 async def bulk_upload_doctors_csv(
     db: DbSession,
     current_user: AdminOrOperationUser,
+    settings: Annotated[Settings, Depends(get_settings)],
     file: UploadFile = File(
         ...,
         description="CSV file using the doctor onboarding template (UTF-8, max 500 rows)",
@@ -1157,13 +1225,15 @@ async def bulk_upload_doctors_csv(
 
     results: list[CsvUploadRow] = []
     created = updated = skipped = 0
+    warning_count = 0
     row_errors: list[CsvRowValidationError] = []
 
     for row in rows:
         row_num = int(row["_row_num"])
-        phone_raw = row.get("phone", "")
+        phone_raw = str(row.get("phone", ""))
         phone = _normalise_phone(phone_raw)
-        email_val = row.get("email", "") or None
+        email_val = row.get("email") or None
+        update_payload = _doctor_update_payload_from_row(row)
 
         # Each row runs in its own savepoint so a DB-level error on one row
         # (e.g. unique-constraint violation on email) is isolated and rolled
@@ -1181,36 +1251,50 @@ async def bulk_upload_doctors_csv(
 
                 if existing:
                     # ── UPDATE existing doctor (flush only, no commit) ───────
-                    update_data: dict[str, Any] = {}
-                    # Only fill email if the record has none yet — avoid
-                    # overwriting an existing verified email.
                     if email_val and not existing.email:
-                        update_data["email"] = email_val
+                        update_payload["email"] = email_val
 
-                    for col, val in row.items():
-                        if col.startswith("_"):
-                            continue
-                        if col in _DOCTOR_UPDATE_FIELDS and val:
-                            update_data[col] = val
-
-                    if update_data:
-                        for field, value in DoctorUpdate(**update_data).model_dump(
-                            exclude_unset=True, exclude_none=True
-                        ).items():
-                            # Respect the field_mapping from DoctorRepository
-                            model_field = {
-                                "awards_recognition": "achievements",
-                                "memberships": "professional_memberships",
-                                "phone_number": "phone",
-                            }.get(field, field)
-                            if hasattr(existing, model_field):
-                                setattr(existing, model_field, value)
+                    _apply_doctor_update_payload(existing, update_payload)
+                    if update_payload:
                         db.add(existing)
                         await db.flush()
+
+                    identity = await db.scalar(
+                        select(DoctorIdentity).where(
+                            DoctorIdentity.doctor_id == existing.id
+                        )
+                    )
+                    if identity:
+                        full_name = row.get("full_name")
+                        if full_name:
+                            identity.full_name = str(full_name)
+                        identity.phone_number = phone
+                        if email_val:
+                            identity.email = email_val
+                        db.add(identity)
+                        await db.flush()
+
+                    row_warnings: list[str] = []
+                    row_onboarding_status: str | None = None
+                    if settings.BULK_VERIFY:
+                        outcome = await apply_bulk_verify_and_linqmd(
+                            db=db,
+                            row=row,
+                            doctor=existing,
+                            identity=identity,
+                            is_create=False,
+                            changed_by=str(current_user.id),
+                            changed_by_email=current_user.phone or "",
+                        )
+                        row_warnings = outcome.warnings
+                        row_onboarding_status = outcome.onboarding_status
+                        warning_count += len(row_warnings)
 
                     results.append(CsvUploadRow(
                         row=row_num, status="updated",
                         doctor_id=existing.id, phone=phone, email=email_val,
+                        warnings=row_warnings,
+                        onboarding_status=row_onboarding_status,
                     ))
                     updated += 1
 
@@ -1221,38 +1305,22 @@ async def bulk_upload_doctors_csv(
                         phone=phone,
                         email=email_val,
                         role="user",
+                        onboarding_source="bulk_csv",
                     )
-                    # Apply extra DoctorUpdate fields from the CSV row
-                    raw_extra: dict[str, Any] = {}
-                    for col, val in row.items():
-                        if col.startswith("_"):
-                            continue
-                        if col in _DOCTOR_UPDATE_FIELDS and val:
-                            raw_extra[col] = val
-
-                    if raw_extra:
-                        for field, value in DoctorUpdate(**raw_extra).model_dump(
-                            exclude_unset=True, exclude_none=True
-                        ).items():
-                            model_field = {
-                                "awards_recognition": "achievements",
-                                "memberships": "professional_memberships",
-                                "phone_number": "phone",
-                            }.get(field, field)
-                            if hasattr(new_doctor, model_field):
-                                setattr(new_doctor, model_field, value)
+                    _apply_doctor_update_payload(new_doctor, update_payload)
 
                     db.add(new_doctor)
                     await db.flush()  # get new_doctor.id without committing
                     await db.refresh(new_doctor)
 
+                    identity = None
                     # ── doctor_identity with PENDING status (flush only) ─────
                     # The identity row drives the onboarding workflow:
                     # PENDING → SUBMITTED → VERIFIED / REJECTED
                     if email_val:
                         identity = DoctorIdentity(
                             doctor_id=new_doctor.id,
-                            full_name=new_doctor.full_name or "",
+                            full_name=str(row.get("full_name") or new_doctor.full_name or ""),
                             email=email_val,
                             phone_number=phone,
                             onboarding_status=OnboardingStatus.PENDING,
@@ -1271,9 +1339,27 @@ async def bulk_upload_doctors_csv(
                         db.add(history)
                         await db.flush()
 
+                    row_warnings = []
+                    row_onboarding_status = None
+                    if settings.BULK_VERIFY:
+                        outcome = await apply_bulk_verify_and_linqmd(
+                            db=db,
+                            row=row,
+                            doctor=new_doctor,
+                            identity=identity,
+                            is_create=True,
+                            changed_by=str(current_user.id),
+                            changed_by_email=current_user.phone or "",
+                        )
+                        row_warnings = outcome.warnings
+                        row_onboarding_status = outcome.onboarding_status
+                        warning_count += len(row_warnings)
+
                     results.append(CsvUploadRow(
                         row=row_num, status="created",
                         doctor_id=new_doctor.id, phone=phone, email=email_val,
+                        warnings=row_warnings,
+                        onboarding_status=row_onboarding_status,
                     ))
                     created += 1
 
@@ -1319,12 +1405,14 @@ async def bulk_upload_doctors_csv(
             f"Processed {total} row(s): "
             f"{created} created, {updated} updated"
             + (f", {skipped} row(s) skipped due to errors" if skipped else "")
+            + (f", {warning_count} post-upload warning(s)" if warning_count else "")
             + "."
         ),
         total_rows=total,
         created=created,
         updated=updated,
         skipped=skipped,
+        warning_count=warning_count,
         rows=results,
         skipped_errors=row_errors,
     )

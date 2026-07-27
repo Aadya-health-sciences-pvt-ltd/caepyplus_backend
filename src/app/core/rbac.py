@@ -132,6 +132,15 @@ async def require_admin(current_user: Annotated[User, Depends(get_current_user)]
     return current_user
 
 
+ADMIN_PORTAL_ROLES: frozenset[str] = frozenset(
+    {
+        UserRole.ADMIN.value,
+        UserRole.OPERATION.value,
+        UserRole.CONTENT_CREATOR.value,
+    }
+)
+
+
 async def require_admin_or_operation(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
@@ -150,9 +159,27 @@ async def require_admin_or_operation(
     return current_user
 
 
+async def require_content_creator(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Require Content Creator role. Raises ForbiddenError otherwise."""
+    if current_user.role != UserRole.CONTENT_CREATOR.value:
+        logger.warning(
+            "Non-content-creator access attempt",
+            user_id=current_user.id,
+            role=current_user.role,
+        )
+        raise ForbiddenError(
+            message="Content creator access required",
+            error_code="INSUFFICIENT_PERMISSIONS",
+        )
+    return current_user
+
+
 # ---------------------------------------------------------------------------
 # Convenient type aliases for endpoint signatures
 # ---------------------------------------------------------------------------
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_admin)]
 AdminOrOperationUser = Annotated[User, Depends(require_admin_or_operation)]
+ContentCreatorUser = Annotated[User, Depends(require_content_creator)]

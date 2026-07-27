@@ -11,10 +11,12 @@ class UserRole(str, Enum):
     Attributes:
         ADMIN: Full system access, can manage all resources
         OPERATION: Limited admin access for operation tasks
+        CONTENT_CREATOR: Admin portal access to manage blogs for verified doctors
         USER: Regular doctor/user access (default for doctors)
     """
     ADMIN = "admin"
     OPERATION = "operation"
+    CONTENT_CREATOR = "content_creator"
     USER = "user"
 
     @classmethod
