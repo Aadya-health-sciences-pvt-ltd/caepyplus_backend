@@ -11,8 +11,6 @@ import io
 from importlib import resources
 from pathlib import Path
 
-import app as app_pkg
-
 _TEMPLATE_FILENAME = "doctor_bulk_upload_template.csv"
 
 _TEMPLATE_COLUMNS: tuple[str, ...] = (
@@ -100,7 +98,8 @@ def get_bulk_upload_template_csv() -> str:
 
 
 def _template_path_on_disk() -> Path:
-    return Path(app_pkg.__file__).resolve().parent / "static" / _TEMPLATE_FILENAME
+    # Works for both `uvicorn src.app.main:app` and installed `app` package layout.
+    return Path(__file__).resolve().parent.parent / "static" / _TEMPLATE_FILENAME
 
 
 def read_packaged_template_csv_if_present() -> str | None:
@@ -108,8 +107,10 @@ def read_packaged_template_csv_if_present() -> str | None:
     path = _template_path_on_disk()
     if path.is_file():
         return path.read_text(encoding="utf-8")
-    try:
-        ref = resources.files("app.static").joinpath(_TEMPLATE_FILENAME)
-        return ref.read_text(encoding="utf-8")
-    except (FileNotFoundError, ModuleNotFoundError, TypeError, OSError):
-        return None
+    for package in ("src.app.static", "app.static"):
+        try:
+            ref = resources.files(package).joinpath(_TEMPLATE_FILENAME)
+            return ref.read_text(encoding="utf-8")
+        except (FileNotFoundError, ModuleNotFoundError, TypeError, OSError):
+            continue
+    return None
