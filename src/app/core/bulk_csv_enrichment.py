@@ -7,6 +7,7 @@ location objects from the ``practice_location`` column (legacy: ``practice_locat
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
 from typing import Any, get_args, get_origin
@@ -41,6 +42,7 @@ _LEGACY_PRACTICE_LOCATION_COLUMNS = tuple(f"practice_location_{i}" for i in rang
 _LEGACY_LIST_ALIASES: dict[str, str] = {
     "awards_recognition": "awards_academic_honours",
     "memberships": "professional_memberships",
+    "expertise": "conditions_commonly_treated",
 }
 
 # Direct CSV keys that map to a different DoctorUpdate field before list coercion.
@@ -48,6 +50,7 @@ _FIELD_ALIASES: dict[str, str] = {
     "city": "primary_practice_location",
     "primary_practice_location": "primary_practice_location",
     "primary_specialization": "specialty",
+    "specialication": "professional_achievement",
 }
 
 
@@ -93,6 +96,51 @@ def parse_list_cell(raw: str | None) -> list[str]:
         seen.add(item)
         out.append(item)
     return out
+
+
+def parse_expertise_cell(raw: str | None) -> list[str]:
+    """
+    Parse bulk ``expertise`` into ``conditions_commonly_treated`` (JSON string list).
+
+    Accepts:
+    - JSON array: ``["Hypertension", "Diabetes"]``
+    - Pipe/semicolon lists: ``Hypertension|Diabetes`` or ``Hypertension; Diabetes``
+    - Free-form text (default): entire cell → one JSON element, commas preserved
+      e.g. ``Complex heart failure, arrhythmia, and preventive cardiology``
+      → ``["Complex heart failure, arrhythmia, and preventive cardiology"]``
+    """
+    text = (raw or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            seen: set[str] = set()
+            out: list[str] = []
+            for item in parsed:
+                if item is None:
+                    continue
+                value = str(item).strip()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                out.append(value)
+            return out
+    if "|" in text or ";" in text:
+        parts = re.split(r"[|;]", text)
+        seen: set[str] = set()
+        out: list[str] = []
+        for part in parts:
+            item = part.strip()
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            out.append(item)
+        return out
+    return [text]
 
 
 def resolve_full_name(raw: dict[str, str]) -> str:
@@ -239,7 +287,11 @@ def enrich_bulk_csv_row(raw: dict[str, str]) -> dict[str, Any]:
         cell = raw.get(csv_col, "")
         if not cell:
             continue
-        _merge_list_field(enriched, du_field, parse_list_cell(cell))
+        if csv_col == "expertise":
+            parsed_items = parse_expertise_cell(cell)
+        else:
+            parsed_items = parse_list_cell(cell)
+        _merge_list_field(enriched, du_field, parsed_items)
 
     # Awards: merge both legacy and canonical columns
     awards_extra = parse_list_cell(raw.get("awards_academic_honours", ""))
@@ -281,6 +333,8 @@ def enrich_bulk_csv_row(raw: dict[str, str]) -> dict[str, Any]:
         "full_name",
         "email",
         "theme",
+        "expertise",
+        "specialication",
     }
     for col, val in raw.items():
         if col.startswith("_") or col in skip_keys or not val:

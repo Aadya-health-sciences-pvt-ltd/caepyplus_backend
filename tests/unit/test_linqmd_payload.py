@@ -78,7 +78,8 @@ class TestTransformDoctorData:
             "years_post_specialisation": 10,
             "awards_academic_honours": ["Best Resident"],
             "areas_of_expertise": ["Interventional Cardiology"],
-            "conditions_treated": ["Hypertension"],
+            "conditions_commonly_treated": ["Hypertension"],
+            "professional_achievement": "Advanced interventional and preventive cardiology.",
             "professional_overview": "Experienced cardiologist.",
         }
 
@@ -98,9 +99,10 @@ class TestTransformDoctorData:
         assert "MBBS - AIIMS (2008)" in payload.education_details
         assert payload.yearsofexperiences == "10"
         assert payload.awards_honors == "Best Resident"
-        # Overview is AI-generated on LinQMD create — not mapped in transform.
+        # AI-generated on LinQMD create — not mapped in transform.
+        assert payload.specialities_long == ""
         assert payload.overview == ""
-        assert "Interventional Cardiology" in payload.expertise_summary
+        assert payload.expertise_summary == ""
 
     def test_generates_username_from_profile_fields(self):
         service = LinQMDSyncService()

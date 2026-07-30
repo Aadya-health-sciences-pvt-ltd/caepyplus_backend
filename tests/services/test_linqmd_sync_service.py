@@ -1,6 +1,7 @@
 """Unit tests for LinQMD sync service (mocked HTTP, no external calls)."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -146,6 +147,36 @@ def _mock_overview_service(overview_text: str = "AI generated overview text."):
     )
 
 
+def _mock_expertise_summary_service(summary_text: str = ""):
+    mock_svc = MagicMock()
+    mock_svc.generate_with_fallback = AsyncMock(return_value=summary_text)
+    return patch(
+        "src.app.services.linqmd_expertise_summary_service.get_linqmd_expertise_summary_service",
+        return_value=mock_svc,
+    )
+
+
+def _mock_specialities_long_service(text: str = ""):
+    mock_svc = MagicMock()
+    mock_svc.generate_with_fallback = AsyncMock(return_value=text)
+    return patch(
+        "src.app.services.linqmd_specialities_long_service.get_linqmd_specialities_long_service",
+        return_value=mock_svc,
+    )
+
+
+@contextmanager
+def _mock_linqmd_ai_services(
+    overview_text: str = "AI generated overview text.",
+    expertise_text: str = "",
+    specialities_long_text: str = "",
+):
+    with _mock_overview_service(overview_text):
+        with _mock_expertise_summary_service(expertise_text):
+            with _mock_specialities_long_service(specialities_long_text):
+                yield
+
+
 class TestSyncDoctor:
     @pytest.mark.asyncio
     async def test_sync_doctor_success(self, sync_service: LinQMDSyncService):
@@ -154,7 +185,7 @@ class TestSyncDoctor:
             "_load_display_picture_file",
             new=AsyncMock(return_value=None),
         ):
-            with _mock_overview_service():
+            with _mock_linqmd_ai_services():
                 with patch.object(
                     sync_service,
                     "_send_to_linqmd",
@@ -190,7 +221,7 @@ class TestSyncDoctor:
             "_load_display_picture_file",
             new=AsyncMock(return_value=None),
         ):
-            with _mock_overview_service(overview):
+            with _mock_linqmd_ai_services(overview):
                 with patch.object(
                     sync_service,
                     "_send_to_linqmd",
@@ -200,6 +231,55 @@ class TestSyncDoctor:
 
         sent_payload = mock_send.await_args.args[0]
         assert sent_payload.overview == overview
+
+    @pytest.mark.asyncio
+    async def test_sync_doctor_includes_expertise_summary_in_create_payload(
+        self, sync_service: LinQMDSyncService
+    ):
+        expertise = (
+            "Dr. Anjali Sharma has extensive experience managing hypertension, "
+            "with focused expertise in interventional cardiology."
+        )
+        with patch.object(
+            sync_service,
+            "_load_display_picture_file",
+            new=AsyncMock(return_value=None),
+        ):
+            with _mock_linqmd_ai_services(expertise_text=expertise):
+                with patch.object(
+                    sync_service,
+                    "_send_to_linqmd",
+                    new=AsyncMock(return_value=(200, {"uid": "42"})),
+                ) as mock_send:
+                    await sync_service.sync_doctor(_identity(), _details(), doctor_id=5)
+
+        sent_payload = mock_send.await_args.args[0]
+        assert sent_payload.expertise_summary == expertise
+
+    @pytest.mark.asyncio
+    async def test_sync_doctor_includes_specialities_long_in_create_payload(
+        self, sync_service: LinQMDSyncService
+    ):
+        specialities_long = (
+            "Dr. Anjali Sharma is a Cardiology specialist with a focus on advanced "
+            "interventional and preventive cardiology, explained in clear, "
+            "patient-friendly language."
+        )
+        with patch.object(
+            sync_service,
+            "_load_display_picture_file",
+            new=AsyncMock(return_value=None),
+        ):
+            with _mock_linqmd_ai_services(specialities_long_text=specialities_long):
+                with patch.object(
+                    sync_service,
+                    "_send_to_linqmd",
+                    new=AsyncMock(return_value=(200, {"uid": "42"})),
+                ) as mock_send:
+                    await sync_service.sync_doctor(_identity(), _details(), doctor_id=5)
+
+        sent_payload = mock_send.await_args.args[0]
+        assert sent_payload.specialities_long == specialities_long
 
     @pytest.mark.asyncio
     async def test_sync_doctor_persists_overview_on_success(
@@ -212,7 +292,7 @@ class TestSyncDoctor:
             "_load_display_picture_file",
             new=AsyncMock(return_value=None),
         ):
-            with _mock_overview_service(overview):
+            with _mock_linqmd_ai_services(overview):
                 with patch.object(
                     sync_service,
                     "_send_to_linqmd",
@@ -239,7 +319,7 @@ class TestSyncDoctor:
             "_load_display_picture_file",
             new=AsyncMock(return_value=None),
         ):
-            with _mock_overview_service():
+            with _mock_linqmd_ai_services():
                 with patch.object(
                     sync_service,
                     "_send_to_linqmd",
@@ -261,7 +341,7 @@ class TestSyncDoctor:
             "_load_display_picture_file",
             new=AsyncMock(return_value=None),
         ):
-            with _mock_overview_service():
+            with _mock_linqmd_ai_services():
                 with patch.object(
                     sync_service,
                     "_send_to_linqmd",
@@ -330,12 +410,20 @@ class TestSyncDoctorUpdateById:
                     "_load_display_picture_file",
                     new=AsyncMock(return_value=None),
                 ):
-                    with patch.object(
-                        sync_service,
-                        "_send_update_to_linqmd",
-                        new=AsyncMock(return_value=(200, {"ok": True})),
-                    ) as mock_update:
-                        result = await sync_service.sync_doctor_update_by_id(5, mock_db)
+                    with _mock_expertise_summary_service(
+                        "Expertise in cardiology and hypertension management."
+                    ):
+                        with _mock_specialities_long_service(
+                            "Cardiology specialist focused on preventive heart care."
+                        ):
+                            with patch.object(
+                                sync_service,
+                                "_send_update_to_linqmd",
+                                new=AsyncMock(return_value=(200, {"ok": True})),
+                            ) as mock_update:
+                                result = await sync_service.sync_doctor_update_by_id(
+                                    5, mock_db
+                                )
 
         assert result.success is True
         mock_update.assert_awaited_once()
@@ -344,6 +432,8 @@ class TestSyncDoctorUpdateById:
         assert sent_payload.name == "stored-user"
         assert sent_payload.password == "stored-pass"
         assert sent_payload.overview == ""
+        assert "cardiology" in sent_payload.expertise_summary.lower()
+        assert "Cardiology" in sent_payload.specialities_long
 
     @pytest.mark.asyncio
     async def test_update_omits_overview_from_form_data(
@@ -373,12 +463,14 @@ class TestSyncDoctorUpdateById:
                     "_load_display_picture_file",
                     new=AsyncMock(return_value=None),
                 ):
-                    with patch.object(
-                        sync_service,
-                        "_send_update_to_linqmd",
-                        new=AsyncMock(return_value=(200, {"ok": True})),
-                    ) as mock_update:
-                        await sync_service.sync_doctor_update_by_id(5, mock_db)
+                    with _mock_expertise_summary_service("Clinical expertise summary."):
+                        with _mock_specialities_long_service("Specialization summary."):
+                            with patch.object(
+                                sync_service,
+                                "_send_update_to_linqmd",
+                                new=AsyncMock(return_value=(200, {"ok": True})),
+                            ) as mock_update:
+                                await sync_service.sync_doctor_update_by_id(5, mock_db)
 
         sent_payload = mock_update.await_args.args[1]
         form = sent_payload.to_form_data(include_theme=False)

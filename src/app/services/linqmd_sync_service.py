@@ -51,8 +51,8 @@ class LinQMDUserPayload:
     degree: str = ""  # Qualification/degree
     speciality: str = ""  # Primary specialization
     overview: str = ""  # Professional overview
-    specialities_long: str = ""  # Detailed specialities
-    expertise_summary: str = ""  # Summary of expertise
+    specialities_long: str = ""  # AI-generated from speciality + professional_achievement
+    expertise_summary: str = ""  # AI-generated summary of clinical expertise
     education_details: str = ""  # Education details
     yearsofexperiences: str = ""  # years_post_specialisation, else years_of_clinical_experience
     awards_honors: str = ""  # awards_academic_honours when present
@@ -520,40 +520,39 @@ class LinQMDSyncService:
             elif isinstance(qual, str):
                 education_lines.append(qual)
         education_details = '\n'.join(education_lines)
-        
-        # Format specialities (speciality resolved above for username)
-        if not speciality:
-            speciality = details.get('speciality', '') or ''
-        sub_specialities = details.get('sub_specialities', []) or []
-        specialities_long = ', '.join([speciality] + sub_specialities) if sub_specialities else speciality
-        
+
+        # specialities_long is AI-generated on LinQMD create/update — not mapped here.
+        specialities_long = ''
+
         # Build expertises array from areas_of_expertise
         expertises = []
-        areas = details.get('areas_of_expertise', []) or []
+        areas = (
+            details.get('areas_of_expertise', [])
+            or details.get('areas_of_clinical_interest', [])
+            or []
+        )
         for area in areas:
             if isinstance(area, str) and area:
                 expertises.append({
                     'head': area,
                     'content': f"Expert in {area}"  # Basic content
                 })
-        
+
         # Add conditions treated as expertises
-        conditions = details.get('conditions_treated', []) or []
+        conditions = (
+            details.get('conditions_commonly_treated', [])
+            or details.get('conditions_treated', [])
+            or []
+        )
         for condition in conditions[:5]:  # Limit to 5
             if isinstance(condition, str) and condition:
                 expertises.append({
                     'head': f"Treatment: {condition}",
                     'content': f"Specialized treatment for {condition}"
                 })
-        
-        # Build expertise summary
-        procedures = details.get('procedures_performed', []) or []
-        expertise_parts = []
-        if areas:
-            expertise_parts.append(f"Areas of Expertise: {', '.join(areas[:5])}")
-        if procedures:
-            expertise_parts.append(f"Procedures: {', '.join(procedures[:5])}")
-        expertise_summary = '\n'.join(expertise_parts)
+
+        # expertise_summary is AI-generated on LinQMD create/update — not mapped here.
+        expertise_summary = ''
         
         # Overview is AI-generated on LinQMD create only — not mapped here.
         overview = ''
@@ -897,6 +896,24 @@ class LinQMDSyncService:
                 identity, details
             )
 
+            from .linqmd_expertise_summary_service import (
+                get_linqmd_expertise_summary_service,
+            )
+
+            expertise_service = get_linqmd_expertise_summary_service()
+            payload.expertise_summary = await expertise_service.generate_with_fallback(
+                identity, details
+            )
+
+            from .linqmd_specialities_long_service import (
+                get_linqmd_specialities_long_service,
+            )
+
+            specialities_service = get_linqmd_specialities_long_service()
+            payload.specialities_long = await specialities_service.generate_with_fallback(
+                identity, details
+            )
+
             status_code, response_json = await self._send_to_linqmd(payload)
             result = self._finalize_sync_result(doctor_id, status_code, response_json)
             if result.success:
@@ -1024,6 +1041,24 @@ class LinQMDSyncService:
             payload.display_picture_file = display_picture_file
             # Overview is create-only — never sent on LinQMD profile update.
             payload.overview = ""
+
+            from .linqmd_expertise_summary_service import (
+                get_linqmd_expertise_summary_service,
+            )
+
+            expertise_service = get_linqmd_expertise_summary_service()
+            payload.expertise_summary = await expertise_service.generate_with_fallback(
+                identity_dict, details_dict
+            )
+
+            from .linqmd_specialities_long_service import (
+                get_linqmd_specialities_long_service,
+            )
+
+            specialities_service = get_linqmd_specialities_long_service()
+            payload.specialities_long = await specialities_service.generate_with_fallback(
+                identity_dict, details_dict
+            )
 
             status_code, response_json = await self._send_update_to_linqmd(
                 creds.linqmd_user_id,

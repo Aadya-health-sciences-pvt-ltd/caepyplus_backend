@@ -85,7 +85,6 @@ class TestCreateGenaiClient:
             project="test-project",
             location="us-central1",
             credentials=mock_creds,
-            http_options={"api_version": "v1beta1"},
         )
 
     @patch("src.app.services.gemini_client_factory.genai.Client")

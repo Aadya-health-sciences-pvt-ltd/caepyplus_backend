@@ -5,6 +5,7 @@ from datetime import date
 
 from app.core.bulk_csv_enrichment import (
     enrich_bulk_csv_row,
+    parse_expertise_cell,
     parse_list_cell,
     resolve_full_name,
     validate_enriched_bulk_row,
@@ -15,6 +16,47 @@ def test_parse_list_cell_pipe_and_comma() -> None:
     assert parse_list_cell("English|Hindi") == ["English", "Hindi"]
     assert parse_list_cell("MBBS, MD") == ["MBBS", "MD"]
     assert parse_list_cell("a|a|b") == ["a", "b"]
+
+
+def test_parse_expertise_cell_free_text_and_json() -> None:
+    assert parse_expertise_cell("Hypertension") == ["Hypertension"]
+    assert parse_expertise_cell("Hypertension|Diabetes") == ["Hypertension", "Diabetes"]
+    assert parse_expertise_cell("Knee replacement|Sports injuries") == [
+        "Knee replacement",
+        "Sports injuries",
+    ]
+    assert parse_expertise_cell(
+        "Complex heart failure, arrhythmia, and preventive cardiology"
+    ) == ["Complex heart failure, arrhythmia, and preventive cardiology"]
+    assert parse_expertise_cell('["Hypertension", "Arrhythmia"]') == [
+        "Hypertension",
+        "Arrhythmia",
+    ]
+    assert parse_expertise_cell('["Hypertension", "Hypertension", ""]') == ["Hypertension"]
+
+
+def test_enrich_expertise_and_specialication_columns() -> None:
+    raw = {
+        "phone": "9876543210",
+        "email": "a@example.com",
+        "full_name": "Dr. Test",
+        "specialty": "Cardiology",
+        "medical_registration_number": "REG1",
+        "medical_council": "Council",
+        "expertise": "Hypertension|Heart Failure",
+        "specialication": "Advanced interventional cardiology",
+    }
+    enriched = enrich_bulk_csv_row(raw)
+    assert enriched["conditions_commonly_treated"] == ["Hypertension", "Heart Failure"]
+    assert enriched["professional_achievement"] == "Advanced interventional cardiology"
+
+
+def test_template_includes_expertise_after_qualifications() -> None:
+    from app.core.bulk_upload_template import build_bulk_upload_template_csv
+
+    header = build_bulk_upload_template_csv().splitlines()[0].split(",")
+    qual_idx = header.index("qualifications")
+    assert header[qual_idx + 1 : qual_idx + 3] == ["expertise", "specialication"]
 
 
 def test_resolve_full_name_legacy_merge() -> None:
