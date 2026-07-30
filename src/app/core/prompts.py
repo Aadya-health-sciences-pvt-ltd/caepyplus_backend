@@ -446,6 +446,38 @@ class PromptManager:
             "Do NOT include markdown code fences or extra commentary."
         )
 
+    def get_linqmd_expertise_summary_prompt(self, doctor_data: dict[str, Any]) -> str:
+        """Build prompt for AI-generated LinQMD expertise_summary."""
+        system = self.get("linqmd_expertise_summary.system_prompt")
+        instruction = self.get("linqmd_expertise_summary.instruction")
+        schema = self.get("linqmd_expertise_summary.response_schema")
+        doctor_json = json.dumps(doctor_data, ensure_ascii=False, indent=2)
+
+        return (
+            f"{system}\n\n"
+            f"## CLINICAL EXPERTISE DATA (JSON)\n{doctor_json}\n\n"
+            f"## REQUIRED OUTPUT FORMAT\n{schema}\n\n"
+            f"## TASK\n{instruction}\n\n"
+            "Output STRICTLY a single JSON object with one field: expertise_summary.\n"
+            "Do NOT include markdown code fences or extra commentary."
+        )
+
+    def get_linqmd_specialities_long_prompt(self, doctor_data: dict[str, Any]) -> str:
+        """Build prompt for AI-generated LinQMD specialities_long."""
+        system = self.get("linqmd_specialities_long.system_prompt")
+        instruction = self.get("linqmd_specialities_long.instruction")
+        schema = self.get("linqmd_specialities_long.response_schema")
+        doctor_json = json.dumps(doctor_data, ensure_ascii=False, indent=2)
+
+        return (
+            f"{system}\n\n"
+            f"## SPECIALIZATION DATA (JSON)\n{doctor_json}\n\n"
+            f"## REQUIRED OUTPUT FORMAT\n{schema}\n\n"
+            f"## TASK\n{instruction}\n\n"
+            "Output STRICTLY a single JSON object with one field: specialities_long.\n"
+            "Do NOT include markdown code fences or extra commentary."
+        )
+
 
 # -----------------------------------------------------------------------------
 # Singleton Pattern with Lazy Initialization
