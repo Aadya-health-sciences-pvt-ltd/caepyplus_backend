@@ -12,9 +12,10 @@ from sqlalchemy import select, delete
 
 from ....core.blog_auth import AuthenticatedDoctorId, linqmd_login_error_code
 from ....core.security import require_authentication
+from ....core.config import Settings, get_settings
 from ....core.prompts import get_prompt_manager
 from ....core.exceptions import AIServiceError, ExtractionError
-from ....services.gemini_service import get_gemini_service
+from ....services.gemini_service import GeminiService, get_gemini_service
 from ....db.session import DbSession
 from ....models.blog import Blog, BlogKeyword, BlogComment
 from ....schemas.blog import (
@@ -98,6 +99,24 @@ async def _resolve_image_urls(image_urls: list | None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 _TOPICS_MAX_TOKENS = 8192
+_BLOG_STUDIO_MODEL_CONFIG_KEY = "GEMINI_RESUME_MODEL"
+
+
+async def _blog_studio_generate_structured(
+    gemini: GeminiService,
+    prompt: str,
+    *,
+    max_tokens: int | None = None,
+    settings: Settings | None = None,
+) -> dict:
+    """Blog Studio AI calls always use ``GEMINI_RESUME_MODEL``."""
+    cfg = settings or get_settings()
+    return await gemini.generate_structured(
+        prompt,
+        max_tokens=max_tokens,
+        model=cfg.GEMINI_RESUME_MODEL,
+        config_key=_BLOG_STUDIO_MODEL_CONFIG_KEY,
+    )
 
 
 def _topics_http_exception(exc: Exception) -> HTTPException:
@@ -126,7 +145,9 @@ async def get_ai_topics() -> AITopicsResponse:
         prompts = get_prompt_manager()
 
         prompt = prompts.get_blog_topics_prompt()
-        result = await gemini.generate_structured(prompt, max_tokens=_TOPICS_MAX_TOKENS)
+        result = await _blog_studio_generate_structured(
+            gemini, prompt, max_tokens=_TOPICS_MAX_TOKENS
+        )
         return AITopicsResponse(**result)
     except (AIServiceError, ExtractionError, HTTPException):
         raise
@@ -141,7 +162,7 @@ async def get_ai_keywords(topic: str) -> AIKeywordSuggestionResponse:
         prompts = get_prompt_manager()
         
         prompt = prompts.get_blog_keywords_prompt(topic)
-        result = await gemini.generate_structured(prompt)
+        result = await _blog_studio_generate_structured(gemini, prompt)
         return AIKeywordSuggestionResponse(**result)
     except Exception as e:
         raise HTTPException(
@@ -159,7 +180,7 @@ async def generate_ai_blog_content(
         prompts = get_prompt_manager()
         
         prompt = prompts.get_blog_content_prompt(payload.topic, payload.keywords)
-        result = await gemini.generate_structured(prompt)
+        result = await _blog_studio_generate_structured(gemini, prompt)
         return AIBlogContentResponse(**result)
     except Exception as e:
         raise HTTPException(
