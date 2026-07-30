@@ -546,7 +546,7 @@ linqmd_overview:
     6. Length: MINIMUM 80 words, MAXIMUM 200 words. Count carefully.
     7. Plain prose only — no headings, bullet points, or markdown.
 
-    response_schema: |
+  response_schema: |
     {
       "overview": "A single paragraph of plain text, 80-200 words, third-person patient-facing bio."
     }
