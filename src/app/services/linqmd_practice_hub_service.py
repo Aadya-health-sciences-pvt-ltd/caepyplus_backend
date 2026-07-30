@@ -220,7 +220,7 @@ class LinqmdPracticeHubService:
     def _build_multipart_form(self, blog: PracticeHubBlogPayload) -> dict[str, Any]:
         title = blog.title or "Untitled Blog"
         form: dict[str, Any] = {
-            "Title": build_blog_title_slug(title),
+            "Title": build_field_blog_title(title),
             "field_blog_title": build_field_blog_title(title),
             "short_description": blog.subtitle or "",
             "body": blog.content or "",

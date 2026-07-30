@@ -645,7 +645,9 @@ async def upload_blog_image(
     
     file_bytes = await file.read()
     original_filename = file.filename or "image.jpg"
-    
+
+    blob_service = get_blob_storage_service()
+
     # The BlobStorageService automatically detects extension and mime_type from filename,
     # generates a safe UUID for the blob_id, and builds the path using doctor_id and category.
     upload_result = await blob_service.upload_from_bytes(
