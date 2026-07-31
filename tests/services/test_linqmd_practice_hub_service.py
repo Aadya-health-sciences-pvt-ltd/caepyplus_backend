@@ -15,6 +15,8 @@ from src.app.services.linqmd_practice_hub_service import (
     _stored_uri_to_s3_key,
     build_field_blog_title,
     build_blog_title_slug,
+    build_blog_live_url,
+    resolve_blog_live_url,
     extract_image_alt_from_html,
     parse_practice_hub_login_tokens,
 )
@@ -51,6 +53,56 @@ class TestPracticeHubHelpers:
         slug = build_blog_title_slug(long_title, max_len=40)
         assert len(slug) <= 40
         assert not slug.endswith("-")
+
+    def test_build_blog_live_url(self):
+        url = build_blog_live_url(
+            base_url="https://dev.linqmd.com",
+            username="cardiology-bangalore-drfoo",
+            title="Heart Health: Tips for 2026",
+        )
+        assert url == (
+            "https://dev.linqmd.com/doctor/cardiology-bangalore-drfoo/"
+            "blog/heart-health-tips-for-2026"
+        )
+
+    def test_build_blog_live_url_sluggifies_field_blog_title_only(self):
+        long_title = "Heart Health Tips " + "word " * 20
+        field_title = build_field_blog_title(long_title)
+        url = build_blog_live_url(
+            base_url="https://dev.linqmd.com",
+            username="drfoo",
+            title=long_title,
+        )
+        assert url == (
+            f"https://dev.linqmd.com/doctor/drfoo/blog/{build_blog_title_slug(field_title)}"
+        )
+
+    def test_resolve_blog_live_url_draft_returns_none(self):
+        assert resolve_blog_live_url(
+            blog_status="draft",
+            title="Heart Health",
+            linqmd_username="drfoo",
+            base_url="https://dev.linqmd.com",
+        ) is None
+
+    def test_resolve_blog_live_url_published(self):
+        url = resolve_blog_live_url(
+            blog_status="published",
+            title="Heart Health Tips",
+            linqmd_username="drfoo",
+            base_url="https://dev.linqmd.com",
+        )
+        assert url == "https://dev.linqmd.com/doctor/drfoo/blog/heart-health-tips"
+
+    def test_resolve_blog_live_url_prefers_seo_schema_markup(self):
+        url = resolve_blog_live_url(
+            blog_status="published",
+            title="Ignored",
+            linqmd_username="drfoo",
+            base_url="https://dev.linqmd.com",
+            seo_schema_markup={"live_url": "https://dev.linqmd.com/doctor/drfoo/blog/custom"},
+        )
+        assert url == "https://dev.linqmd.com/doctor/drfoo/blog/custom"
 
     def test_extract_image_alt_from_html(self):
         html = '<p>Hi</p><img src="/x.jpg" alt="Doctor portrait" />'
