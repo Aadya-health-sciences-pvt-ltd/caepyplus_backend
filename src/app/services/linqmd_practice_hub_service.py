@@ -87,6 +87,39 @@ def build_blog_title_slug(title: str, max_len: int = 80) -> str:
     return truncated or "blog"
 
 
+def build_blog_live_url(*, base_url: str, username: str, title: str) -> str:
+    """Public LinQMD blog URL: slug of ``build_field_blog_title(title)``."""
+    base = (base_url or "").rstrip("/")
+    user = (username or "").strip().lstrip("/")
+    field_title = build_field_blog_title(title)
+    slug = build_blog_title_slug(field_title)
+    return f"{base}/doctor/{user}/blog/{slug}"
+
+
+def resolve_blog_live_url(
+    *,
+    blog_status: str | None,
+    title: str | None,
+    linqmd_username: str | None,
+    base_url: str,
+    seo_schema_markup: dict[str, Any] | None = None,
+) -> str | None:
+    """Compute live blog URL for published posts (not persisted)."""
+    if (blog_status or "").lower() != "published":
+        return None
+    if isinstance(seo_schema_markup, dict):
+        stored = seo_schema_markup.get("live_url")
+        if isinstance(stored, str) and stored.strip():
+            return stored.strip()
+    if not linqmd_username or not (title or "").strip():
+        return None
+    return build_blog_live_url(
+        base_url=base_url,
+        username=linqmd_username,
+        title=title or "",
+    )
+
+
 def extract_image_alt_from_html(content: str | None) -> str | None:
     """Return alt text from the first img tag in HTML content."""
     if not content:
