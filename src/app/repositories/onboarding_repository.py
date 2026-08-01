@@ -97,7 +97,10 @@ class OnboardingRepository:
             )
             stmt = stmt.where(DoctorIdentity.onboarding_status == status_enum)
 
-        stmt = stmt.offset(skip).limit(limit).order_by(DoctorIdentity.created_at.desc())
+        stmt = stmt.offset(skip).limit(limit).order_by(
+            DoctorIdentity.created_at.desc(),
+            DoctorIdentity.doctor_id.desc(),
+        )
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
