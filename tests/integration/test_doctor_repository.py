@@ -197,6 +197,43 @@ class TestCountAndGetAll:
         result = await repo.get_all(limit=3)
         assert len(result) <= 3
 
+    async def test_get_all_pagination_is_stable_when_created_at_tied(
+        self, db_session: AsyncSession
+    ):
+        """OFFSET/LIMIT must return every doctor once when created_at is identical."""
+        from datetime import datetime, timezone
+
+        from sqlalchemy import update
+
+        from src.app.models.doctor import Doctor
+
+        repo = DoctorRepository(db_session)
+        doctor_ids: list[int] = []
+        shared_ts = datetime(2026, 8, 1, 9, 49, 31, tzinfo=timezone.utc)
+
+        for i in range(25):
+            doctor = await repo.create_from_phone(f"+9195000020{i:02d}")
+            doctor_ids.append(doctor.id)
+
+        await db_session.execute(
+            update(Doctor).where(Doctor.id.in_(doctor_ids)).values(created_at=shared_ts)
+        )
+        await db_session.flush()
+
+        collected: list[int] = []
+        skip = 0
+        limit = 10
+        while True:
+            batch = await repo.get_all(skip=skip, limit=limit)
+            if not batch:
+                break
+            collected.extend(d.id for d in batch)
+            skip += limit
+
+        assert len(collected) == len(doctor_ids)
+        assert len(set(collected)) == len(doctor_ids)
+        assert set(collected) == set(doctor_ids)
+
 
 # ---------------------------------------------------------------------------
 # delete / delete_or_raise
