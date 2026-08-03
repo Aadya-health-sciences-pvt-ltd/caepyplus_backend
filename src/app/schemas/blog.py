@@ -70,6 +70,10 @@ class BlogResponse(BaseModel):
     estimated_read_time: int | None = None
     drupal_node_id: str | None = None
     seo_schema_markup: dict[str, Any] | None = None
+    live_url: str | None = Field(
+        default=None,
+        description="Computed LinQMD public blog URL when status is published",
+    )
     published_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None

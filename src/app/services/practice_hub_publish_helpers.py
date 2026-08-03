@@ -75,6 +75,22 @@ async def get_owned_blog(
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
 
 
+def linqmd_profile_missing_exception(
+    *,
+    message: str = (
+        "No LinQMD Practice Hub profile found. Enter your Practice Hub credentials to publish."
+    ),
+) -> HTTPException:
+    """Structured error so the UI can open the credential modal."""
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={
+            "code": "linqmd_profile_missing",
+            "message": message,
+        },
+    )
+
+
 async def get_blog_for_practice_hub_publish(
     db: AsyncSession,
     *,

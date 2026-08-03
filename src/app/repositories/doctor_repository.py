@@ -180,7 +180,7 @@ class DoctorRepository:
         Returns:
             List of doctor entities
         """
-        query = select(Doctor).order_by(Doctor.created_at.desc())
+        query = select(Doctor).order_by(Doctor.created_at.desc(), Doctor.id.desc())
 
         # Apply filters BEFORE offset/limit for correct pagination
         if specialization:

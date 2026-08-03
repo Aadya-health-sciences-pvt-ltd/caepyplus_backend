@@ -39,12 +39,15 @@ from ....services.linqmd_practice_hub_service import (
     LinqmdLoginError,
     LinqmdPublishError,
     PracticeHubBlogPayload,
+    build_blog_live_url,
     extract_image_alt_from_html,
     get_linqmd_practice_hub_service,
+    resolve_blog_live_url,
 )
 from ....services.practice_hub_publish_helpers import (
     get_blog_for_practice_hub_publish,
     get_owned_blog,
+    linqmd_profile_missing_exception,
 )
 from ....models.enums import BlogStatus, CommentStatus, CommentAuthorType
 
@@ -93,6 +96,54 @@ async def _resolve_image_urls(image_urls: list | None) -> list[str]:
             resolved.append(path)
     
     return resolved
+
+
+async def _get_linqmd_username(db: DbSession, doctor_id: int) -> str | None:
+    creds = await LinqmdCredentialsRepository(db).get_by_doctor_id(doctor_id)
+    if creds and creds.linqmd_username:
+        return creds.linqmd_username.strip().lstrip("/")
+    return None
+
+
+async def _blog_to_response(db: DbSession, doctor_id: int, blog: Blog) -> BlogResponse:
+    if blog.image_urls:
+        blog.image_urls = await _resolve_image_urls(blog.image_urls)
+    username = await _get_linqmd_username(db, doctor_id)
+    settings = get_settings()
+    live_url = resolve_blog_live_url(
+        blog_status=blog.status,
+        title=blog.title,
+        linqmd_username=username,
+        base_url=settings.LINQMD_PRACTICE_HUB_API_URL,
+        seo_schema_markup=blog.seo_schema_markup,
+    )
+    return BlogResponse.model_validate(blog).model_copy(update={"live_url": live_url})
+
+
+async def _blogs_to_responses(
+    db: DbSession,
+    doctor_id: int,
+    blogs: list[Blog],
+) -> list[BlogResponse]:
+    username = await _get_linqmd_username(db, doctor_id)
+    settings = get_settings()
+    base_url = settings.LINQMD_PRACTICE_HUB_API_URL
+    responses: list[BlogResponse] = []
+    for blog in blogs:
+        if blog.image_urls:
+            blog.image_urls = await _resolve_image_urls(blog.image_urls)
+        live_url = resolve_blog_live_url(
+            blog_status=blog.status,
+            title=blog.title,
+            linqmd_username=username,
+            base_url=base_url,
+            seo_schema_markup=blog.seo_schema_markup,
+        )
+        responses.append(
+            BlogResponse.model_validate(blog).model_copy(update={"live_url": live_url})
+        )
+    return responses
+
 
 # ---------------------------------------------------------------------------
 # AI Suggestions (Static Paths First)
@@ -262,13 +313,7 @@ async def get_blogs(
         
     result = await db.execute(query)
     blogs = list(result.scalars().all())
-    
-    # Hydrate image_urls with fresh presigned URLs so the browser can render them
-    for blog in blogs:
-        if blog.image_urls:
-            blog.image_urls = await _resolve_image_urls(blog.image_urls)
-    
-    return blogs
+    return await _blogs_to_responses(db, doctor_id, blogs)
 
 
 @router.post("", response_model=BlogResponse, status_code=status.HTTP_201_CREATED)
@@ -288,7 +333,7 @@ async def create_blog(
     await db.flush()
     await db.commit()
     await db.refresh(blog)
-    return blog
+    return await _blog_to_response(db, doctor_id, blog)
 
 
 @router.get("/{blog_id}", response_model=BlogResponse)
@@ -298,12 +343,13 @@ async def get_blog(
     doctor_id: AuthenticatedDoctorId,
 ) -> Any:
     """Get an existing blog by ID."""
-    return await get_owned_blog(
+    blog = await get_owned_blog(
         db,
         blog_id=blog_id,
         doctor_id=doctor_id,
         route="GET /blogs/{blog_id}",
     )
+    return await _blog_to_response(db, doctor_id, blog)
 
 
 @router.put("/{blog_id}", response_model=BlogResponse)
@@ -349,8 +395,8 @@ async def update_blog(
 
     await db.commit()
     await db.refresh(blog)
-    
-    return blog
+    return await _blog_to_response(db, doctor_id, blog)
+
 
 async def _doctor_onboarding_status(db: DbSession, doctor_id: int) -> str:
     """Prefer doctor_identity status; fall back to doctors.onboarding_status."""
@@ -415,10 +461,7 @@ async def publish_blog_to_practice_hub(
         using_override,
     )
     if stored_creds is None and payload.credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No LinQMD Practice Hub profile found. Contact admin to sync your profile.",
-        )
+        raise linqmd_profile_missing_exception()
 
     if using_override:
         username = payload.credentials.username.strip()
@@ -469,17 +512,7 @@ async def publish_blog_to_practice_hub(
         login_result.refresh_token is not None,
     )
 
-    if using_override:
-        if stored_creds is None:
-            logger.warning(
-                "practice_hub_publish creds_override_no_profile doctor_id=%s blog_id=%s",
-                doctor_id,
-                blog_id,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No LinQMD profile to update. Contact admin to sync your profile first.",
-            )
+    if using_override and stored_creds is not None:
         await creds_repo.update_credentials(doctor_id, username, password)
 
     image_bytes = None
@@ -548,6 +581,15 @@ async def publish_blog_to_practice_hub(
     blog.published_at = datetime.now()
     if drupal_node_id:
         blog.drupal_node_id = drupal_node_id
+    settings = get_settings()
+    live_url = build_blog_live_url(
+        base_url=settings.LINQMD_PRACTICE_HUB_API_URL,
+        username=username,
+        title=blog.title or "Untitled Blog",
+    )
+    markup = dict(blog.seo_schema_markup or {})
+    markup["live_url"] = live_url
+    blog.seo_schema_markup = markup
     await db.commit()
     await db.refresh(blog)
 

@@ -33,12 +33,19 @@ from ....services.linqmd_practice_hub_service import (
     LinqmdLoginError,
     LinqmdPublishError,
     PracticeHubBlogPayload,
+    build_blog_live_url,
     extract_image_alt_from_html,
     get_linqmd_practice_hub_service,
 )
-from ....services.practice_hub_publish_helpers import get_blog_for_practice_hub_publish
+from ....services.practice_hub_publish_helpers import (
+    get_blog_for_practice_hub_publish,
+    linqmd_profile_missing_exception,
+)
 from ....core.blog_auth import linqmd_login_error_code
+from ....core.config import get_settings
 from .blogs import (
+    _blog_to_response,
+    _blogs_to_responses,
     _doctor_onboarding_status,
     _resolve_image_urls,
     generate_ai_blog_content,
@@ -154,10 +161,7 @@ async def content_list_blogs(
         query = query.where(Blog.status == status)
     result = await db.execute(query)
     blogs = list(result.scalars().all())
-    for blog in blogs:
-        if blog.image_urls:
-            blog.image_urls = await _resolve_image_urls(blog.image_urls)
-    return blogs
+    return await _blogs_to_responses(db, doctor_id, blogs)
 
 
 @router.post("", response_model=BlogResponse, status_code=status.HTTP_201_CREATED)
@@ -261,9 +265,8 @@ async def content_publish_blog_to_practice_hub(
         using_override,
     )
     if stored_creds is None and payload.credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No LinQMD Practice Hub profile found. Contact admin to sync profile.",
+        raise linqmd_profile_missing_exception(
+            message="No LinQMD Practice Hub profile found. Enter credentials to publish.",
         )
 
     if using_override:
@@ -309,12 +312,7 @@ async def content_publish_blog_to_practice_hub(
         blog_id,
     )
 
-    if using_override:
-        if stored_creds is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No LinQMD profile to update. Contact admin to sync profile first.",
-            )
+    if using_override and stored_creds is not None:
         await creds_repo.update_credentials(doctor_id, username, password)
 
     image_bytes = None
@@ -371,6 +369,15 @@ async def content_publish_blog_to_practice_hub(
     blog.published_at = datetime.now()
     if drupal_node_id:
         blog.drupal_node_id = drupal_node_id
+    settings = get_settings()
+    live_url = build_blog_live_url(
+        base_url=settings.LINQMD_PRACTICE_HUB_API_URL,
+        username=username,
+        title=blog.title or "Untitled Blog",
+    )
+    markup = dict(blog.seo_schema_markup or {})
+    markup["live_url"] = live_url
+    blog.seo_schema_markup = markup
     await db.commit()
     await db.refresh(blog)
 
