@@ -1,12 +1,15 @@
 # =============================================================================
 # Doctor Onboarding Service — Runtime Dependencies
 # =============================================================================
-# This file exists for tooling compatibility (Docker, pip install -r).
+# This file exists for tooling compatibility (legacy pip install -r).
+# Docker / production installs via **uv** from pyproject.toml + uv.lock (see Dockerfile).
 # The authoritative dependency spec with version bounds is pyproject.toml.
 #
 # INSTALL:
-#   pip install -e ".[dev]"           # local development (recommended)
-#   pip install -r requirements.txt   # production Docker image
+#   uv sync --dev                     # local development (recommended)
+#   uv sync --frozen --no-dev         # production (Docker)
+#   pip install -e ".[dev]"           # fallback without uv
+#   pip install -r requirements.txt   # fallback without uv (keep in sync with pyproject.toml)
 # =============================================================================
 
 # ── Core Framework ────────────────────────────────────────────────────────────
@@ -27,8 +30,10 @@ psycopg2-binary>=2.9.9,<3.0.0   # Sync driver required by Alembic offline mode
 greenlet>=3.0.0                  # Required by SQLAlchemy async bridge
 
 # ── Authentication & Security ─────────────────────────────────────────────────
-# JWT is implemented with Python stdlib (hmac + hashlib) — no python-jose needed.
+# Legacy JWT is implemented with Python stdlib (hmac + hashlib).
+# pyjwt[crypto] is required for OIDC RS256 + JWKS verification (OIDC_ENABLED).
 firebase-admin>=6.0.0            # Google Sign-In token verification
+PyJWT[crypto]>=2.9.0,<2.10.0     # OIDC token verification (must stay in sync with pyproject.toml)
 
 # ── HTTP Client ───────────────────────────────────────────────────────────────
 httpx>=0.28.0,<1.0.0             # Async HTTP (OTP SMS calls, Firebase fallback)

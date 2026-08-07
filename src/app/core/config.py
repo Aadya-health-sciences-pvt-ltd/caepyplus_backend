@@ -236,6 +236,36 @@ class Settings(BaseSettings):
         description="JWT access token expiration time (minutes)"
     )
 
+    # OIDC (linqmd_workspace_backend_code's Authorization Server), additive
+    # alongside the legacy SECRET_KEY/HS256 scheme above. OIDC_ENABLED false/
+    # unset: _decode_jwt is unchanged, legacy HS256 only. true: also accepts
+    # RS256 tokens from OIDC_ISSUER, scoped to OIDC_AUDIENCE. Resource-server
+    # verification only - this does not change caepy's own doctor login flow.
+    OIDC_ENABLED: bool = Field(
+        default=False,
+        description="Accept RS256 OIDC tokens alongside the legacy HS256 scheme"
+    )
+    OIDC_ISSUER: str | None = Field(
+        default=None,
+        description="linqmd_workspace_backend_code OIDC issuer URL (from env only)"
+    )
+    OIDC_AUDIENCE: str | None = Field(
+        default=None,
+        description="This service's OIDC resource identifier / aud (from env only)"
+    )
+
+    # Outbound (client_credentials) side of the same OIDC issuer - used by
+    # OidcHttpClient to mint tokens for calling other resource servers
+    # (e.g. communication). No-op when either is unset.
+    OIDC_CLIENT_ID: str | None = Field(
+        default=None,
+        description="This service's OIDC client_id for client_credentials"
+    )
+    OIDC_CLIENT_SECRET: str | None = Field(
+        default=None,
+        description="This service's OIDC client_secret for client_credentials"
+    )
+
     # ========================================
     # CORS Configuration
     # ========================================
@@ -731,6 +761,8 @@ class Settings(BaseSettings):
                     "SMS_USER_ID and SMS_USER_PASS are required in production "
                     "for OTP functionality"
                 )
+            if self.OIDC_ENABLED and not self.OIDC_ISSUER:
+                raise ValueError("OIDC_ISSUER must be set in production when OIDC_ENABLED is true")
             if not os.environ.get("FIREBASE_PROJECT_ID"):
                 warnings.warn(
                     "FIREBASE_PROJECT_ID is not set in production; Google Sign-In will not work.",

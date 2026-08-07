@@ -30,12 +30,14 @@ services:
       dockerfile: Dockerfile
     container_name: doctor-onboarding-api
     ports:
-      - "6555:6555"
+      # Host 6555 → container 8000 (Dockerfile / ECS listen on 8000)
+      - "6555:8000"
     environment:
       # ── App ───────────────────────────────
       - APP_ENV=development
       - DEBUG=true # DEV ONLY — config validator blocks DEBUG=true in production
       - LOG_LEVEL=INFO
+      - PORT=8000
 
       # ── Database ──────────────────────────
       # Points to the `db` service defined below.
@@ -55,6 +57,22 @@ services:
       # ── Security ──────────────────────────
       # REQUIRED: Change this to a random 64-char string in production.
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-minimum-32-chars}
+
+      # ── OIDC (optional local) ─────────────
+      # When OIDC_ENABLED=true, pyjwt[crypto] (from uv.lock) verifies RS256 tokens.
+      - OIDC_ENABLED=${OIDC_ENABLED:-false}
+      - OIDC_ISSUER=${OIDC_ISSUER:-}
+      - OIDC_AUDIENCE=${OIDC_AUDIENCE:-}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
+      - OIDC_RESOURCE_WORKSPACE=${OIDC_RESOURCE_WORKSPACE:-}
+      - OIDC_RESOURCE_AIMR=${OIDC_RESOURCE_AIMR:-}
+      - OIDC_RESOURCE_PAYMENT=${OIDC_RESOURCE_PAYMENT:-}
+      - OIDC_RESOURCE_CAEPY=${OIDC_RESOURCE_CAEPY:-}
+      - OIDC_RESOURCE_COMMUNICATION=${OIDC_RESOURCE_COMMUNICATION:-}
+      - OIDC_RESOURCE_SYMPTOM_COLLECTOR=${OIDC_RESOURCE_SYMPTOM_COLLECTOR:-}
+      - OIDC_RESOURCE_CLINIC_BOT=${OIDC_RESOURCE_CLINIC_BOT:-}
+      - OIDC_RESOURCE_PRACTICE_HUB=${OIDC_RESOURCE_PRACTICE_HUB:-}
 
       # ── Gemini AI ─────────────────────────
       # Required for resume parsing and voice onboarding features.
@@ -113,7 +131,7 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:6555/api/v1/live', timeout=8); sys.exit(0 if r.status == 200 else 1)" ]
+      test: [ "CMD", "python", "-c", "import urllib.request, sys; r = urllib.request.urlopen('http://localhost:8000/api/v1/live', timeout=8); sys.exit(0 if r.status == 200 else 1)" ]
       interval: 30s
       timeout: 10s
       retries: 3
