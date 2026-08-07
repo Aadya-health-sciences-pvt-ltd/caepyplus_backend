@@ -11,6 +11,7 @@ import httpx
 import structlog
 
 from ..core.config import get_settings
+from ..core.oidc_http_client import Resource, get_oidc_http_client
 
 logger = structlog.get_logger(__name__)
 
@@ -315,6 +316,7 @@ class OTPService:
         self._memory_store: InMemoryOTPStore | None = None
         self._initialized = False
         self.http_client = httpx.AsyncClient(timeout=30.0, verify=False, trust_env=False)
+        self._oidc = get_oidc_http_client()
 
     async def _init_store(self) -> None:
         """Initialize the OTP store (Redis first, memory fallback)."""
@@ -415,9 +417,11 @@ class OTPService:
                     }
                 }
 
+                headers = await self._oidc.authorization_headers(Resource.COMMUNICATION)
                 response = await self.http_client.post(
                     self.settings.LINQMD_COMMUNICATION_SERVICE_URL,
-                    json=payload
+                    json=payload,
+                    headers=headers,
                 )
 
                 # Log the raw response from communication service

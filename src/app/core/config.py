@@ -247,11 +247,23 @@ class Settings(BaseSettings):
     )
     OIDC_ISSUER: str | None = Field(
         default=None,
-        description="linqmd_workspace_backend_code OIDC issuer URL"
+        description="linqmd_workspace_backend_code OIDC issuer URL (from env only)"
     )
-    OIDC_AUDIENCE: str = Field(
-        default="https://api.linqmd.com/caepy",
-        description="This service's own OIDC resource identifier"
+    OIDC_AUDIENCE: str | None = Field(
+        default=None,
+        description="This service's OIDC resource identifier / aud (from env only)"
+    )
+
+    # Outbound (client_credentials) side of the same OIDC issuer - used by
+    # OidcHttpClient to mint tokens for calling other resource servers
+    # (e.g. communication). No-op when either is unset.
+    OIDC_CLIENT_ID: str | None = Field(
+        default=None,
+        description="This service's OIDC client_id for client_credentials"
+    )
+    OIDC_CLIENT_SECRET: str | None = Field(
+        default=None,
+        description="This service's OIDC client_secret for client_credentials"
     )
 
     # ========================================
