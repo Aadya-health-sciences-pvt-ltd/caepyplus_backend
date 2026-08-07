@@ -3,7 +3,7 @@ name: Deploy Caepy API to ECS
 on:
   push:
     branches:
-      - dev
+      - dev_oidc
   workflow_dispatch:
 
 env:
