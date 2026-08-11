@@ -18,8 +18,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Copy project metadata first (layer caching)
 COPY pyproject.toml uv.lock README.md ./
 
-# Install runtime deps from the lockfile (includes pyjwt[crypto] for OIDC)
-RUN uv sync --frozen --no-dev
+# Install runtime deps only (skip local package — needs src/ + static CSV)
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy all project files
 COPY . .
