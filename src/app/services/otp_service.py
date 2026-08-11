@@ -417,11 +417,12 @@ class OTPService:
                     }
                 }
 
-                headers = await self._oidc.authorization_headers(Resource.COMMUNICATION)
-                response = await self.http_client.post(
+                response = await self._oidc.request(
+                    "POST",
                     self.settings.LINQMD_COMMUNICATION_SERVICE_URL,
+                    Resource.COMMUNICATION,
+                    client=self.http_client,
                     json=payload,
-                    headers=headers,
                 )
 
                 # Log the raw response from communication service

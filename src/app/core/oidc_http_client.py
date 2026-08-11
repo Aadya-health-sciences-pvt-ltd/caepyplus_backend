@@ -82,17 +82,28 @@ class OidcHttpClient:
     def _enabled(self) -> bool:
         return bool(self._issuer and self._client_id and self._client_secret)
 
-    async def get_token(self, resource_key: str, scope: Optional[str] = None) -> Optional[str]:
+    def _invalidate(self, resource: str) -> None:
+        self._tokens.pop(resource, None)
+
+    async def get_token(
+        self,
+        resource_key: str,
+        scope: Optional[str] = None,
+        *,
+        resource_identifier: Optional[str] = None,
+        force_refresh: bool = False,
+    ) -> Optional[str]:
         if not self._enabled:
             return None
 
-        resource = resolve_oidc_resource(resource_key)
+        resource = (resource_identifier or resolve_oidc_resource(resource_key) or "").rstrip("/")
         if not resource:
             return None
 
-        cached = self._tokens.get(resource)
-        if cached and cached[1] > time.time() + _EXPIRY_SLACK_SECONDS:
-            return cached[0]
+        if not force_refresh:
+            cached = self._tokens.get(resource)
+            if cached and cached[1] > time.time() + _EXPIRY_SLACK_SECONDS:
+                return cached[0]
 
         return await self._fetch_token(resource, scope or _DEFAULT_SCOPES.get(resource_key, ""))
 
@@ -119,12 +130,60 @@ class OidcHttpClient:
         return access_token
 
     async def authorization_headers(
-        self, resource_key: str, scope: Optional[str] = None
+        self,
+        resource_key: str,
+        scope: Optional[str] = None,
+        *,
+        resource_identifier: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> dict:
-        token = await self.get_token(resource_key, scope)
+        token = await self.get_token(
+            resource_key,
+            scope,
+            resource_identifier=resource_identifier,
+            force_refresh=force_refresh,
+        )
         if not token:
             return {}
         return {"Authorization": f"Bearer {token}"}
+
+    async def request(
+        self,
+        method: str,
+        url: str,
+        resource_key: str,
+        scope: Optional[str] = None,
+        *,
+        resource_identifier: Optional[str] = None,
+        client: Optional[httpx.AsyncClient] = None,
+        **kwargs,
+    ) -> httpx.Response:
+        resource = (
+            resource_identifier
+            or resolve_oidc_resource(resource_key)
+            or ""
+        ).rstrip("/")
+        if not resource:
+            raise ValueError(f"OIDC resource not configured for {resource_key}")
+
+        http = client or self._http
+        extra_headers = dict(kwargs.pop("headers", {}) or {})
+
+        async def _do_request(force_refresh: bool) -> httpx.Response:
+            auth = await self.authorization_headers(
+                resource_key,
+                scope,
+                resource_identifier=resource,
+                force_refresh=force_refresh,
+            )
+            headers = {**auth, **extra_headers}
+            return await http.request(method, url, headers=headers, **kwargs)
+
+        response = await _do_request(force_refresh=False)
+        if response.status_code == 401:
+            self._invalidate(resource)
+            response = await _do_request(force_refresh=True)
+        return response
 
     async def close(self) -> None:
         await self._http.aclose()
