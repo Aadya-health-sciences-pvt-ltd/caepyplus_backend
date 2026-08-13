@@ -14,10 +14,14 @@ import json
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+import jwt as pyjwt
 from fastapi import Depends, Request
+from jwt import PyJWKClient
 
 from .config import Settings, get_settings
 from .exceptions import UnauthorizedError
+
+_jwks_clients: dict[str, PyJWKClient] = {}
 
 
 def _base64url_decode(data: str) -> bytes:
@@ -27,14 +31,66 @@ def _base64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + padding)
 
 
-def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
-    """Decode and validate an HS256 JWT.
+def _decode_jwt_header_alg(token: str) -> str | None:
+    """Unverified structural peek only, to route to the right verifier below.
+    Real verification (signature/exp/aud/iss) always happens after this."""
 
-    Mirrors the encoding used in auth._encode_jwt:
-    - Verifies signature with SECRET_KEY
-    - Ensures algorithm is HS256
-    - Checks the exp claim against current UTC time
+    try:
+        header_b64 = token.split(".")[0]
+        header = json.loads(_base64url_decode(header_b64))
+    except Exception:
+        return None
+    return header.get("alg") if isinstance(header, dict) else None
+
+
+def _get_jwks_client(issuer: str) -> PyJWKClient:
+    client = _jwks_clients.get(issuer)
+    if client is None:
+        client = PyJWKClient(f"{issuer}/jwks", cache_keys=True)
+        _jwks_clients[issuer] = client
+    return client
+
+
+def _decode_oidc_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
+    """Verifies an RS256 OIDC access token against linqmd_workspace_backend_code's
+    JWKS: signature, expiry, issuer, and audience (scoped to this service's own
+    resource identifier - what makes a token minted for another service unusable
+    here)."""
+
+    assert settings.OIDC_ISSUER  # guarded by caller
+    try:
+        signing_key = _get_jwks_client(settings.OIDC_ISSUER).get_signing_key_from_jwt(token)
+        return pyjwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            issuer=settings.OIDC_ISSUER,
+            audience=settings.OIDC_AUDIENCE,
+        )
+    except pyjwt.PyJWTError as exc:
+        raise UnauthorizedError(
+            message="Invalid or expired token",
+            error_code="INVALID_TOKEN",
+        ) from exc
+
+
+def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
+    """Decode and validate a Bearer JWT.
+
+    OIDC_ENABLED false/unset (default): unchanged from before - HS256 only,
+    verified against SECRET_KEY, mirroring the encoding used in auth._encode_jwt.
+
+    OIDC_ENABLED true: also accepts RS256 tokens issued by
+    linqmd_workspace_backend_code's OIDC Authorization Server, routed to based
+    on the token's own (unverified) alg header - never a static choice, so a
+    legacy HS256 token from this service's own login flow keeps working
+    unchanged either way.
     """
+
+    if settings.OIDC_ENABLED and settings.OIDC_ISSUER:
+        alg = _decode_jwt_header_alg(token)
+        if alg == "RS256":
+            return _decode_oidc_jwt(token, settings=settings)
 
     try:
         header_b64, payload_b64, signature_b64 = token.split(".")

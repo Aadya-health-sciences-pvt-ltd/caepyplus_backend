@@ -29,6 +29,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0,<1.0.0",
     "pydantic>=2.10.0,<3.0.0",
     "pydantic-settings>=2.6.0,<3.0.0",
+    "email-validator>=2.0,<3.0",
     
     # Database
     "sqlalchemy[asyncio]>=2.0.36,<3.0.0",
@@ -48,9 +49,16 @@ dependencies = [
     "pyyaml>=6.0.0,<7.0.0",            # YAML parsing for prompts + email templates
     "aiosmtplib>=3.0.0,<4.0.0",        # Async SMTP for outbound email notifications
     "python-docx>=1.1.0",              # Text extraction from .docx resume uploads
-    # JWT is implemented with stdlib hmac+hashlib (otp.py + security.py) — no
-    # python-jose or passlib needed.  Add passlib[bcrypt] if password hashing
-    # is ever introduced.
+    "aiofiles>=24.1.0,<25.0.0",         # Async file I/O (services/blob_storage_service.py)
+    "aiohttp>=3.10.0,<4.0.0",           # Async HTTP client (services/blob_storage_service.py)
+    "aioboto3>=13.0.0,<14.0.0",         # Async S3 client (blob storage)
+    "redis>=5.0.0,<6.0.0",              # OTP storage / caching
+    "python-dotenv>=1.0.1,<2.0.0",      # .env loading
+    "firebase-admin>=6.5.0,<7.0.0",     # Google Sign-In verification
+    # Legacy JWT is implemented with stdlib hmac+hashlib (otp.py + security.py).
+    # pyjwt is added solely for verifying OIDC-issued RS256 tokens via JWKS
+    # (security.py _decode_jwt, when OIDC_ENABLED) - the legacy path is untouched.
+    "pyjwt[crypto]>=2.9.0,<2.10.0",
 ]
 
 [project.optional-dependencies]
