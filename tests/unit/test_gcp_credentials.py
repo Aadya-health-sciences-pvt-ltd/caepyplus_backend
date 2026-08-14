@@ -17,10 +17,10 @@ from src.app.services.gcp_credentials import (
 
 _FAKE_SA = {
     "type": "service_account",
-    "project_id": "linqmd-470410",
+    "project_id": "linqmd-stg",
     "private_key_id": "abc123",
     "private_key": "-----BEGIN PRIVATE KEY-----\\nFAKE\\n-----END PRIVATE KEY-----\\n",
-    "client_email": "caepy-plus@linqmd-470410.iam.gserviceaccount.com",
+    "client_email": "prod-caepy-api@linqmd-stg.iam.gserviceaccount.com",
     "client_id": "117585752351628625391",
     "token_uri": "https://oauth2.googleapis.com/token",
 }

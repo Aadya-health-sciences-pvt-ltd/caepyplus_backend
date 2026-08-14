@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     # ========================================
     GOOGLE_CLOUD_PROJECT: str = Field(
         default="",
-        description="Google Cloud project ID for Vertex AI (e.g. linqmd-470410)"
+        description="Google Cloud project ID for Vertex AI (e.g. linqmd-stg, linqmd-tf-dev)"
     )
     GOOGLE_CLOUD_LOCATION: str = Field(
         default="us-central1",
