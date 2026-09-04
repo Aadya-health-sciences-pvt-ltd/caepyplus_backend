@@ -213,7 +213,12 @@ python scripts/migrate.py baseline --upgrade
 | `002` | Has `lead_doctors`, no `blogs` |
 | `003` | Has blog tables, `users.phone` still `NOT NULL` |
 | `004` | `users.phone` nullable, `doctors.practice_segments` still `VARCHAR` |
-| `005` | `practice_segments` already `JSON` / `JSONB` (fully up to date) |
+| `005` | `practice_segments` already `JSON` / `JSONB` |
+| `006` | Has `doctor_linqmd_credentials` |
+| `007` | `verbal_intro_file` already `TEXT` |
+| `008` | Has `linq360` schema + dashboard table shells |
+| `009` | `workspace_doctor_dashboard` has business columns |
+| `010` | `workspace_doctor_dashboard.appointments_json` JSONB array (fully up to date) |
 
 ---
 
@@ -225,7 +230,12 @@ python scripts/migrate.py baseline --upgrade
 | `002` | `002_add_lead_doctors.py` | `lead_doctors` table |
 | `003` | `003_add_blog_comment_and_keyword_models.py` | `blogs`, `blog_comments`, `blog_keywords` |
 | `004` | `004_users_phone_nullable.py` | `users.phone` nullable |
-| `005` | `005_practice_segments_json.py` | `doctors.practice_segments` → JSONB (head) |
+| `005` | `005_practice_segments_json.py` | `doctors.practice_segments` → JSONB |
+| `006` | `006_add_doctor_linqmd_credentials.py` | `doctor_linqmd_credentials` table |
+| `007` | `007_verbal_intro_file_text.py` | `doctors.verbal_intro_file` → TEXT |
+| `008` | `008_create_linq360_schema.py` | PostgreSQL schema `linq360` + `workspace_doctor_dashboard` / `doctor_dashboard` shells |
+| `009` | `009_workspace_doctor_dashboard_columns.py` | Rename PK to `appointment_id` + appointment/patient columns on `workspace_doctor_dashboard` |
+| `010` | `010_workspace_appointments_json.py` | Add `appointments_json` JSONB array column on `workspace_doctor_dashboard` (head) |
 
 ### Tables Created
 
@@ -238,8 +248,11 @@ python scripts/migrate.py baseline --upgrade
 | `doctor_status_history` | Immutable audit log |
 | `dropdown_options` | Curated dropdown values with approval workflow |
 | `users` | RBAC user accounts |
+| `linq360.workspace_doctor_dashboard` | Workspace appointments + `appointments_json` array |
+| `linq360.doctor_dashboard` | Linq360 doctor dashboard shell (columns TBD) |
 
-> See [database_schema.md](database_schema.md) for full column-level documentation.
+> See [database_schema.md](database_schema.md) for full column-level documentation of core tables.
+> See [linq360_progress.md](linq360_progress.md) for Linq360 step-by-step progress.
 
 ---
 
@@ -259,7 +272,7 @@ python scripts/migrate.py baseline --upgrade
 
 ## Key Design Decisions
 
-1. **Initial migration + incremental revisions** — `001` creates the base schema; `002`–`005` apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
+1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`010`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
 4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.
