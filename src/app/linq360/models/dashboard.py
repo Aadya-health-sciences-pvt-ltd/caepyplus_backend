@@ -18,10 +18,10 @@ class WorkspaceDoctorDashboard(Base):
     appointment_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     workspace_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    appointments_json: Mapped[list[dict[str, Any]]] = mapped_column(
+    appointments_json: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
-        default=list,
+        default=dict,
     )
 
 

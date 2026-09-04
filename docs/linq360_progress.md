@@ -181,7 +181,7 @@ Kept only four columns on `linq360.workspace_doctor_dashboard`:
 | `appointment_id` | `INTEGER` autoincrement PK |
 | `workspace_id` | `INTEGER` NOT NULL, indexed |
 | `user_id` | `INTEGER` NOT NULL, indexed |
-| `appointments_json` | JSONB array (unchanged) |
+| `appointments_json` | JSONB (shape later changed to a single object in Step 5) |
 
 Dropped flat columns (`patient_meta_code`, `appointment_type`, `patient_name`, `first_name`, `last_name`, `consultation_type`, `time_slot`). Appointment details stay in `appointments_json`.
 
@@ -195,7 +195,37 @@ python -m alembic upgrade head
 
 ---
 
-## Step 5 — `doctor_dashboard` columns (pending)
+## Step 5 — `appointments_json` is a single object (done)
+
+**Date:** 2026-09-04
+
+`appointments_json` is no longer an array. Each row stores **one JSON object**.
+
+Example:
+
+```json
+{
+  "patient_meta_code": "PAT-001",
+  "appointment_type": "BOOKING",
+  "patient_name": "Rajesh Kumar",
+  "first_name": "Rajesh",
+  "last_name": "Kumar",
+  "consultation_type": "in-person",
+  "time_slot": "10:30 AM"
+}
+```
+
+Alembic **`012`** converts existing arrays by taking the first element (or `{}` if empty) and sets the server default to `{}`.
+
+### Apply migration
+
+```bash
+python -m alembic upgrade head
+```
+
+---
+
+## Step 6 — `doctor_dashboard` columns (pending)
 
 Waiting on column definitions for `doctor_dashboard`.
 

@@ -219,7 +219,8 @@ python scripts/migrate.py baseline --upgrade
 | `008` | Has `linq360` schema + dashboard table shells |
 | `009` | `workspace_doctor_dashboard` has business columns |
 | `010` | `workspace_doctor_dashboard.appointments_json` JSONB array |
-| `011` | `workspace_doctor_dashboard` trimmed to appointment_id / workspace_id / user_id / appointments_json (fully up to date) |
+| `011` | `workspace_doctor_dashboard` trimmed to appointment_id / workspace_id / user_id / appointments_json |
+| `012` | `appointments_json` is a single JSON object, not an array (fully up to date) |
 
 ---
 
@@ -237,7 +238,8 @@ python scripts/migrate.py baseline --upgrade
 | `008` | `008_create_linq360_schema.py` | PostgreSQL schema `linq360` + `workspace_doctor_dashboard` / `doctor_dashboard` shells |
 | `009` | `009_workspace_doctor_dashboard_columns.py` | Rename PK to `appointment_id` + appointment/patient columns on `workspace_doctor_dashboard` |
 | `010` | `010_workspace_appointments_json.py` | Add `appointments_json` JSONB array column on `workspace_doctor_dashboard` |
-| `011` | `011_workspace_dashboard_trim_columns.py` | Trim `workspace_doctor_dashboard` to four columns (head) |
+| `011` | `011_workspace_dashboard_trim_columns.py` | Trim `workspace_doctor_dashboard` to four columns |
+| `012` | `012_appointments_json_object.py` | `appointments_json` stored as a single object, not an array (head) |
 
 ### Tables Created
 
@@ -274,7 +276,7 @@ python scripts/migrate.py baseline --upgrade
 
 ## Key Design Decisions
 
-1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`011`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
+1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`012`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
 4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.

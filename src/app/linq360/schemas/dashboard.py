@@ -7,7 +7,7 @@ from ..models.enums import AppointmentType, ConsultationType
 
 
 class WorkspaceAppointmentItem(BaseModel):
-    """One appointment object inside ``appointments_json``."""
+    """Single appointment object stored in ``appointments_json``."""
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -18,9 +18,3 @@ class WorkspaceAppointmentItem(BaseModel):
     last_name: str = Field(..., max_length=255)
     consultation_type: ConsultationType
     time_slot: str = Field(..., max_length=255)
-
-
-class WorkspaceAppointmentsPayload(BaseModel):
-    """Array of appointments stored in ``appointments_json``."""
-
-    appointments: list[WorkspaceAppointmentItem] = Field(default_factory=list)
