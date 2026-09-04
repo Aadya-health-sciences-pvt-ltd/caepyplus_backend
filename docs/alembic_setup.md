@@ -218,7 +218,8 @@ python scripts/migrate.py baseline --upgrade
 | `007` | `verbal_intro_file` already `TEXT` |
 | `008` | Has `linq360` schema + dashboard table shells |
 | `009` | `workspace_doctor_dashboard` has business columns |
-| `010` | `workspace_doctor_dashboard.appointments_json` JSONB array (fully up to date) |
+| `010` | `workspace_doctor_dashboard.appointments_json` JSONB array |
+| `011` | `workspace_doctor_dashboard` trimmed to appointment_id / workspace_id / user_id / appointments_json (fully up to date) |
 
 ---
 
@@ -235,7 +236,8 @@ python scripts/migrate.py baseline --upgrade
 | `007` | `007_verbal_intro_file_text.py` | `doctors.verbal_intro_file` → TEXT |
 | `008` | `008_create_linq360_schema.py` | PostgreSQL schema `linq360` + `workspace_doctor_dashboard` / `doctor_dashboard` shells |
 | `009` | `009_workspace_doctor_dashboard_columns.py` | Rename PK to `appointment_id` + appointment/patient columns on `workspace_doctor_dashboard` |
-| `010` | `010_workspace_appointments_json.py` | Add `appointments_json` JSONB array column on `workspace_doctor_dashboard` (head) |
+| `010` | `010_workspace_appointments_json.py` | Add `appointments_json` JSONB array column on `workspace_doctor_dashboard` |
+| `011` | `011_workspace_dashboard_trim_columns.py` | Trim `workspace_doctor_dashboard` to four columns (head) |
 
 ### Tables Created
 
@@ -248,7 +250,7 @@ python scripts/migrate.py baseline --upgrade
 | `doctor_status_history` | Immutable audit log |
 | `dropdown_options` | Curated dropdown values with approval workflow |
 | `users` | RBAC user accounts |
-| `linq360.workspace_doctor_dashboard` | Workspace appointments + `appointments_json` array |
+| `linq360.workspace_doctor_dashboard` | `appointment_id`, `workspace_id`, `user_id`, `appointments_json` |
 | `linq360.doctor_dashboard` | Linq360 doctor dashboard shell (columns TBD) |
 
 > See [database_schema.md](database_schema.md) for full column-level documentation of core tables.
@@ -272,7 +274,7 @@ python scripts/migrate.py baseline --upgrade
 
 ## Key Design Decisions
 
-1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`010`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
+1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`011`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
 4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.

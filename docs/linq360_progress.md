@@ -168,7 +168,34 @@ python -m alembic upgrade head
 
 ---
 
-## Step 4 — `doctor_dashboard` columns (pending)
+## Step 4 — trim `workspace_doctor_dashboard` columns (done)
+
+**Date:** 2026-09-04
+
+### What we did
+
+Kept only four columns on `linq360.workspace_doctor_dashboard`:
+
+| Column | Type |
+|--------|------|
+| `appointment_id` | `INTEGER` autoincrement PK |
+| `workspace_id` | `INTEGER` NOT NULL, indexed |
+| `user_id` | `INTEGER` NOT NULL, indexed |
+| `appointments_json` | JSONB array (unchanged) |
+
+Dropped flat columns (`patient_meta_code`, `appointment_type`, `patient_name`, `first_name`, `last_name`, `consultation_type`, `time_slot`). Appointment details stay in `appointments_json`.
+
+No FKs (no workspace table yet; linq360 stays independent of `public.users`). Alembic **`011`**. Pydantic sample JSON shape unchanged.
+
+### Apply migration
+
+```bash
+python -m alembic upgrade head
+```
+
+---
+
+## Step 5 — `doctor_dashboard` columns (pending)
 
 Waiting on column definitions for `doctor_dashboard`.
 
