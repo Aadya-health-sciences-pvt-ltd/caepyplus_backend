@@ -18,6 +18,11 @@ from ....core.exceptions import AIServiceError, ExtractionError
 from ....services.gemini_service import GeminiService, get_gemini_service
 from ....db.session import DbSession
 from ....models.blog import Blog, BlogKeyword, BlogComment
+from ....models.enums import CommentStatus
+from ....linq360.services.content_aggregator_service import (
+    ContentAggregatorService,
+    blog_comment_delta,
+)
 from ....schemas.blog import (
     BlogResponse,
     BlogCreate,
@@ -32,6 +37,8 @@ from ....schemas.blog import (
     AITopicCard,
     AIBlogContentGenerateRequest,
     AIBlogContentResponse,
+    DrupalPodcastCommentWebhookPayload,
+    DrupalReviewWebhookPayload,
 )
 from ....repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
 from ....repositories.onboarding_repository import OnboardingRepository
@@ -286,7 +293,14 @@ async def update_comment_status(
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found or access denied")
 
-    comment.status = payload.status
+    old_status = comment.status
+    new_status = (
+        payload.status.value if hasattr(payload.status, "value") else str(payload.status)
+    )
+    comment.status = new_status
+    delta = blog_comment_delta(old_status, new_status)
+    if delta != 0:
+        await ContentAggregatorService(db).adjust_blog_comments(doctor_id, delta)
     await db.commit()
 
     return {
@@ -651,11 +665,17 @@ async def delete_blog(
     if blog is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
 
+    approved_count = sum(
+        1 for c in (blog.comments or []) if c.status == CommentStatus.APPROVED.value
+    )
+
     # Delete keywords first due to foreign key constraints if not handled by cascade
     await db.execute(delete(BlogKeyword).where(BlogKeyword.blog_id == blog_id))
     
     # Delete the blog
     await db.delete(blog)
+    if approved_count:
+        await ContentAggregatorService(db).adjust_blog_comments(doctor_id, -approved_count)
     await db.commit()
 
     return {
@@ -725,8 +745,237 @@ async def upload_blog_image(
 
 @webhook_router.post("/drupal/comments")
 async def handle_drupal_comment_webhook() -> dict[str, str]:
+    """Blog comments are moderated in-app; counts update on approve/reject there."""
     return {"status": "received"}
 
 @webhook_router.post("/drupal/nodes")
 async def handle_drupal_node_webhook() -> dict[str, str]:
     return {"status": "received"}
+
+
+async def _resolve_doctor_id_for_webhook(
+    db: DbSession,
+    doctor_id: int | None,
+    linqmd_user_id: str | None,
+) -> int:
+    """Resolve CAEPY ``doctors.id`` for Drupal webhooks.
+
+    Identity bridge (not workspace user_mapping):
+      Drupal reviews.user_id / ``linqmd_user_id``
+        → ``doctor_linqmd_credentials.linqmd_user_id``
+        → ``doctor_id`` (``doctors.id``)
+
+    1. ``payload.doctor_id`` present → must exist in ``doctors``
+    2. Else ``payload.linqmd_user_id`` → credentials lookup → doctor must exist
+    3. Else → 422
+    """
+    from ....repositories.doctor_repository import DoctorRepository
+
+    doctor_repo = DoctorRepository(db)
+
+    if doctor_id is not None:
+        doctor = await doctor_repo.get_by_id(int(doctor_id))
+        if doctor is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No CAEPY doctor found for doctor_id={doctor_id}",
+            )
+        return int(doctor.id)
+
+    if linqmd_user_id is not None and str(linqmd_user_id).strip():
+        uid = str(linqmd_user_id).strip()
+        creds = await LinqmdCredentialsRepository(db).get_by_linqmd_user_id(uid)
+        if creds is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"No doctor_linqmd_credentials row for linqmd_user_id={uid!r}. "
+                    "Link Practice Hub Drupal uid before sending review webhooks."
+                ),
+            )
+        doctor = await doctor_repo.get_by_id(int(creds.doctor_id))
+        if doctor is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"Credentials exist for linqmd_user_id={uid!r} "
+                    f"(doctor_id={creds.doctor_id}) but no doctors row found"
+                ),
+            )
+        return int(doctor.id)
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="Provide doctor_id or linqmd_user_id (Drupal Practice Hub uid)",
+    )
+
+
+def _action_to_delta(action: str) -> int:
+    """Map Drupal moderation action to aggregator delta.
+
+    Deny/reject of a pending item is a no-op (never counted). Use unpublish/delete
+    only when the item was previously counted.
+    """
+    normalized = action.strip().lower()
+    if normalized in ("approve", "approved", "publish", "published"):
+        return 1
+    if normalized in ("unpublish", "unpublished", "delete", "deleted"):
+        return -1
+    if normalized in ("deny", "denied", "reject", "rejected"):
+        return 0
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Unsupported action: {action}",
+    )
+
+
+@webhook_router.post("/drupal/podcast-comments")
+async def handle_drupal_podcast_comment_webhook(
+    payload: DrupalPodcastCommentWebhookPayload,
+    db: DbSession,
+) -> dict[str, Any]:
+    """Adjust podcast_comments_aggregator from Drupal moderation events."""
+    doctor_id = await _resolve_doctor_id_for_webhook(db, payload.doctor_id, payload.linqmd_user_id)
+    delta = _action_to_delta(payload.action)
+    if delta == 0:
+        return {
+            "status": "ok",
+            "doctor_id": doctor_id,
+            "delta": 0,
+            "message": "No aggregator change for deny/reject of uncounted item",
+        }
+    row = await ContentAggregatorService(db).adjust_podcast_comments(doctor_id, delta)
+    await db.commit()
+    return {
+        "status": "ok",
+        "doctor_id": doctor_id,
+        "comment_count": row.comment_count,
+        "delta": delta,
+    }
+
+
+async def _optional_existing_doctor_id(db: DbSession, doctor_id: int | None) -> int | None:
+    """Return ``doctors.id`` only when that CAEPY row already exists.
+
+    A missing doctor does not fail the request. Credentials are not required.
+    """
+    if doctor_id is None:
+        return None
+    from ....repositories.doctor_repository import DoctorRepository
+
+    doctor = await DoctorRepository(db).get_by_id(int(doctor_id))
+    if doctor is None:
+        return None
+    return int(doctor.id)
+
+
+def _require_review_linqmd_user_id(linqmd_user_id: str | None) -> str:
+    if linqmd_user_id is None or not str(linqmd_user_id).strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="linqmd_user_id is required (Drupal reviews.user_id)",
+        )
+    return str(linqmd_user_id).strip()
+
+
+@webhook_router.post("/drupal/reviews")
+async def handle_drupal_reviews_webhook(
+    payload: DrupalReviewWebhookPayload,
+    db: DbSession,
+) -> dict[str, Any]:
+    """Drupal review events keyed by ``linqmd_user_id`` (Drupal uid).
+
+    Pending inbox does not require ``doctors`` or ``doctor_linqmd_credentials``.
+    Published ``adjust_reviews`` runs only when ``doctor_id`` already exists.
+    """
+    linqmd_user_id = _require_review_linqmd_user_id(payload.linqmd_user_id)
+    doctor_id = await _optional_existing_doctor_id(db, payload.doctor_id)
+    action = payload.action.strip().lower()
+    svc = ContentAggregatorService(db)
+
+    if action in ("submit", "submitted"):
+        row = await svc.adjust_pending_reviews(linqmd_user_id, 1, doctor_id=doctor_id)
+        await db.commit()
+        return {
+            "status": "ok",
+            "linqmd_user_id": linqmd_user_id,
+            "doctor_id": doctor_id,
+            "pending_count": row.pending_count,
+            "pending_delta": 1,
+        }
+
+    if action in ("approve", "approved", "publish", "published"):
+        if doctor_id is not None and payload.rating is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="rating is required to update published review metrics",
+            )
+        pending_row = await svc.adjust_pending_reviews(linqmd_user_id, -1, doctor_id=doctor_id)
+        body: dict[str, Any] = {
+            "status": "ok",
+            "linqmd_user_id": linqmd_user_id,
+            "doctor_id": doctor_id,
+            "pending_count": pending_row.pending_count,
+            "pending_delta": -1,
+        }
+        if doctor_id is not None:
+            pub_row = await svc.adjust_reviews(
+                doctor_id,
+                payload.rating if payload.rating is not None else 0,
+                1,
+                linqmd_user_id=linqmd_user_id,
+            )
+            body["review_count"] = pub_row.review_count
+            body["avg_rating"] = float(pub_row.avg_rating) if pub_row.avg_rating is not None else None
+            body["published_delta"] = 1
+        else:
+            body["published_delta"] = 0
+            body["message"] = "No CAEPY doctor; published metrics unchanged"
+        await db.commit()
+        return body
+
+    if action in ("reject", "rejected", "deny", "denied", "delete_pending"):
+        row = await svc.adjust_pending_reviews(linqmd_user_id, -1, doctor_id=doctor_id)
+        await db.commit()
+        return {
+            "status": "ok",
+            "linqmd_user_id": linqmd_user_id,
+            "doctor_id": doctor_id,
+            "pending_count": row.pending_count,
+            "pending_delta": -1,
+        }
+
+    if action in ("unpublish", "unpublished", "delete", "deleted"):
+        if doctor_id is None:
+            return {
+                "status": "ok",
+                "linqmd_user_id": linqmd_user_id,
+                "doctor_id": None,
+                "published_delta": 0,
+                "message": "No CAEPY doctor; published metrics unchanged",
+            }
+        if payload.rating is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="rating is required to update published review metrics",
+            )
+        row = await svc.adjust_reviews(
+            doctor_id,
+            payload.rating,
+            -1,
+            linqmd_user_id=linqmd_user_id,
+        )
+        await db.commit()
+        return {
+            "status": "ok",
+            "linqmd_user_id": linqmd_user_id,
+            "doctor_id": doctor_id,
+            "review_count": row.review_count,
+            "avg_rating": float(row.avg_rating) if row.avg_rating is not None else None,
+            "published_delta": -1,
+        }
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Unsupported action: {payload.action}",
+    )

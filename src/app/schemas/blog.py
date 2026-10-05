@@ -171,3 +171,31 @@ class DrupalCommentWebhookPayload(BaseModel):
     drupal_node_id: str
     author_name: str
     content: str
+
+
+class DrupalPodcastCommentWebhookPayload(BaseModel):
+    """Drupal podcast comment moderation event (aggregator contract).
+
+    Provide ``doctor_id`` (CAEPY doctors.id) and/or ``linqmd_user_id``
+    (resolved via doctor_linqmd_credentials).
+    """
+
+    action: str  # approve | unpublish | delete
+    doctor_id: int | None = None
+    linqmd_user_id: str | None = None
+    comment_id: str | None = None
+
+
+class DrupalReviewWebhookPayload(BaseModel):
+    """Drupal review moderation event.
+
+    ``linqmd_user_id`` (Drupal ``reviews.user_id``) is required and keys the
+    pending inbox. ``doctor_id`` is optional and used only when that CAEPY
+    doctor already exists. Missing credentials do not fail the request.
+    """
+
+    action: str
+    linqmd_user_id: str | None = None
+    rating: float | None = None
+    doctor_id: int | None = None
+    review_id: str | None = None

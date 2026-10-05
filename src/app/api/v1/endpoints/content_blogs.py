@@ -12,7 +12,11 @@ from sqlalchemy import delete, select
 from ....core.rbac import ContentCreatorUser
 from ....db.session import DbSession
 from ....models.blog import Blog, BlogComment, BlogKeyword
-from ....models.enums import BlogStatus
+from ....models.enums import BlogStatus, CommentStatus
+from ....linq360.services.content_aggregator_service import (
+    ContentAggregatorService,
+    blog_comment_delta,
+)
 from ....repositories.doctor_repository import DoctorRepository
 from ....repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
 from ....schemas.blog import (
@@ -141,7 +145,14 @@ async def content_update_comment_status(
     comment = result.scalar_one_or_none()
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found or access denied")
-    comment.status = payload.status
+    old_status = comment.status
+    new_status = (
+        payload.status.value if hasattr(payload.status, "value") else str(payload.status)
+    )
+    comment.status = new_status
+    delta = blog_comment_delta(old_status, new_status)
+    if delta != 0:
+        await ContentAggregatorService(db).adjust_blog_comments(doctor_id, delta)
     await db.commit()
     return {
         "status": "success",
@@ -432,8 +443,13 @@ async def content_delete_blog(
     blog = result.scalar_one_or_none()
     if blog is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
+    approved_count = sum(
+        1 for c in (blog.comments or []) if c.status == CommentStatus.APPROVED.value
+    )
     await db.execute(delete(BlogKeyword).where(BlogKeyword.blog_id == blog_id))
     await db.delete(blog)
+    if approved_count:
+        await ContentAggregatorService(db).adjust_blog_comments(doctor_id, -approved_count)
     await db.commit()
     return {
         "status": "success",

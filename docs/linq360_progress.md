@@ -225,7 +225,53 @@ python -m alembic upgrade head
 
 ---
 
-## Step 6 — `doctor_dashboard` columns (pending)
+## Step 6 — content aggregators + todays_glance (done)
+
+**Date:** 2026-09-29
+
+### What we did
+
+1. Public source aggregators: `blog_comments_aggregator`, `podcast_comments_aggregator`,
+   `reviews_summary_aggregator` (Alembic **`013`**).
+2. `linq360.content_source_aggregator` with UNIQUE `(doctor_id, source)`.
+3. `todays_glance` JSONB on `workspace_doctor_dashboard` (Alembic **`014`**), refreshed
+   with `WHERE user_id = doctor_id`.
+4. `ContentAggregatorService` + blog comment approve/reject/delete wiring.
+5. `GET /api/v1/linq360/doctors/{doctor_id}/content-engagement`.
+6. Drupal webhook contracts for podcast comments and reviews.
+
+See [content_aggregators.md](content_aggregators.md).
+
+**Correction (same day):** `todays_glance` is the **pending moderation inbox**
+(`content.reviews.pending_count`, etc.), not approved engagement totals.
+Phase 1 wires `adjust_pending_reviews` + reviews webhook submit/approve/reject.
+Published metrics stay on aggregators + content-engagement API. Alembic **`015`**
+adds `reviews_summary_aggregator.pending_count`.
+
+**Identity (updated):** pending reviews are keyed by Drupal `linqmd_user_id`
+(`reviews_pending_aggregator`, Alembic **`016`**). Credentials and a CAEPY
+`doctors` row are not required. Glance updates
+`workspace_doctor_dashboard` where `user_id` equals that numeric Drupal uid.
+Published metrics still use `doctors.id` only when that doctor already exists.
+
+**Glance read (updated):** LinQ360 does not count Drupal MySQL. Practice Hub
+exposes `GET /api/linq360/pending-counts/{user_id}`.
+`POST /v1/linq360/glance/sync` writes the three pending counts into
+`linq360.workspace_doctor_dashboard.todays_glance` where `user_id` is that
+Drupal uid. `GET /v1/linq360/glance` reads that JSON only (zeros when no
+dashboard row). The public `content_pending_glance` table is dropped
+(Alembic **`018`**).
+See [content_aggregators.md](content_aggregators.md).
+
+### Apply migration
+
+```bash
+python -m alembic upgrade head
+```
+
+---
+
+## Step 7 — `doctor_dashboard` columns (pending)
 
 Waiting on column definitions for `doctor_dashboard`.
 
@@ -233,7 +279,5 @@ Waiting on column definitions for `doctor_dashboard`.
 
 ## Later steps (not started)
 
-- Repositories / services
-- API endpoints under `src/app/linq360/api/`
-- Dashboard aggregation and schedule data
+- Remaining dashboard card aggregations (appointments, requests, messages, payments)
 - Regenerate / extend `docs/database_schema.md` for `linq360` tables when both tables have columns

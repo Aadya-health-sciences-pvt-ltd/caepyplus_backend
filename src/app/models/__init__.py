@@ -10,7 +10,15 @@ from .onboarding import (
 from .user import User
 from .blog import Blog, BlogKeyword, BlogComment
 from .linqmd_credentials import DoctorLinqmdCredentials
-from ..linq360.models import DoctorDashboard, WorkspaceDoctorDashboard
+from ..linq360.models import (
+    BlogCommentsAggregator,
+    ContentSourceAggregator,
+    DoctorDashboard,
+    PodcastCommentsAggregator,
+    ReviewsPendingAggregator,
+    ReviewsSummaryAggregator,
+    WorkspaceDoctorDashboard,
+)
 
 __all__ = [
     "Doctor",
@@ -26,4 +34,9 @@ __all__ = [
     "DoctorLinqmdCredentials",
     "WorkspaceDoctorDashboard",
     "DoctorDashboard",
+    "BlogCommentsAggregator",
+    "PodcastCommentsAggregator",
+    "ReviewsPendingAggregator",
+    "ReviewsSummaryAggregator",
+    "ContentSourceAggregator",
 ]

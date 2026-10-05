@@ -220,7 +220,13 @@ python scripts/migrate.py baseline --upgrade
 | `009` | `workspace_doctor_dashboard` has business columns |
 | `010` | `workspace_doctor_dashboard.appointments_json` JSONB array |
 | `011` | `workspace_doctor_dashboard` trimmed to appointment_id / workspace_id / user_id / appointments_json |
-| `012` | `appointments_json` is a single JSON object, not an array (fully up to date) |
+| `012` | `appointments_json` is a single JSON object, not an array |
+| `013` | Has content aggregator tables (`blog_comments_aggregator`, etc.) |
+| `014` | `todays_glance` already on `workspace_doctor_dashboard` |
+| `015` | `reviews_summary_aggregator.pending_count` present |
+| `016` | `reviews_pending_aggregator` keyed by `linqmd_user_id` |
+| `017` | `content_pending_glance` (dropped in `018`) |
+| `018` | Glance counts live in `workspace_doctor_dashboard.todays_glance` (fully up to date) |
 
 ---
 
@@ -239,7 +245,13 @@ python scripts/migrate.py baseline --upgrade
 | `009` | `009_workspace_doctor_dashboard_columns.py` | Rename PK to `appointment_id` + appointment/patient columns on `workspace_doctor_dashboard` |
 | `010` | `010_workspace_appointments_json.py` | Add `appointments_json` JSONB array column on `workspace_doctor_dashboard` |
 | `011` | `011_workspace_dashboard_trim_columns.py` | Trim `workspace_doctor_dashboard` to four columns |
-| `012` | `012_appointments_json_object.py` | `appointments_json` stored as a single object, not an array (head) |
+| `012` | `012_appointments_json_object.py` | `appointments_json` stored as a single object, not an array |
+| `013` | `013_content_aggregators.py` | Public source aggregators + `linq360.content_source_aggregator` |
+| `014` | `014_todays_glance.py` | Add `todays_glance` JSONB on `workspace_doctor_dashboard` |
+| `015` | `015_reviews_pending_count.py` | Add `pending_count` on `reviews_summary_aggregator` |
+| `016` | `016_reviews_pending_by_linqmd_user.py` | Pending reviews keyed by Drupal `linqmd_user_id` |
+| `017` | `017_content_pending_glance.py` | Temporary public glance table (dropped by `018`) |
+| `018` | `018_drop_content_pending_glance.py` | Drop public glance table; counts stay in `todays_glance` (head) |
 
 ### Tables Created
 
@@ -252,8 +264,12 @@ python scripts/migrate.py baseline --upgrade
 | `doctor_status_history` | Immutable audit log |
 | `dropdown_options` | Curated dropdown values with approval workflow |
 | `users` | RBAC user accounts |
-| `linq360.workspace_doctor_dashboard` | `appointment_id`, `workspace_id`, `user_id`, `appointments_json` |
+| `linq360.workspace_doctor_dashboard` | `appointment_id`, `workspace_id`, `user_id`, `appointments_json`, `todays_glance` |
 | `linq360.doctor_dashboard` | Linq360 doctor dashboard shell (columns TBD) |
+| `linq360.content_source_aggregator` | Per-doctor per-source content engagement rollup |
+| `blog_comments_aggregator` | Approved blog comment counts per doctor |
+| `podcast_comments_aggregator` | Approved podcast comment counts per doctor |
+| `reviews_pending_aggregator` | Pending review inbox keyed by Drupal `linqmd_user_id` |
 
 > See [database_schema.md](database_schema.md) for full column-level documentation of core tables.
 > See [linq360_progress.md](linq360_progress.md) for Linq360 step-by-step progress.
@@ -276,7 +292,7 @@ python scripts/migrate.py baseline --upgrade
 
 ## Key Design Decisions
 
-1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`012`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
+1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`018`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
 4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.

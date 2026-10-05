@@ -23,6 +23,11 @@ class WorkspaceDoctorDashboard(Base):
         nullable=False,
         default=dict,
     )
+    todays_glance: Mapped[dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
 
 
 class DoctorDashboard(Base):

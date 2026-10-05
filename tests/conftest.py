@@ -113,6 +113,8 @@ async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
         echo=False,
+        # Map linq360 schema to default so SQLite create_all works.
+        execution_options={"schema_translate_map": {"linq360": None}},
     )
 
     async with engine.begin() as conn:

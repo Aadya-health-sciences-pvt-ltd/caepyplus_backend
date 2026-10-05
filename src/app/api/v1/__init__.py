@@ -37,6 +37,7 @@ from .endpoints import (
     blogs,
 )
 from .endpoints.voice import voice_ws_router
+from ...linq360.api import content_engagement_router, glance_router
 
 router = APIRouter(prefix="/v1")
 
@@ -139,4 +140,20 @@ router.include_router(
 router.include_router(
     blogs.webhook_router,
     prefix="/webhooks",
+)
+
+# LinQ360 published engagement (JWT required)
+router.include_router(
+    content_engagement_router,
+    prefix="/linq360",
+    tags=["LinQ360"],
+    dependencies=[Depends(require_authentication)],
+)
+
+# Today-at-a-glance content badge. Public: linqmd_user_id only.
+# Do not attach JWT auth — a Drupal access token must not 401 this route.
+router.include_router(
+    glance_router,
+    prefix="/linq360",
+    tags=["LinQ360"],
 )

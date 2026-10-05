@@ -23,6 +23,13 @@ class LinqmdCredentialsRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_linqmd_user_id(self, linqmd_user_id: str) -> DoctorLinqmdCredentials | None:
+        stmt = select(DoctorLinqmdCredentials).where(
+            DoctorLinqmdCredentials.linqmd_user_id == str(linqmd_user_id)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def exists_for_doctor(self, doctor_id: int) -> bool:
         row = await self.get_by_doctor_id(doctor_id)
         return row is not None
