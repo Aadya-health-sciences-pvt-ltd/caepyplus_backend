@@ -1,8 +1,9 @@
 # Linq360 Progress
 
 Step-by-step record of Linq360 backend work. The doctor workspace dashboard UI
-(today-at-a-glance cards: appointments, requests, messages, payments; and
+(today-at-a-glance cards: appointments, requests, payments; and
 today’s schedule) is product context only — not implemented yet.
+Pending content counts are stored in `todays_glance` (Step 6). `messages` is not part of that JSON.
 
 ---
 
@@ -254,13 +255,34 @@ adds `reviews_summary_aggregator.pending_count`.
 `workspace_doctor_dashboard` where `user_id` equals that numeric Drupal uid.
 Published metrics still use `doctors.id` only when that doctor already exists.
 
-**Glance read (updated):** LinQ360 does not count Drupal MySQL. Practice Hub
-exposes `GET /api/linq360/pending-counts/{user_id}`.
-`POST /v1/linq360/glance/sync` writes the three pending counts into
+**Glance (updated 2026-10-05):** LinQ360 does not count Drupal MySQL and does
+not use `DRUPAL_DATABASE_URL`. Practice Hub exposes
+`GET {LINQMD_PRACTICE_HUB_API_URL}/api/linq360/pending-counts/{linqmd_user_id}`.
+
+`POST /v1/linq360/glance/sync` with `{ "linqmd_user_id": "884" }` calls that URL
+and writes the three pending counts into
 `linq360.workspace_doctor_dashboard.todays_glance` where `user_id` is that
-Drupal uid. `GET /v1/linq360/glance` reads that JSON only (zeros when no
-dashboard row). The public `content_pending_glance` table is dropped
-(Alembic **`018`**).
+Drupal uid. If no dashboard row exists, sync inserts one (`workspace_id` `0`,
+`appointments_json` `{}`) so the JSON can be stored. `appointments_json` is
+not filled by this sync.
+
+`GET /v1/linq360/glance?linqmd_user_id=884` reads `todays_glance.content` only.
+No row yet means all three counts are `0`. The public `content_pending_glance`
+table is dropped (Alembic **`018`**).
+
+```json
+{
+  "content": {
+    "reviews": { "pending_count": 2 },
+    "blog_comments": { "pending_count": 5 },
+    "podcast_comments": { "pending_count": 1 }
+  },
+  "appointments": {},
+  "requests": {},
+  "payments": {}
+}
+```
+
 See [content_aggregators.md](content_aggregators.md).
 
 ### Apply migration
@@ -279,5 +301,5 @@ Waiting on column definitions for `doctor_dashboard`.
 
 ## Later steps (not started)
 
-- Remaining dashboard card aggregations (appointments, requests, messages, payments)
+- Remaining dashboard card aggregations (appointments, requests, payments). `messages` is not stored in `todays_glance`.
 - Regenerate / extend `docs/database_schema.md` for `linq360` tables when both tables have columns
