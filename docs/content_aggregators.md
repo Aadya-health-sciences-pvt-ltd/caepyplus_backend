@@ -59,7 +59,6 @@ matching dashboard row. If none exists, sync inserts one row with that
   },
   "appointments": {},
   "requests": {},
-  "messages": {},
   "payments": {}
 }
 ```

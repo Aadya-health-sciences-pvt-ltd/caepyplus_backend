@@ -69,7 +69,6 @@ def _default_glance() -> dict[str, Any]:
         },
         "appointments": {},
         "requests": {},
-        "messages": {},
         "payments": {},
     }
 
@@ -422,7 +421,8 @@ class ContentAggregatorService:
         dashboards = await self._ensure_dashboard(linqmd_user_id)
         for dash in dashboards:
             glance = dict(dash.todays_glance) if dash.todays_glance else _default_glance()
-            for key in ("appointments", "requests", "messages", "payments"):
+            glance.pop("messages", None)
+            for key in ("appointments", "requests", "payments"):
                 glance.setdefault(key, {})
             glance["content"] = content
             dash.todays_glance = glance
