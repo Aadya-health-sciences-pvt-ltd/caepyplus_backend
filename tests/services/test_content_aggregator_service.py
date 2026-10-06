@@ -169,7 +169,7 @@ class TestMainUpsertAndGlance:
             workspace_id=1,
             user_id=884,
             appointments_json={},
-            todays_glance={},
+            todays_glance={"appointments": {"kept": True}, "requests": {}, "payments": {}},
         )
         db_session.add(dash)
         await db_session.flush()
@@ -179,26 +179,31 @@ class TestMainUpsertAndGlance:
         assert empty["content"]["reviews"]["pending_count"] == 0
         assert empty["content"]["blog_comments"]["pending_count"] == 0
         assert empty["content"]["podcast_comments"]["pending_count"] == 0
+        assert empty["content"]["total_pending_counts"] == 0
+        assert empty["appointments"] == {"kept": True}
 
         await svc.upsert_pending_glance(
             "884",
-            reviews_pending_count=2,
-            blog_comments_pending_count=1,
-            podcast_comments_pending_count=0,
+            {"reviews": 2, "blog_comments": 1, "podcast_comments": 0},
         )
 
         glance = await svc.get_glance("884")
         assert glance["content"]["reviews"]["pending_count"] == 2
         assert glance["content"]["blog_comments"]["pending_count"] == 1
         assert glance["content"]["podcast_comments"]["pending_count"] == 0
-        assert "appointments" not in glance
+        assert glance["content"]["total_pending_counts"] == 3
+        assert glance["appointments"] == {"kept": True}
+        assert "messages" not in glance
+        assert "linqmd_user_id" not in glance
 
         await db_session.refresh(dash)
         content = dash.todays_glance["content"]
         assert content["reviews"]["pending_count"] == 2
         assert content["blog_comments"]["pending_count"] == 1
+        assert content["total_pending_counts"] == 3
         assert "item_count" not in content["reviews"]
-        assert "appointments" in dash.todays_glance
+        assert dash.todays_glance["appointments"] == {"kept": True}
+        assert "messages" not in dash.todays_glance
 
     async def test_upsert_creates_dashboard_row_when_missing(
         self, db_session: AsyncSession
@@ -206,9 +211,7 @@ class TestMainUpsertAndGlance:
         svc = ContentAggregatorService(db_session)
         await svc.upsert_pending_glance(
             "884",
-            reviews_pending_count=1,
-            blog_comments_pending_count=0,
-            podcast_comments_pending_count=0,
+            {"reviews": 1, "blog_comments": 0, "podcast_comments": 0},
         )
         glance = await svc.get_glance("884")
         assert glance["content"]["reviews"]["pending_count"] == 1

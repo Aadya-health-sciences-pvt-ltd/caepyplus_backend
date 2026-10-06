@@ -29,13 +29,16 @@ class GlanceContent(BaseModel):
     reviews: PendingCount = Field(default_factory=PendingCount)
     blog_comments: PendingCount = Field(default_factory=PendingCount)
     podcast_comments: PendingCount = Field(default_factory=PendingCount)
+    total_pending_counts: int = 0
 
 
 class GlanceResponse(BaseModel):
-    """Today-at-a-glance content badge, keyed by Drupal uid."""
+    """Today-at-a-glance pending inbox. Same shape for sync and get."""
 
-    linqmd_user_id: str
     content: GlanceContent
+    appointments: dict = Field(default_factory=dict)
+    requests: dict = Field(default_factory=dict)
+    payments: dict = Field(default_factory=dict)
 
 
 class GlanceSyncRequest(BaseModel):

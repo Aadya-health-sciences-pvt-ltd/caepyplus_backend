@@ -55,7 +55,8 @@ matching dashboard row. If none exists, sync inserts one row with that
   "content": {
     "reviews": { "pending_count": 5 },
     "blog_comments": { "pending_count": 0 },
-    "podcast_comments": { "pending_count": 0 }
+    "podcast_comments": { "pending_count": 0 },
+    "total_pending_counts": 5
   },
   "appointments": {},
   "requests": {},

@@ -19,7 +19,11 @@ class PracticeHubPendingError(Exception):
         self.status_code = status_code
 
 
-def _non_negative(value: object) -> int:
+PENDING_SOURCES = ("reviews", "blog_comments", "podcast_comments")
+GLANCE_CARDS = ("appointments", "requests", "payments")
+
+
+def non_negative_int(value: object) -> int:
     try:
         number = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -27,19 +31,18 @@ def _non_negative(value: object) -> int:
     return number if number > 0 else 0
 
 
+def pending_count_from_block(block: object) -> int:
+    if isinstance(block, dict):
+        return non_negative_int(block.get("pending_count"))
+    return 0
+
+
 def parse_pending_counts(body: dict[str, Any]) -> dict[str, int]:
-    """Map the Practice Hub payload to the three stored counts."""
+    """Map the Practice Hub payload to the three pending counts.
 
-    def _from_block(block: object) -> int:
-        if isinstance(block, dict):
-            return _non_negative(block.get("pending_count"))
-        return 0
-
-    return {
-        "reviews_pending_count": _from_block(body.get("reviews")),
-        "blog_comments_pending_count": _from_block(body.get("blog_comments")),
-        "podcast_comments_pending_count": _from_block(body.get("podcast_comments")),
-    }
+    ``total_pending_counts`` from Drupal is ignored. CAEPY sums the three counts.
+    """
+    return {source: pending_count_from_block(body.get(source)) for source in PENDING_SOURCES}
 
 
 async def fetch_pending_counts(linqmd_user_id: str) -> dict[str, int]:

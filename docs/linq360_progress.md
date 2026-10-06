@@ -275,7 +275,8 @@ table is dropped (Alembic **`018`**).
   "content": {
     "reviews": { "pending_count": 2 },
     "blog_comments": { "pending_count": 5 },
-    "podcast_comments": { "pending_count": 1 }
+    "podcast_comments": { "pending_count": 1 },
+    "total_pending_counts": 8
   },
   "appointments": {},
   "requests": {},

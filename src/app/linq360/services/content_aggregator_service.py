@@ -21,6 +21,13 @@ from ..models.aggregators import (
     ReviewsSummaryAggregator,
 )
 from ..models.dashboard import WorkspaceDoctorDashboard
+from .practice_hub_pending_client import (
+    GLANCE_CARDS,
+    PENDING_SOURCES,
+    fetch_pending_counts,
+    non_negative_int,
+    pending_count_from_block,
+)
 
 
 def blog_comment_delta(old_status: str, new_status: str) -> int:
@@ -37,7 +44,13 @@ def blog_comment_delta(old_status: str, new_status: str) -> int:
 def _floor_non_negative(value: int | Decimal) -> int | Decimal:
     if isinstance(value, Decimal):
         return value if value > 0 else Decimal("0")
-    return value if value > 0 else 0
+    return non_negative_int(value)
+
+
+_COMMENT_AGGREGATORS = {
+    SOURCE_BLOG: BlogCommentsAggregator,
+    SOURCE_PODCAST: PodcastCommentsAggregator,
+}
 
 
 def _avg_rating(rating_sum: Decimal, review_count: int) -> Decimal | None:
@@ -46,31 +59,31 @@ def _avg_rating(rating_sum: Decimal, review_count: int) -> Decimal | None:
     return (rating_sum / Decimal(review_count)).quantize(Decimal("0.0001"))
 
 
-def _glance_payload(
-    linqmd_user_id: str, reviews: int, blogs: int, podcasts: int
-) -> dict[str, Any]:
-    return {
-        "linqmd_user_id": linqmd_user_id,
-        "content": {
-            "reviews": {"pending_count": reviews},
-            "blog_comments": {"pending_count": blogs},
-            "podcast_comments": {"pending_count": podcasts},
-        },
-    }
+def _counts_from_glance(existing: dict[str, Any] | None) -> dict[str, int]:
+    content = (existing or {}).get("content") if isinstance(existing, dict) else None
+    content = content if isinstance(content, dict) else {}
+    return {source: pending_count_from_block(content.get(source)) for source in PENDING_SOURCES}
 
 
-def _default_glance() -> dict[str, Any]:
-    """Pending moderation inbox shape (not approved engagement totals)."""
-    return {
-        "content": {
-            "reviews": {"pending_count": 0},
-            "blog_comments": {"pending_count": 0},
-            "podcast_comments": {"pending_count": 0},
-        },
-        "appointments": {},
-        "requests": {},
-        "payments": {},
+def _content_block(counts: dict[str, int]) -> dict[str, Any]:
+    """Pending counts plus their sum. The total is not stored in its own column."""
+    values = {source: non_negative_int(counts.get(source, 0)) for source in PENDING_SOURCES}
+    block: dict[str, Any] = {
+        source: {"pending_count": values[source]} for source in PENDING_SOURCES
     }
+    block["total_pending_counts"] = sum(values.values())
+    return block
+
+
+def _glance_document(existing: dict[str, Any] | None, counts: dict[str, int]) -> dict[str, Any]:
+    """API and stored glance shape. Other cards are left as already stored."""
+    stored = dict(existing or {})
+    stored.pop("messages", None)
+    document: dict[str, Any] = {"content": _content_block(counts)}
+    for card in GLANCE_CARDS:
+        value = stored.get(card)
+        document[card] = dict(value) if isinstance(value, dict) else {}
+    return document
 
 
 class GlanceDashboardMissing(Exception):
@@ -84,18 +97,6 @@ class GlanceDashboardMissing(Exception):
         self.linqmd_user_id = linqmd_user_id
 
 
-def _pending_from_glance(glance: dict[str, Any] | None, key: str) -> int:
-    content = (glance or {}).get("content") or {}
-    block = content.get(key) or {}
-    if not isinstance(block, dict):
-        return 0
-    try:
-        number = int(block.get("pending_count") or 0)
-    except (TypeError, ValueError):
-        return 0
-    return number if number > 0 else 0
-
-
 class ContentAggregatorService:
     """Adjust / rebuild content aggregators; pending inbox → todays_glance."""
 
@@ -107,18 +108,12 @@ class ContentAggregatorService:
     # ------------------------------------------------------------------
 
     async def adjust_blog_comments(self, doctor_id: int, delta: int) -> BlogCommentsAggregator:
-        row = await self._get_or_create_blog(doctor_id)
-        row.comment_count = int(_floor_non_negative(row.comment_count + delta))
-        await self._upsert_main_comments(doctor_id, SOURCE_BLOG, row.comment_count)
-        return row
+        return await self._adjust_comments(doctor_id, SOURCE_BLOG, delta)
 
     async def adjust_podcast_comments(
         self, doctor_id: int, delta: int
     ) -> PodcastCommentsAggregator:
-        row = await self._get_or_create_podcast(doctor_id)
-        row.comment_count = int(_floor_non_negative(row.comment_count + delta))
-        await self._upsert_main_comments(doctor_id, SOURCE_PODCAST, row.comment_count)
-        return row
+        return await self._adjust_comments(doctor_id, SOURCE_PODCAST, delta)
 
     async def adjust_reviews(
         self,
@@ -130,16 +125,10 @@ class ContentAggregatorService:
         """Adjust published review metrics only — does not touch todays_glance."""
         row = await self._get_or_create_reviews(doctor_id)
         rating_dec = Decimal(str(rating))
-        if delta > 0:
+        if delta != 0:
             row.review_count = int(_floor_non_negative(row.review_count + delta))
             row.rating_sum = Decimal(
                 str(_floor_non_negative(Decimal(str(row.rating_sum)) + rating_dec * delta))
-            )
-        elif delta < 0:
-            steps = abs(delta)
-            row.review_count = int(_floor_non_negative(row.review_count - steps))
-            row.rating_sum = Decimal(
-                str(_floor_non_negative(Decimal(str(row.rating_sum)) - rating_dec * steps))
             )
         if row.review_count == 0:
             row.rating_sum = Decimal("0")
@@ -165,7 +154,7 @@ class ContentAggregatorService:
         """
         uid = str(linqmd_user_id).strip()
         row = await self._get_or_create_pending_reviews(uid)
-        row.pending_count = int(_floor_non_negative(row.pending_count + delta))
+        row.pending_count = non_negative_int(row.pending_count + delta)
         if doctor_id is not None:
             row.doctor_id = doctor_id
         return row
@@ -181,37 +170,17 @@ class ContentAggregatorService:
         """
         uid = str(linqmd_user_id).strip()
         dash = await self._first_dashboard(uid)
-        if dash is None:
-            return _glance_payload(uid, 0, 0, 0)
-        glance = dash.todays_glance or {}
-        return _glance_payload(
-            uid,
-            _pending_from_glance(glance, "reviews"),
-            _pending_from_glance(glance, "blog_comments"),
-            _pending_from_glance(glance, "podcast_comments"),
-        )
+        stored = dash.todays_glance if dash is not None and dash.todays_glance else None
+        return _glance_document(stored, _counts_from_glance(stored))
 
-    async def upsert_pending_glance(
-        self,
-        linqmd_user_id: str,
-        *,
-        reviews_pending_count: int,
-        blog_comments_pending_count: int,
-        podcast_comments_pending_count: int,
-    ) -> None:
+    async def upsert_pending_glance(self, linqmd_user_id: str, counts: dict[str, int]) -> None:
         """Write pending counts into ``todays_glance`` for this Drupal uid."""
-        uid = str(linqmd_user_id).strip()
-        reviews = int(_floor_non_negative(reviews_pending_count))
-        blogs = int(_floor_non_negative(blog_comments_pending_count))
-        podcasts = int(_floor_non_negative(podcast_comments_pending_count))
-        await self._refresh_todays_glance_content(uid, reviews, blogs, podcasts)
+        await self._refresh_todays_glance_content(str(linqmd_user_id).strip(), counts)
 
     async def sync_pending_glance(self, linqmd_user_id: str) -> dict[str, Any]:
         """GET Practice Hub pending counts and upsert the CAEPY row."""
-        from .practice_hub_pending_client import fetch_pending_counts
-
         counts = await fetch_pending_counts(linqmd_user_id)
-        await self.upsert_pending_glance(linqmd_user_id, **counts)
+        await self.upsert_pending_glance(linqmd_user_id, counts)
         return await self.get_glance(linqmd_user_id)
 
     # ------------------------------------------------------------------
@@ -229,14 +198,14 @@ class ContentAggregatorService:
             )
         )
         count = int(result.scalar_one() or 0)
-        row = await self._get_or_create_blog(doctor_id)
+        row = await self._get_or_create_comments(doctor_id, SOURCE_BLOG)
         row.comment_count = count
         await self._upsert_main_comments(doctor_id, SOURCE_BLOG, count)
         return row
 
     async def rebuild_podcast_comments(self, doctor_id: int) -> PodcastCommentsAggregator:
         """No local podcast comments table yet — resync main from existing aggregator row."""
-        row = await self._get_or_create_podcast(doctor_id)
+        row = await self._get_or_create_comments(doctor_id, SOURCE_PODCAST)
         await self._upsert_main_comments(doctor_id, SOURCE_PODCAST, row.comment_count)
         return row
 
@@ -306,35 +275,40 @@ class ContentAggregatorService:
     # Internal: get-or-create / upsert / glance
     # ------------------------------------------------------------------
 
-    async def _get_or_create_blog(self, doctor_id: int) -> BlogCommentsAggregator:
-        row = await self.session.get(BlogCommentsAggregator, doctor_id)
+    async def _get_or_create_row(self, model: type[Any], key: Any, factory: Any) -> Any:
+        row = await self.session.get(model, key)
         if row is None:
-            row = BlogCommentsAggregator(doctor_id=doctor_id, comment_count=0)
+            row = factory()
             self.session.add(row)
             await self.session.flush()
         return row
 
-    async def _get_or_create_podcast(self, doctor_id: int) -> PodcastCommentsAggregator:
-        row = await self.session.get(PodcastCommentsAggregator, doctor_id)
-        if row is None:
-            row = PodcastCommentsAggregator(doctor_id=doctor_id, comment_count=0)
-            self.session.add(row)
-            await self.session.flush()
+    async def _get_or_create_comments(self, doctor_id: int, source: str) -> Any:
+        model = _COMMENT_AGGREGATORS[source]
+        return await self._get_or_create_row(
+            model,
+            doctor_id,
+            lambda: model(doctor_id=doctor_id, comment_count=0),
+        )
+
+    async def _adjust_comments(self, doctor_id: int, source: str, delta: int) -> Any:
+        row = await self._get_or_create_comments(doctor_id, source)
+        row.comment_count = non_negative_int(row.comment_count + delta)
+        await self._upsert_main_comments(doctor_id, source, row.comment_count)
         return row
 
     async def _get_or_create_reviews(self, doctor_id: int) -> ReviewsSummaryAggregator:
-        row = await self.session.get(ReviewsSummaryAggregator, doctor_id)
-        if row is None:
-            row = ReviewsSummaryAggregator(
+        return await self._get_or_create_row(
+            ReviewsSummaryAggregator,
+            doctor_id,
+            lambda: ReviewsSummaryAggregator(
                 doctor_id=doctor_id,
                 review_count=0,
                 pending_count=0,
                 rating_sum=Decimal("0"),
                 avg_rating=None,
-            )
-            self.session.add(row)
-            await self.session.flush()
-        return row
+            ),
+        )
 
     async def _get_or_create_main(self, doctor_id: int, source: str) -> ContentSourceAggregator:
         result = await self.session.execute(
@@ -368,12 +342,11 @@ class ContentAggregatorService:
         main.avg_rating = row.avg_rating
 
     async def _get_or_create_pending_reviews(self, linqmd_user_id: str) -> ReviewsPendingAggregator:
-        row = await self.session.get(ReviewsPendingAggregator, linqmd_user_id)
-        if row is None:
-            row = ReviewsPendingAggregator(linqmd_user_id=linqmd_user_id, pending_count=0)
-            self.session.add(row)
-            await self.session.flush()
-        return row
+        return await self._get_or_create_row(
+            ReviewsPendingAggregator,
+            linqmd_user_id,
+            lambda: ReviewsPendingAggregator(linqmd_user_id=linqmd_user_id, pending_count=0),
+        )
 
     async def _dashboards_for_uid(self, linqmd_user_id: str) -> list[WorkspaceDoctorDashboard]:
         if not linqmd_user_id.isdigit():
@@ -396,7 +369,7 @@ class ContentAggregatorService:
             workspace_id=0,
             user_id=int(linqmd_user_id),
             appointments_json={},
-            todays_glance=_default_glance(),
+            todays_glance={},
         )
         self.session.add(row)
         await self.session.flush()
@@ -407,24 +380,14 @@ class ContentAggregatorService:
         return rows[0] if rows else None
 
     async def _refresh_todays_glance_content(
-        self,
-        linqmd_user_id: str,
-        reviews: int,
-        blogs: int,
-        podcasts: int,
+        self, linqmd_user_id: str, counts: dict[str, int]
     ) -> None:
         """Write pending counts into ``todays_glance`` where ``user_id`` is the Drupal uid.
 
         Creates one dashboard row when none exists so the JSON can be stored.
         """
-        content = _glance_payload(linqmd_user_id, reviews, blogs, podcasts)["content"]
         dashboards = await self._ensure_dashboard(linqmd_user_id)
         for dash in dashboards:
-            glance = dict(dash.todays_glance) if dash.todays_glance else _default_glance()
-            glance.pop("messages", None)
-            for key in ("appointments", "requests", "payments"):
-                glance.setdefault(key, {})
-            glance["content"] = content
-            dash.todays_glance = glance
+            dash.todays_glance = _glance_document(dash.todays_glance, counts)
             flag_modified(dash, "todays_glance")
         await self.session.flush()
