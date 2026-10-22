@@ -45,10 +45,9 @@ class PodcastCommentsAggregator(Base):
 
 
 class ReviewsPendingAggregator(Base):
-    """Still-pending review inbox, keyed by Drupal uid (``linqmd_user_id``).
+    """Legacy pending review counter keyed by Drupal uid (``linqmd_user_id``).
 
-    CAEPY ``doctors.id`` is optional. A missing doctor or credentials row
-    does not block this count.
+    Prefer ``ReviewsAggregator`` for new writes. Kept readable for migration.
     """
 
     __tablename__ = "reviews_pending_aggregator"
@@ -56,6 +55,66 @@ class ReviewsPendingAggregator(Base):
     linqmd_user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     doctor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class ReviewsAggregator(Base):
+    """Pending review inbox per Drupal doctor uid (``user_id``).
+
+    Seed insert uses rating=1, rating_count=0, and pending_count from a
+    one-time COUNT of top-level pending reviews (no extra delta on insert).
+    """
+
+    __tablename__ = "reviews_aggregator"
+
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    rating_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    doctor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class BlogCommentStats(Base):
+    """Pending blog comment counts per blog and doctor."""
+
+    __tablename__ = "blog_comment_stats"
+    __table_args__ = (UniqueConstraint("blog_id", "doctor_id", name="uq_blog_comment_stats_blog_doctor"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    blog_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    doctor_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class PodcastCommentStats(Base):
+    """Pending podcast comment counts per podcast and doctor."""
+
+    __tablename__ = "podcast_comment_stats"
+    __table_args__ = (
+        UniqueConstraint("podcast_id", "doctor_id", name="uq_podcast_comment_stats_podcast_doctor"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    podcast_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    doctor_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    pending_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

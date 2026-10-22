@@ -166,11 +166,17 @@ class AIBlogContentResponse(BaseModel):
 
 
 class DrupalCommentWebhookPayload(BaseModel):
-    """Incoming payload from Drupal when a comment is made."""
+    """Incoming payload from Drupal when a blog comment is created or moderated."""
+
+    action: str = "submit"  # submit | approve | reject | flag | delete
     drupal_comment_id: str
-    drupal_node_id: str
-    author_name: str
-    content: str
+    drupal_node_id: str | None = None
+    blog_id: int | None = None
+    doctor_id: int | None = None
+    author_name: str = "Anonymous"
+    content: str = ""
+    parent_comment_id: int | None = None
+    status: str | None = None
 
 
 class DrupalPodcastCommentWebhookPayload(BaseModel):
@@ -180,10 +186,12 @@ class DrupalPodcastCommentWebhookPayload(BaseModel):
     (resolved via doctor_linqmd_credentials).
     """
 
-    action: str  # approve | unpublish | delete
+    action: str  # submit | approve | publish | reject | flag | unpublish | delete
     doctor_id: int | None = None
     linqmd_user_id: str | None = None
     comment_id: str | None = None
+    podcast_id: str | None = None
+    parent_comment_id: str | None = None
 
 
 class DrupalReviewWebhookPayload(BaseModel):
@@ -199,3 +207,4 @@ class DrupalReviewWebhookPayload(BaseModel):
     rating: float | None = None
     doctor_id: int | None = None
     review_id: str | None = None
+    parent_review_id: str | None = None

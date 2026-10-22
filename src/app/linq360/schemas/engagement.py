@@ -21,14 +21,27 @@ class ContentEngagementResponse(BaseModel):
     total_item_count: int = 0
 
 
-class PendingCount(BaseModel):
+class ReviewsPending(BaseModel):
     pending_count: int = 0
+    review_id: list[int] = Field(default_factory=list)
+
+
+class BlogCommentsPending(BaseModel):
+    pending_count: int = 0
+    comment_id: list[int] = Field(default_factory=list)
+    blog_id: list[int] = Field(default_factory=list)
+
+
+class PodcastCommentsPending(BaseModel):
+    pending_count: int = 0
+    comment_id: list[int] = Field(default_factory=list)
+    podcast_id: list[int] = Field(default_factory=list)
 
 
 class GlanceContent(BaseModel):
-    reviews: PendingCount = Field(default_factory=PendingCount)
-    blog_comments: PendingCount = Field(default_factory=PendingCount)
-    podcast_comments: PendingCount = Field(default_factory=PendingCount)
+    reviews: ReviewsPending = Field(default_factory=ReviewsPending)
+    blog_comments: BlogCommentsPending = Field(default_factory=BlogCommentsPending)
+    podcast_comments: PodcastCommentsPending = Field(default_factory=PodcastCommentsPending)
     total_pending_counts: int = 0
 
 
@@ -42,6 +55,6 @@ class GlanceResponse(BaseModel):
 
 
 class GlanceSyncRequest(BaseModel):
-    """Sync one Drupal uid from Practice Hub into CAEPY."""
+    """Optional body for glance sync (unused; doctor comes from Bearer token)."""
 
-    linqmd_user_id: str = Field(min_length=1)
+    model_config = {"extra": "ignore"}

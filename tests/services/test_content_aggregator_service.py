@@ -1,14 +1,18 @@
 """Tests for ContentAggregatorService (adjust, floor, main upsert, glance)."""
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.linq360.models.aggregators import (
     SOURCE_BLOG,
+    BlogCommentStats,
     BlogCommentsAggregator,
     ContentSourceAggregator,
+    PodcastCommentStats,
     PodcastCommentsAggregator,
+    ReviewsAggregator,
     ReviewsPendingAggregator,
     ReviewsSummaryAggregator,
 )
@@ -16,10 +20,12 @@ from src.app.linq360.models.dashboard import WorkspaceDoctorDashboard
 from src.app.linq360.services.content_aggregator_service import (
     ContentAggregatorService,
     blog_comment_delta,
+    pending_status_delta,
 )
 from src.app.models.blog import Blog, BlogComment
 from src.app.models.doctor import Doctor
-from src.app.models.enums import CommentStatus
+from src.app.models.enums import CommentStatus, ReviewStatus
+from src.app.models.review import Review
 
 
 class TestBlogCommentDelta:
@@ -39,6 +45,18 @@ class TestBlogCommentDelta:
         assert blog_comment_delta("pending", "replied") == 0
         assert blog_comment_delta("replied", "approved") == 1
         assert blog_comment_delta("approved", "replied") == -1
+
+
+class TestPendingStatusDelta:
+    def test_enter_and_leave_pending(self) -> None:
+        assert pending_status_delta(None, "pending", is_top_level=True) == 1
+        assert pending_status_delta("pending", "approved", is_top_level=True) == -1
+        assert pending_status_delta("pending", "flagged", is_top_level=True) == -1
+        assert pending_status_delta("pending", "rejected", is_top_level=True) == -1
+
+    def test_replies_ignored(self) -> None:
+        assert pending_status_delta(None, "pending", is_top_level=False) == 0
+        assert pending_status_delta("pending", "approved", is_top_level=False) == 0
 
 
 class TestAdjustBlogPodcast:
@@ -184,12 +202,27 @@ class TestMainUpsertAndGlance:
 
         await svc.upsert_pending_glance(
             "884",
-            {"reviews": 2, "blog_comments": 1, "podcast_comments": 0},
+            {
+                "reviews": {"pending_count": 2, "review_id": [3, 9]},
+                "blog_comments": {
+                    "pending_count": 1,
+                    "comment_id": [2],
+                    "blog_id": [5],
+                },
+                "podcast_comments": {
+                    "pending_count": 0,
+                    "comment_id": [],
+                    "podcast_id": [],
+                },
+            },
         )
 
         glance = await svc.get_glance("884")
         assert glance["content"]["reviews"]["pending_count"] == 2
+        assert glance["content"]["reviews"]["review_id"] == [3, 9]
         assert glance["content"]["blog_comments"]["pending_count"] == 1
+        assert glance["content"]["blog_comments"]["comment_id"] == [2]
+        assert glance["content"]["blog_comments"]["blog_id"] == [5]
         assert glance["content"]["podcast_comments"]["pending_count"] == 0
         assert glance["content"]["total_pending_counts"] == 3
         assert glance["appointments"] == {"kept": True}
@@ -199,6 +232,7 @@ class TestMainUpsertAndGlance:
         await db_session.refresh(dash)
         content = dash.todays_glance["content"]
         assert content["reviews"]["pending_count"] == 2
+        assert content["reviews"]["review_id"] == [3, 9]
         assert content["blog_comments"]["pending_count"] == 1
         assert content["total_pending_counts"] == 3
         assert "item_count" not in content["reviews"]
@@ -231,6 +265,136 @@ class TestMainUpsertAndGlance:
         loaded = await svc.get_pending_reviews("884")
         assert loaded is not None
         assert loaded.pending_count == 1
+
+class TestReviewsAggregatorPending:
+    async def test_seed_from_count_without_double_delta(
+        self, db_session: AsyncSession
+    ) -> None:
+        db_session.add(
+            Review(
+                review_id="r1",
+                user_id="884",
+                status=ReviewStatus.PENDING.value,
+                parent_review_id=None,
+            )
+        )
+        await db_session.flush()
+
+        svc = ContentAggregatorService(db_session)
+        row = await svc.adjust_reviews_aggregator_pending("884", 1)
+        assert row.pending_count == 1
+        assert row.rating == 1
+        assert row.rating_count == 0
+
+        # Second event applies delta on existing row
+        db_session.add(
+            Review(
+                review_id="r2",
+                user_id="884",
+                status=ReviewStatus.PENDING.value,
+            )
+        )
+        await db_session.flush()
+        row = await svc.adjust_reviews_aggregator_pending("884", 1)
+        assert row.pending_count == 2
+
+    async def test_floor_and_reply_ignored_via_delta(
+        self, db_session: AsyncSession
+    ) -> None:
+        svc = ContentAggregatorService(db_session)
+        row = await svc.adjust_reviews_aggregator_pending("885", 1)
+        assert row.pending_count == 1
+        row = await svc.adjust_reviews_aggregator_pending("885", -5)
+        assert row.pending_count == 0
+
+    async def test_adjust_does_not_write_glance_by_default(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Glance is filled by Practice Hub sync, not by aggregator deltas."""
+        svc = ContentAggregatorService(db_session)
+        await svc.adjust_reviews_aggregator_pending("884", 2)
+        glance = await svc.get_glance("884")
+        assert glance["content"]["reviews"]["pending_count"] == 0
+
+
+class TestBlogPodcastCommentStats:
+    async def test_blog_stats_per_blog_and_sum(
+        self, db_session: AsyncSession
+    ) -> None:
+        svc = ContentAggregatorService(db_session)
+        await svc.adjust_blog_comment_stats_pending(1, 50, 1, refresh_glance=False)
+        await svc.adjust_blog_comment_stats_pending(1, 50, 1, refresh_glance=False)
+        await svc.adjust_blog_comment_stats_pending(2, 50, 1, refresh_glance=False)
+        row1 = (
+            await db_session.execute(
+                select(BlogCommentStats).where(
+                    BlogCommentStats.blog_id == 1, BlogCommentStats.doctor_id == 50
+                )
+            )
+        ).scalar_one()
+        assert row1.pending_count == 2
+        assert await svc.sum_blog_pending(50) == 3
+
+        await svc.adjust_blog_comment_stats_pending(1, 50, -10, refresh_glance=False)
+        assert row1.pending_count == 0
+
+    async def test_podcast_stats(self, db_session: AsyncSession) -> None:
+        svc = ContentAggregatorService(db_session)
+        await svc.adjust_podcast_comment_stats_pending("p1", 60, 1, refresh_glance=False)
+        await svc.adjust_podcast_comment_stats_pending("p1", 60, 1, refresh_glance=False)
+        row = (
+            await db_session.execute(
+                select(PodcastCommentStats).where(
+                    PodcastCommentStats.podcast_id == "p1",
+                    PodcastCommentStats.doctor_id == 60,
+                )
+            )
+        ).scalar_one()
+        assert row.pending_count == 2
+        await svc.adjust_podcast_comment_stats_pending("p1", 60, -1, refresh_glance=False)
+        assert row.pending_count == 1
+
+    async def test_sync_pending_glance_from_practice_hub(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import base64
+        import json
+
+        def _jwt(payload: dict) -> str:
+            header = base64.urlsafe_b64encode(b'{"alg":"none"}').decode().rstrip("=")
+            body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+            return f"{header}.{body}.sig"
+
+        token = _jwt({"appointment_doctor_id": "884", "user_id": "320"})
+
+        async def _fake_fetch(access_token: str) -> dict:
+            return {
+                "reviews": {"pending_count": 2, "review_id": [3]},
+                "blog_comments": {
+                    "pending_count": 1,
+                    "comment_id": [2],
+                    "blog_id": [5],
+                },
+                "podcast_comments": {
+                    "pending_count": 0,
+                    "comment_id": [],
+                    "podcast_id": [],
+                },
+            }
+
+        monkeypatch.setattr(
+            "src.app.linq360.services.content_aggregator_service.fetch_pending_counts",
+            _fake_fetch,
+        )
+        svc = ContentAggregatorService(db_session)
+        glance = await svc.sync_pending_glance(token)
+        assert glance["content"]["reviews"]["pending_count"] == 2
+        assert glance["content"]["reviews"]["review_id"] == [3]
+        assert glance["content"]["blog_comments"]["pending_count"] == 1
+        assert glance["content"]["blog_comments"]["comment_id"] == [2]
+        assert glance["content"]["blog_comments"]["blog_id"] == [5]
+        assert glance["content"]["total_pending_counts"] == 3
+
 
 class TestRebuildBlog:
     async def test_rebuild_from_approved_comments(self, db_session: AsyncSession) -> None:

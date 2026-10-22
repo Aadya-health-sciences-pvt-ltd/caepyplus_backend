@@ -16,6 +16,7 @@ from ....models.enums import BlogStatus, CommentStatus
 from ....linq360.services.content_aggregator_service import (
     ContentAggregatorService,
     blog_comment_delta,
+    pending_status_delta,
 )
 from ....repositories.doctor_repository import DoctorRepository
 from ....repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
@@ -150,9 +151,19 @@ async def content_update_comment_status(
         payload.status.value if hasattr(payload.status, "value") else str(payload.status)
     )
     comment.status = new_status
-    delta = blog_comment_delta(old_status, new_status)
-    if delta != 0:
-        await ContentAggregatorService(db).adjust_blog_comments(doctor_id, delta)
+    svc = ContentAggregatorService(db)
+    approved_delta = blog_comment_delta(old_status, new_status)
+    if approved_delta != 0:
+        await svc.adjust_blog_comments(doctor_id, approved_delta)
+    pending_delta = pending_status_delta(
+        old_status,
+        new_status,
+        is_top_level=comment.parent_comment_id is None,
+    )
+    if pending_delta != 0:
+        await svc.adjust_blog_comment_stats_pending(
+            comment.blog_id, doctor_id, pending_delta
+        )
     await db.commit()
     return {
         "status": "success",
@@ -443,13 +454,22 @@ async def content_delete_blog(
     blog = result.scalar_one_or_none()
     if blog is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
-    approved_count = sum(
-        1 for c in (blog.comments or []) if c.status == CommentStatus.APPROVED.value
+    comments = list(blog.comments or [])
+    approved_count = sum(1 for c in comments if c.status == CommentStatus.APPROVED.value)
+    pending_top_level = sum(
+        1
+        for c in comments
+        if c.status == CommentStatus.PENDING.value and c.parent_comment_id is None
     )
     await db.execute(delete(BlogKeyword).where(BlogKeyword.blog_id == blog_id))
     await db.delete(blog)
+    svc = ContentAggregatorService(db)
     if approved_count:
-        await ContentAggregatorService(db).adjust_blog_comments(doctor_id, -approved_count)
+        await svc.adjust_blog_comments(doctor_id, -approved_count)
+    if pending_top_level:
+        await svc.adjust_blog_comment_stats_pending(
+            blog_id, doctor_id, -pending_top_level
+        )
     await db.commit()
     return {
         "status": "success",

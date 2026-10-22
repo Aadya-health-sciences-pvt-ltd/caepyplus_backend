@@ -18,10 +18,14 @@ from ....core.exceptions import AIServiceError, ExtractionError
 from ....services.gemini_service import GeminiService, get_gemini_service
 from ....db.session import DbSession
 from ....models.blog import Blog, BlogKeyword, BlogComment
-from ....models.enums import CommentStatus
+from ....models.enums import CommentStatus, ReviewStatus
+from ....models.podcast_comment import PodcastComment
+from ....models.review import Review
+from ....linq360.models.aggregators import ReviewsAggregator
 from ....linq360.services.content_aggregator_service import (
     ContentAggregatorService,
     blog_comment_delta,
+    pending_status_delta,
 )
 from ....schemas.blog import (
     BlogResponse,
@@ -37,6 +41,7 @@ from ....schemas.blog import (
     AITopicCard,
     AIBlogContentGenerateRequest,
     AIBlogContentResponse,
+    DrupalCommentWebhookPayload,
     DrupalPodcastCommentWebhookPayload,
     DrupalReviewWebhookPayload,
 )
@@ -298,9 +303,19 @@ async def update_comment_status(
         payload.status.value if hasattr(payload.status, "value") else str(payload.status)
     )
     comment.status = new_status
-    delta = blog_comment_delta(old_status, new_status)
-    if delta != 0:
-        await ContentAggregatorService(db).adjust_blog_comments(doctor_id, delta)
+    svc = ContentAggregatorService(db)
+    approved_delta = blog_comment_delta(old_status, new_status)
+    if approved_delta != 0:
+        await svc.adjust_blog_comments(doctor_id, approved_delta)
+    pending_delta = pending_status_delta(
+        old_status,
+        new_status,
+        is_top_level=comment.parent_comment_id is None,
+    )
+    if pending_delta != 0:
+        await svc.adjust_blog_comment_stats_pending(
+            comment.blog_id, doctor_id, pending_delta
+        )
     await db.commit()
 
     return {
@@ -665,8 +680,12 @@ async def delete_blog(
     if blog is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog not found")
 
-    approved_count = sum(
-        1 for c in (blog.comments or []) if c.status == CommentStatus.APPROVED.value
+    comments = list(blog.comments or [])
+    approved_count = sum(1 for c in comments if c.status == CommentStatus.APPROVED.value)
+    pending_top_level = sum(
+        1
+        for c in comments
+        if c.status == CommentStatus.PENDING.value and c.parent_comment_id is None
     )
 
     # Delete keywords first due to foreign key constraints if not handled by cascade
@@ -674,8 +693,13 @@ async def delete_blog(
     
     # Delete the blog
     await db.delete(blog)
+    svc = ContentAggregatorService(db)
     if approved_count:
-        await ContentAggregatorService(db).adjust_blog_comments(doctor_id, -approved_count)
+        await svc.adjust_blog_comments(doctor_id, -approved_count)
+    if pending_top_level:
+        await svc.adjust_blog_comment_stats_pending(
+            blog_id, doctor_id, -pending_top_level
+        )
     await db.commit()
 
     return {
@@ -744,9 +768,113 @@ async def upload_blog_image(
 # ---------------------------------------------------------------------------
 
 @webhook_router.post("/drupal/comments")
-async def handle_drupal_comment_webhook() -> dict[str, str]:
-    """Blog comments are moderated in-app; counts update on approve/reject there."""
-    return {"status": "received"}
+async def handle_drupal_comment_webhook(
+    payload: DrupalCommentWebhookPayload,
+    db: DbSession,
+) -> dict[str, Any]:
+    """Create or moderate a blog comment; keep pending counters in sync."""
+    action = payload.action.strip().lower()
+    blog = await _resolve_blog_for_comment_webhook(db, payload)
+    doctor_id = int(blog.doctor_id)
+    svc = ContentAggregatorService(db)
+
+    if action in ("submit", "submitted", "create", "created"):
+        existing = None
+        if payload.drupal_comment_id:
+            result = await db.execute(
+                select(BlogComment).where(
+                    BlogComment.drupal_comment_id == payload.drupal_comment_id
+                )
+            )
+            existing = result.scalar_one_or_none()
+        if existing is not None:
+            return {
+                "status": "ok",
+                "comment_id": existing.id,
+                "blog_id": blog.id,
+                "pending_delta": 0,
+                "message": "Comment already exists",
+            }
+        comment = BlogComment(
+            blog_id=blog.id,
+            drupal_comment_id=payload.drupal_comment_id,
+            author_name=payload.author_name or "Anonymous",
+            content=payload.content or "",
+            status=CommentStatus.PENDING.value,
+            parent_comment_id=payload.parent_comment_id,
+        )
+        db.add(comment)
+        await db.flush()
+        pending_delta = pending_status_delta(
+            None,
+            CommentStatus.PENDING.value,
+            is_top_level=comment.parent_comment_id is None,
+        )
+        if pending_delta:
+            await svc.adjust_blog_comment_stats_pending(blog.id, doctor_id, pending_delta)
+        await db.commit()
+        return {
+            "status": "ok",
+            "comment_id": comment.id,
+            "blog_id": blog.id,
+            "pending_delta": pending_delta,
+        }
+
+    comment = await _find_blog_comment_for_webhook(db, payload, blog.id)
+    if comment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blog comment not found",
+        )
+
+    old_status = comment.status
+    new_status = _blog_comment_status_for_action(action, payload.status)
+    if action in ("delete", "deleted"):
+        pending_delta = pending_status_delta(
+            old_status,
+            CommentStatus.REJECTED.value,
+            is_top_level=comment.parent_comment_id is None,
+        )
+        approved_delta = (
+            -1 if old_status == CommentStatus.APPROVED.value else 0
+        )
+        blog_id = comment.blog_id
+        await db.delete(comment)
+        await db.flush()
+        if approved_delta:
+            await svc.adjust_blog_comments(doctor_id, approved_delta)
+        if pending_delta:
+            await svc.adjust_blog_comment_stats_pending(blog_id, doctor_id, pending_delta)
+        await db.commit()
+        return {
+            "status": "ok",
+            "comment_id": None,
+            "blog_id": blog_id,
+            "pending_delta": pending_delta,
+            "approved_delta": approved_delta,
+        }
+
+    comment.status = new_status
+    await db.flush()
+    approved_delta = blog_comment_delta(old_status, new_status)
+    if approved_delta:
+        await svc.adjust_blog_comments(doctor_id, approved_delta)
+    pending_delta = pending_status_delta(
+        old_status,
+        new_status,
+        is_top_level=comment.parent_comment_id is None,
+    )
+    if pending_delta:
+        await svc.adjust_blog_comment_stats_pending(blog.id, doctor_id, pending_delta)
+    await db.commit()
+    return {
+        "status": "ok",
+        "comment_id": comment.id,
+        "blog_id": blog.id,
+        "pending_delta": pending_delta,
+        "approved_delta": approved_delta,
+    }
+
 
 @webhook_router.post("/drupal/nodes")
 async def handle_drupal_node_webhook() -> dict[str, str]:
@@ -810,23 +938,115 @@ async def _resolve_doctor_id_for_webhook(
     )
 
 
-def _action_to_delta(action: str) -> int:
-    """Map Drupal moderation action to aggregator delta.
-
-    Deny/reject of a pending item is a no-op (never counted). Use unpublish/delete
-    only when the item was previously counted.
-    """
-    normalized = action.strip().lower()
-    if normalized in ("approve", "approved", "publish", "published"):
-        return 1
-    if normalized in ("unpublish", "unpublished", "delete", "deleted"):
-        return -1
-    if normalized in ("deny", "denied", "reject", "rejected"):
-        return 0
+async def _resolve_blog_for_comment_webhook(
+    db: DbSession, payload: DrupalCommentWebhookPayload
+) -> Blog:
+    if payload.blog_id is not None:
+        result = await db.execute(select(Blog).where(Blog.id == int(payload.blog_id)))
+        blog = result.scalar_one_or_none()
+        if blog is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No blog found for blog_id={payload.blog_id}",
+            )
+        return blog
+    if payload.drupal_node_id:
+        result = await db.execute(
+            select(Blog).where(Blog.drupal_node_id == str(payload.drupal_node_id))
+        )
+        blog = result.scalar_one_or_none()
+        if blog is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No blog found for drupal_node_id={payload.drupal_node_id!r}",
+            )
+        return blog
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail=f"Unsupported action: {action}",
+        detail="Provide blog_id or drupal_node_id",
     )
+
+
+async def _find_blog_comment_for_webhook(
+    db: DbSession, payload: DrupalCommentWebhookPayload, blog_id: int
+) -> BlogComment | None:
+    if payload.drupal_comment_id:
+        result = await db.execute(
+            select(BlogComment).where(
+                BlogComment.drupal_comment_id == payload.drupal_comment_id,
+                BlogComment.blog_id == blog_id,
+            )
+        )
+        return result.scalar_one_or_none()
+    return None
+
+
+def _blog_comment_status_for_action(action: str, explicit: str | None) -> str:
+    if explicit:
+        return explicit.strip().lower()
+    if action in ("approve", "approved", "publish", "published"):
+        return CommentStatus.APPROVED.value
+    if action in ("reject", "rejected", "deny", "denied", "hidden", "hide"):
+        return CommentStatus.REJECTED.value
+    if action in ("flag", "flagged"):
+        return CommentStatus.FLAGGED.value
+    if action in ("submit", "submitted", "create", "created"):
+        return CommentStatus.PENDING.value
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Unsupported blog comment action: {action}",
+    )
+
+
+def _podcast_status_for_action(action: str) -> str:
+    if action in ("submit", "submitted", "create", "created"):
+        return CommentStatus.PENDING.value
+    if action in ("approve", "approved", "publish", "published"):
+        return CommentStatus.APPROVED.value
+    if action in ("reject", "rejected", "deny", "denied", "hidden", "hide"):
+        return CommentStatus.REJECTED.value
+    if action in ("flag", "flagged"):
+        return CommentStatus.FLAGGED.value
+    if action in ("unpublish", "unpublished"):
+        return CommentStatus.REJECTED.value
+    if action in ("delete", "deleted"):
+        return CommentStatus.REJECTED.value
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Unsupported podcast comment action: {action}",
+    )
+
+
+def _review_status_for_action(action: str) -> str:
+    if action in ("submit", "submitted"):
+        return ReviewStatus.PENDING.value
+    if action in ("approve", "approved", "publish", "published"):
+        return ReviewStatus.PUBLISHED.value
+    if action in ("reject", "rejected", "deny", "denied", "hidden", "hide", "delete_pending"):
+        return ReviewStatus.HIDDEN.value
+    if action in ("flag", "flagged"):
+        return ReviewStatus.FLAGGED.value
+    if action in ("unpublish", "unpublished"):
+        return ReviewStatus.HIDDEN.value
+    if action in ("delete", "deleted"):
+        return ReviewStatus.DELETED.value
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Unsupported review action: {action}",
+    )
+
+
+def _approved_podcast_delta(old_status: str | None, new_status: str, action: str) -> int:
+    """Published podcast aggregator delta (approve +1, unpublish/delete of approved -1)."""
+    was = (old_status or "") == CommentStatus.APPROVED.value
+    now = new_status == CommentStatus.APPROVED.value
+    if not was and now:
+        return 1
+    if was and not now:
+        return -1
+    if action in ("unpublish", "unpublished", "delete", "deleted") and was:
+        return -1
+    return 0
 
 
 @webhook_router.post("/drupal/podcast-comments")
@@ -834,23 +1054,101 @@ async def handle_drupal_podcast_comment_webhook(
     payload: DrupalPodcastCommentWebhookPayload,
     db: DbSession,
 ) -> dict[str, Any]:
-    """Adjust podcast_comments_aggregator from Drupal moderation events."""
+    """Upsert podcast comment status and adjust pending + approved counters."""
     doctor_id = await _resolve_doctor_id_for_webhook(db, payload.doctor_id, payload.linqmd_user_id)
-    delta = _action_to_delta(payload.action)
-    if delta == 0:
+    action = payload.action.strip().lower()
+    if not payload.comment_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="comment_id is required",
+        )
+    if not payload.podcast_id and action in ("submit", "submitted", "create", "created"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="podcast_id is required on submit",
+        )
+
+    svc = ContentAggregatorService(db)
+    comment = await db.get(PodcastComment, payload.comment_id)
+    old_status = comment.status if comment is not None else None
+    new_status = _podcast_status_for_action(action)
+    parent_id = (
+        payload.parent_comment_id
+        if payload.parent_comment_id is not None
+        else (comment.parent_comment_id if comment is not None else None)
+    )
+    podcast_id = (
+        str(payload.podcast_id)
+        if payload.podcast_id
+        else (comment.podcast_id if comment is not None else None)
+    )
+    if not podcast_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="podcast_id is required",
+        )
+
+    if action in ("delete", "deleted"):
+        pending_delta = 0
+        approved_delta = 0
+        if comment is not None:
+            pending_delta = pending_status_delta(
+                old_status,
+                CommentStatus.REJECTED.value,
+                is_top_level=comment.parent_comment_id is None,
+            )
+            if old_status == CommentStatus.APPROVED.value:
+                approved_delta = -1
+            await db.delete(comment)
+            await db.flush()
+        if approved_delta:
+            await svc.adjust_podcast_comments(doctor_id, approved_delta)
+        if pending_delta:
+            await svc.adjust_podcast_comment_stats_pending(
+                podcast_id, doctor_id, pending_delta
+            )
+        await db.commit()
         return {
             "status": "ok",
             "doctor_id": doctor_id,
-            "delta": 0,
-            "message": "No aggregator change for deny/reject of uncounted item",
+            "pending_delta": pending_delta,
+            "approved_delta": approved_delta,
         }
-    row = await ContentAggregatorService(db).adjust_podcast_comments(doctor_id, delta)
+
+    if comment is None:
+        comment = PodcastComment(
+            comment_id=payload.comment_id,
+            podcast_id=podcast_id,
+            doctor_id=doctor_id,
+            status=new_status,
+            parent_comment_id=parent_id,
+        )
+        db.add(comment)
+    else:
+        comment.status = new_status
+        comment.podcast_id = podcast_id
+        comment.doctor_id = doctor_id
+        if payload.parent_comment_id is not None:
+            comment.parent_comment_id = payload.parent_comment_id
+    await db.flush()
+
+    pending_delta = pending_status_delta(
+        old_status,
+        new_status,
+        is_top_level=comment.parent_comment_id is None,
+    )
+    approved_delta = _approved_podcast_delta(old_status, new_status, action)
+    if approved_delta:
+        await svc.adjust_podcast_comments(doctor_id, approved_delta)
+    if pending_delta:
+        await svc.adjust_podcast_comment_stats_pending(podcast_id, doctor_id, pending_delta)
     await db.commit()
     return {
         "status": "ok",
         "doctor_id": doctor_id,
-        "comment_count": row.comment_count,
-        "delta": delta,
+        "comment_id": comment.comment_id,
+        "pending_delta": pending_delta,
+        "approved_delta": approved_delta,
     }
 
 
@@ -878,6 +1176,40 @@ def _require_review_linqmd_user_id(linqmd_user_id: str | None) -> str:
     return str(linqmd_user_id).strip()
 
 
+async def _upsert_review_mirror(
+    db: DbSession,
+    *,
+    review_id: str | None,
+    user_id: str,
+    status_value: str,
+    parent_review_id: str | None,
+    doctor_id: int | None,
+) -> tuple[Review | None, str | None]:
+    """Upsert local review mirror. Returns (row, previous_status)."""
+    if not review_id:
+        return None, None
+    row = await db.get(Review, review_id)
+    old_status = row.status if row is not None else None
+    if row is None:
+        row = Review(
+            review_id=review_id,
+            user_id=user_id,
+            status=status_value,
+            parent_review_id=parent_review_id,
+            doctor_id=doctor_id,
+        )
+        db.add(row)
+    else:
+        row.status = status_value
+        row.user_id = user_id
+        if parent_review_id is not None:
+            row.parent_review_id = parent_review_id
+        if doctor_id is not None:
+            row.doctor_id = doctor_id
+    await db.flush()
+    return row, old_status
+
+
 @webhook_router.post("/drupal/reviews")
 async def handle_drupal_reviews_webhook(
     payload: DrupalReviewWebhookPayload,
@@ -885,24 +1217,83 @@ async def handle_drupal_reviews_webhook(
 ) -> dict[str, Any]:
     """Drupal review events keyed by ``linqmd_user_id`` (Drupal uid).
 
-    Pending inbox does not require ``doctors`` or ``doctor_linqmd_credentials``.
+    Updates local review status and ``reviews_aggregator.pending_count``.
     Published ``adjust_reviews`` runs only when ``doctor_id`` already exists.
+    Replies (parent_review_id set) do not change pending counters.
     """
     linqmd_user_id = _require_review_linqmd_user_id(payload.linqmd_user_id)
     doctor_id = await _optional_existing_doctor_id(db, payload.doctor_id)
     action = payload.action.strip().lower()
     svc = ContentAggregatorService(db)
+    new_status = _review_status_for_action(action)
+    parent_id = payload.parent_review_id
 
-    if action in ("submit", "submitted"):
-        row = await svc.adjust_pending_reviews(linqmd_user_id, 1, doctor_id=doctor_id)
-        await db.commit()
-        return {
-            "status": "ok",
-            "linqmd_user_id": linqmd_user_id,
-            "doctor_id": doctor_id,
-            "pending_count": row.pending_count,
-            "pending_delta": 1,
-        }
+    review, old_status = await _upsert_review_mirror(
+        db,
+        review_id=payload.review_id,
+        user_id=linqmd_user_id,
+        status_value=new_status,
+        parent_review_id=parent_id,
+        doctor_id=doctor_id,
+    )
+    is_top_level = True
+    if review is not None:
+        is_top_level = review.parent_review_id is None
+    elif parent_id:
+        is_top_level = False
+
+    if review is not None:
+        pending_delta = pending_status_delta(
+            old_status, new_status, is_top_level=is_top_level
+        )
+    elif not is_top_level:
+        pending_delta = 0
+    elif action in ("submit", "submitted"):
+        pending_delta = 1
+    elif action in (
+        "approve",
+        "approved",
+        "publish",
+        "published",
+        "reject",
+        "rejected",
+        "deny",
+        "denied",
+        "delete_pending",
+        "flag",
+        "flagged",
+        "hidden",
+        "hide",
+        "delete",
+        "deleted",
+    ):
+        pending_delta = -1
+    else:
+        pending_delta = 0
+
+    pending_row = None
+    # Seed path: becoming pending with no aggregator row uses COUNT (no extra delta).
+    needs_seed = (
+        is_top_level
+        and new_status == ReviewStatus.PENDING.value
+        and (old_status or "") != ReviewStatus.PENDING.value
+        and await db.get(ReviewsAggregator, linqmd_user_id) is None
+    )
+    if needs_seed or pending_delta != 0:
+        pending_row = await svc.adjust_reviews_aggregator_pending(
+            linqmd_user_id,
+            pending_delta,
+            doctor_id=doctor_id,
+        )
+
+    body: dict[str, Any] = {
+        "status": "ok",
+        "linqmd_user_id": linqmd_user_id,
+        "doctor_id": doctor_id,
+        "pending_delta": pending_delta,
+    }
+    if pending_row is not None:
+        body["pending_count"] = pending_row.pending_count
 
     if action in ("approve", "approved", "publish", "published"):
         if doctor_id is not None and payload.rating is None:
@@ -910,14 +1301,6 @@ async def handle_drupal_reviews_webhook(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="rating is required to update published review metrics",
             )
-        pending_row = await svc.adjust_pending_reviews(linqmd_user_id, -1, doctor_id=doctor_id)
-        body: dict[str, Any] = {
-            "status": "ok",
-            "linqmd_user_id": linqmd_user_id,
-            "doctor_id": doctor_id,
-            "pending_count": pending_row.pending_count,
-            "pending_delta": -1,
-        }
         if doctor_id is not None:
             pub_row = await svc.adjust_reviews(
                 doctor_id,
@@ -926,7 +1309,9 @@ async def handle_drupal_reviews_webhook(
                 linqmd_user_id=linqmd_user_id,
             )
             body["review_count"] = pub_row.review_count
-            body["avg_rating"] = float(pub_row.avg_rating) if pub_row.avg_rating is not None else None
+            body["avg_rating"] = (
+                float(pub_row.avg_rating) if pub_row.avg_rating is not None else None
+            )
             body["published_delta"] = 1
         else:
             body["published_delta"] = 0
@@ -934,46 +1319,51 @@ async def handle_drupal_reviews_webhook(
         await db.commit()
         return body
 
-    if action in ("reject", "rejected", "deny", "denied", "delete_pending"):
-        row = await svc.adjust_pending_reviews(linqmd_user_id, -1, doctor_id=doctor_id)
-        await db.commit()
-        return {
-            "status": "ok",
-            "linqmd_user_id": linqmd_user_id,
-            "doctor_id": doctor_id,
-            "pending_count": row.pending_count,
-            "pending_delta": -1,
-        }
-
     if action in ("unpublish", "unpublished", "delete", "deleted"):
-        if doctor_id is None:
-            return {
-                "status": "ok",
-                "linqmd_user_id": linqmd_user_id,
-                "doctor_id": None,
-                "published_delta": 0,
-                "message": "No CAEPY doctor; published metrics unchanged",
-            }
-        if payload.rating is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="rating is required to update published review metrics",
-            )
-        row = await svc.adjust_reviews(
-            doctor_id,
-            payload.rating,
-            -1,
-            linqmd_user_id=linqmd_user_id,
-        )
+        was_pending = (old_status or "") == ReviewStatus.PENDING.value
+        if action in ("unpublish", "unpublished") or (
+            action in ("delete", "deleted") and not was_pending
+        ):
+            if doctor_id is None:
+                body["published_delta"] = 0
+                body["message"] = "No CAEPY doctor; published metrics unchanged"
+                await db.commit()
+                return body
+            if payload.rating is None and not was_pending:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="rating is required to update published review metrics",
+                )
+            if not was_pending and payload.rating is not None:
+                pub_row = await svc.adjust_reviews(
+                    doctor_id,
+                    payload.rating,
+                    -1,
+                    linqmd_user_id=linqmd_user_id,
+                )
+                body["review_count"] = pub_row.review_count
+                body["avg_rating"] = (
+                    float(pub_row.avg_rating) if pub_row.avg_rating is not None else None
+                )
+                body["published_delta"] = -1
         await db.commit()
-        return {
-            "status": "ok",
-            "linqmd_user_id": linqmd_user_id,
-            "doctor_id": doctor_id,
-            "review_count": row.review_count,
-            "avg_rating": float(row.avg_rating) if row.avg_rating is not None else None,
-            "published_delta": -1,
-        }
+        return body
+
+    if action in (
+        "submit",
+        "submitted",
+        "reject",
+        "rejected",
+        "deny",
+        "denied",
+        "delete_pending",
+        "flag",
+        "flagged",
+        "hidden",
+        "hide",
+    ):
+        await db.commit()
+        return body
 
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

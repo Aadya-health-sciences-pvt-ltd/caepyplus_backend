@@ -85,11 +85,12 @@ The only place that calls Drupal for glance.
 |--------|-----|
 | `PENDING_SOURCES` | The three count names, used by parse and by the glance JSON. |
 | `GLANCE_CARDS` | `appointments`, `requests`, `payments`. Copied through, not filled by this client. |
-| `PracticeHubPendingError` | Drupal was unreachable or did not return HTTP 200. |
 | `non_negative_int` | Shared floor at 0. |
-| `pending_count_from_block` | Reads `{ "pending_count": N }` from one Drupal block. |
-| `parse_pending_counts` | Keeps the three counts. Ignores Drupal's total. |
-| `fetch_pending_counts` | `GET {LINQMD_PRACTICE_HUB_API_URL}/api/linq360/pending-counts/{uid}` with the Practice Hub Basic token and cookie. |
+| `pending_count_from_block` | Reads `{ "pending_count": N }` from one block (ignores id arrays). |
+| `parse_pending_counts` | Keeps the three counts; supports nested `content`. |
+| `fetch_pending_counts` | `GET …/api/linq360/pending-counts` with workspace select Bearer token (no uid). |
+| `linqmd_user_id_from_workspace_token` | Reads ``appointment_doctor_id`` from the JWT for glance storage key. |
+| `PracticeHubPendingError` | Drupal unreachable or not HTTP 200. |
 
 ### `services/content_aggregator_service.py`
 
@@ -105,7 +106,7 @@ Glance functions:
 | `GlanceDashboardMissing` | Uid is not numeric, so it cannot be `user_id`. |
 | `get_glance` | Read path. No Drupal call. |
 | `upsert_pending_glance` | Write path. |
-| `sync_pending_glance` | Fetch, upsert, then `get_glance`. |
+| `sync_pending_glance` | Fetch Practice Hub, upsert glance, then `get_glance`. |
 | `_dashboards_for_uid` | Rows where `user_id` equals the Drupal uid. |
 | `_ensure_dashboard` | Those rows, or one new row when none exist. |
 | `_first_dashboard` | The row get uses when several appointments exist. |
@@ -259,12 +260,13 @@ flowchart TD
 
 `POST /caepy/api/v1/linq360/glance/sync`
 
-Body: `{ "linqmd_user_id": "884" }`. No doctor JWT.
+Header: `Authorization: Bearer <workspace_select_access_token>`. No user_id in body/URL.
 
 ```mermaid
 flowchart TD
   post["sync_glance"]
   svc["sync_pending_glance"]
+  decode["appointment_doctor_id from JWT"]
   fetch["fetch_pending_counts"]
   parse["parse_pending_counts"]
   upsert["upsert_pending_glance"]
@@ -275,19 +277,17 @@ flowchart TD
   read["get_glance"]
   resp["GlanceResponse"]
 
-  post --> svc --> fetch --> parse --> upsert --> ensure --> refresh --> doc --> table --> read --> resp
+  post --> svc --> decode --> fetch --> parse --> upsert --> ensure --> refresh --> doc --> table --> read --> resp
 ```
 
-1. `sync_glance` reads `GlanceSyncRequest`.
-2. `fetch_pending_counts` calls Drupal.
-3. `parse_pending_counts` returns `{ "reviews": N, "blog_comments": N, "podcast_comments": N }`.
-4. `_ensure_dashboard` finds rows with that `user_id`, or inserts one (`workspace_id` 0, `appointments_json` `{}`).
-5. `_glance_document` keeps `appointments`, `requests`, and `payments`, and replaces `content`.
-6. `_content_block` sets `total_pending_counts` to the sum.
-7. `get_glance` builds the same document again from the saved row.
-8. `GlanceResponse` is the HTTP body.
+1. `sync_glance` requires workspace select Bearer token.
+2. Decode JWT → `appointment_doctor_id` (Drupal uid, e.g. 892).
+3. `fetch_pending_counts` calls Drupal `GET …/pending-counts` with that Bearer token.
+4. `parse_pending_counts` keeps only the three `pending_count` numbers (drops id arrays).
+5. Glance is stored under that Drupal uid; `total_pending_counts` is the sum.
+6. Response is the same glance document.
 
-Drupal down or not HTTP 200: HTTP 502, and `todays_glance` is left unchanged. Non-numeric uid: HTTP 404.
+Missing token: HTTP 401. Drupal 401: HTTP 401. Other Drupal failures: HTTP 502.
 
 ## Glance get
 

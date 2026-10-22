@@ -34,11 +34,23 @@ class BlogStatus(str, Enum):
 
 
 class CommentStatus(str, Enum):
-    """Status of a blog comment."""
+    """Status of a blog or podcast comment."""
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
     REPLIED = "replied"
+    FLAGGED = "flagged"
+
+
+class ReviewStatus(str, Enum):
+    """Status of a mirrored Drupal review."""
+    PENDING = "pending"
+    PUBLISHED = "published"
+    APPROVED = "approved"
+    HIDDEN = "hidden"
+    REJECTED = "rejected"
+    FLAGGED = "flagged"
+    DELETED = "deleted"
 
 
 class CommentAuthorType(str, Enum):

@@ -226,7 +226,8 @@ python scripts/migrate.py baseline --upgrade
 | `015` | `reviews_summary_aggregator.pending_count` present |
 | `016` | `reviews_pending_aggregator` keyed by `linqmd_user_id` |
 | `017` | `content_pending_glance` (dropped in `018`) |
-| `018` | Glance counts live in `workspace_doctor_dashboard.todays_glance` (fully up to date) |
+| `018` | Glance counts live in `workspace_doctor_dashboard.todays_glance` |
+| `019` | `reviews_aggregator`, `blog_comment_stats`, `podcast_comment_stats`, review/podcast mirrors (fully up to date) |
 
 ---
 
@@ -251,7 +252,8 @@ python scripts/migrate.py baseline --upgrade
 | `015` | `015_reviews_pending_count.py` | Add `pending_count` on `reviews_summary_aggregator` |
 | `016` | `016_reviews_pending_by_linqmd_user.py` | Pending reviews keyed by Drupal `linqmd_user_id` |
 | `017` | `017_content_pending_glance.py` | Temporary public glance table (dropped by `018`) |
-| `018` | `018_drop_content_pending_glance.py` | Drop public glance table; counts stay in `todays_glance` (head) |
+| `018` | `018_drop_content_pending_glance.py` | Drop public glance table; counts stay in `todays_glance` |
+| `019` | `019_pending_counter_stats.py` | Pending counter tables + review/podcast mirrors + `parent_comment_id` (head) |
 
 ### Tables Created
 
@@ -292,7 +294,7 @@ python scripts/migrate.py baseline --upgrade
 
 ## Key Design Decisions
 
-1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`018`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
+1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`019`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
 4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.

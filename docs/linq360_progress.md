@@ -255,16 +255,16 @@ adds `reviews_summary_aggregator.pending_count`.
 `workspace_doctor_dashboard` where `user_id` equals that numeric Drupal uid.
 Published metrics still use `doctors.id` only when that doctor already exists.
 
-**Glance (updated 2026-10-05):** LinQ360 does not count Drupal MySQL and does
-not use `DRUPAL_DATABASE_URL`. Practice Hub exposes
-`GET {LINQMD_PRACTICE_HUB_API_URL}/api/linq360/pending-counts/{linqmd_user_id}`.
+**Glance (updated):** LinQ360 owns `GET /api/linq360/pending-counts` (list +
+counts). CAEPY must not call or rebuild that API. CAEPY keeps review/comment
+status and local counters (`reviews_aggregator`, `blog_comment_stats`,
+`podcast_comment_stats`) in sync on each event, and mirrors totals into
+`todays_glance` (Alembic **`019`**).
 
-`POST /v1/linq360/glance/sync` with `{ "linqmd_user_id": "884" }` calls that URL
-and writes the three pending counts into
-`linq360.workspace_doctor_dashboard.todays_glance` where `user_id` is that
-Drupal uid. If no dashboard row exists, sync inserts one (`workspace_id` `0`,
-`appointments_json` `{}`) so the JSON can be stored. `appointments_json` is
-not filled by this sync.
+`POST /v1/linq360/glance/sync` with `{ "linqmd_user_id": "884" }` rebuilds
+glance from those local counters into
+`linq360.workspace_doctor_dashboard.todays_glance`. If no dashboard row exists,
+sync inserts one (`workspace_id` `0`, `appointments_json` `{}`).
 
 `GET /v1/linq360/glance?linqmd_user_id=884` reads `todays_glance.content` only.
 No row yet means all three counts are `0`. The public `content_pending_glance`

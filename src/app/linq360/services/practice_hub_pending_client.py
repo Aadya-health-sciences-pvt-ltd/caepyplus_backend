@@ -1,9 +1,16 @@
-"""Fetch Drupal pending counts from Practice Hub.
+"""Fetch Drupal pending counts from Practice Hub (workspace-token flow).
 
-GET {LINQMD_PRACTICE_HUB_API_URL}/api/linq360/pending-counts/{user_id}
+GET {LINQMD_PRACTICE_HUB_API_URL}/api/linq360/pending-counts
+
+No user_id in the URL or body. Doctor comes from the workspace select
+Bearer token (``appointment_doctor_id``). CAEPY does not implement this GET;
+it pulls the Drupal payload into todays_glance via POST /linq360/glance/sync,
+keeping both pending_count and id arrays.
 """
 from __future__ import annotations
 
+import base64
+import json
 from typing import Any
 
 import httpx
@@ -22,6 +29,12 @@ class PracticeHubPendingError(Exception):
 PENDING_SOURCES = ("reviews", "blog_comments", "podcast_comments")
 GLANCE_CARDS = ("appointments", "requests", "payments")
 
+_SOURCE_ID_KEYS: dict[str, tuple[str, ...]] = {
+    "reviews": ("review_id",),
+    "blog_comments": ("comment_id", "blog_id"),
+    "podcast_comments": ("comment_id", "podcast_id"),
+}
+
 
 def non_negative_int(value: object) -> int:
     try:
@@ -31,32 +44,115 @@ def non_negative_int(value: object) -> int:
     return number if number > 0 else 0
 
 
+def _id_list(value: object) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    out: list[int] = []
+    for item in value:
+        try:
+            out.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def pending_count_from_block(block: object) -> int:
+    """Read pending_count from a Drupal content block."""
     if isinstance(block, dict):
         return non_negative_int(block.get("pending_count"))
-    return 0
+    return non_negative_int(block)
+
+
+def parse_source_block(source: str, block: object) -> dict[str, Any]:
+    """Normalize one Drupal source block (count + id arrays)."""
+    raw = block if isinstance(block, dict) else {"pending_count": block}
+    entry: dict[str, Any] = {"pending_count": pending_count_from_block(raw)}
+    for key in _SOURCE_ID_KEYS.get(source, ()):
+        entry[key] = _id_list(raw.get(key))
+    return entry
+
+
+def parse_pending_payload(body: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Map Drupal pending-counts JSON to three source blocks (counts + ids)."""
+    source = body.get("content") if isinstance(body.get("content"), dict) else body
+    if not isinstance(source, dict):
+        source = {}
+    return {name: parse_source_block(name, source.get(name)) for name in PENDING_SOURCES}
 
 
 def parse_pending_counts(body: dict[str, Any]) -> dict[str, int]:
-    """Map the Practice Hub payload to the three pending counts.
+    """Map payload to the three pending counts only."""
+    return {
+        name: block["pending_count"] for name, block in parse_pending_payload(body).items()
+    }
 
-    ``total_pending_counts`` from Drupal is ignored. CAEPY sums the three counts.
+
+def _normalize_bearer_token(token: str) -> str:
+    raw = (token or "").strip()
+    if raw.lower().startswith("bearer "):
+        raw = raw[7:].strip()
+    return raw
+
+
+def decode_workspace_select_claims(token: str) -> dict[str, Any]:
+    """Decode workspace select JWT payload (no signature verify).
+
+    Used only to read ``appointment_doctor_id`` / ``user_id`` for glance storage.
+    Drupal validates the token on the pending-counts call.
     """
-    return {source: pending_count_from_block(body.get(source)) for source in PENDING_SOURCES}
+    raw = _normalize_bearer_token(token)
+    parts = raw.split(".")
+    if len(parts) < 2:
+        raise PracticeHubPendingError("Workspace select token is not a valid JWT")
+    payload_b64 = parts[1]
+    padding = "=" * (-len(payload_b64) % 4)
+    try:
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
+        claims = json.loads(payload_bytes.decode("utf-8"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise PracticeHubPendingError(
+            "Workspace select token payload could not be decoded"
+        ) from exc
+    if not isinstance(claims, dict):
+        raise PracticeHubPendingError("Workspace select token payload was not an object")
+    return claims
 
 
-async def fetch_pending_counts(linqmd_user_id: str) -> dict[str, int]:
-    """GET Practice Hub pending counts for a Drupal uid."""
+def linqmd_user_id_from_workspace_token(token: str) -> str:
+    """Drupal doctor uid from ``appointment_doctor_id`` in the workspace select token."""
+    claims = decode_workspace_select_claims(token)
+    doctor = claims.get("appointment_doctor_id")
+    if doctor is None or not str(doctor).strip():
+        raise PracticeHubPendingError(
+            "Workspace select token has no appointment_doctor_id "
+            "(select a doctor workspace first)"
+        )
+    return str(doctor).strip()
+
+
+async def fetch_pending_counts(workspace_access_token: str) -> dict[str, dict[str, Any]]:
+    """GET Practice Hub pending counts using the workspace select Bearer token.
+
+    URL has no user_id. Doctor is resolved by Drupal from the token.
+    Returns normalized source blocks including id arrays.
+    """
     settings = get_settings()
     base = (settings.LINQMD_PRACTICE_HUB_API_URL or "").strip()
     if not base:
         raise PracticeHubPendingError("LINQMD_PRACTICE_HUB_API_URL is not set")
 
-    uid = str(linqmd_user_id).strip()
-    url = settings.linqmd_practice_hub_url(f"/api/linq360/pending-counts/{uid}")
-    headers: dict[str, str] = {"Accept": "application/json"}
-    if settings.LINQMD_PRACTICE_HUB_AUTH_TOKEN:
-        headers["Authorization"] = settings.LINQMD_PRACTICE_HUB_AUTH_TOKEN
+    bearer = _normalize_bearer_token(workspace_access_token)
+    if not bearer:
+        raise PracticeHubPendingError(
+            "Workspace select access token is required",
+            status_code=401,
+        )
+
+    url = settings.linqmd_practice_hub_url("/api/linq360/pending-counts")
+    headers: dict[str, str] = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {bearer}",
+    }
     if settings.LINQMD_PRACTICE_HUB_COOKIE:
         headers["Cookie"] = settings.LINQMD_PRACTICE_HUB_COOKIE
 
@@ -64,8 +160,16 @@ async def fetch_pending_counts(linqmd_user_id: str) -> dict[str, int]:
         async with httpx.AsyncClient(timeout=settings.LINQMD_API_TIMEOUT) as client:
             response = await client.get(url, headers=headers)
     except httpx.HTTPError as exc:
-        raise PracticeHubPendingError(f"Practice Hub pending-counts request failed: {exc}") from exc
+        raise PracticeHubPendingError(
+            f"Practice Hub pending-counts request failed: {exc}"
+        ) from exc
 
+    if response.status_code == 401:
+        raise PracticeHubPendingError(
+            "Practice Hub pending-counts: Authentication required "
+            "(use workspace select Bearer token)",
+            status_code=401,
+        )
     if response.status_code != 200:
         detail = response.text[:300]
         raise PracticeHubPendingError(
@@ -76,7 +180,11 @@ async def fetch_pending_counts(linqmd_user_id: str) -> dict[str, int]:
     try:
         body = response.json()
     except Exception as exc:
-        raise PracticeHubPendingError("Practice Hub pending-counts response was not JSON") from exc
+        raise PracticeHubPendingError(
+            "Practice Hub pending-counts response was not JSON"
+        ) from exc
     if not isinstance(body, dict):
-        raise PracticeHubPendingError("Practice Hub pending-counts response was not an object")
-    return parse_pending_counts(body)
+        raise PracticeHubPendingError(
+            "Practice Hub pending-counts response was not an object"
+        )
+    return parse_pending_payload(body)
