@@ -118,8 +118,24 @@ def decode_workspace_select_claims(token: str) -> dict[str, Any]:
     return claims
 
 
-def linqmd_user_id_from_workspace_token(token: str) -> str:
-    """Drupal doctor uid from ``appointment_doctor_id`` in the workspace select token."""
+def _optional_int_claim(claims: dict[str, Any], key: str) -> int | None:
+    value = claims.get(key)
+    if value is None or not str(value).strip():
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def workspace_identity_from_token(token: str) -> dict[str, Any]:
+    """Identity claims from the workspace select token.
+
+    Returns:
+        linqmd_user_id / ph_user_id: Drupal doctor uid (``appointment_doctor_id``)
+        workspace_id: portal workspace id (``workspace_id``), optional
+        ws_user_id: portal user id (``user_id``), optional
+    """
     claims = decode_workspace_select_claims(token)
     doctor = claims.get("appointment_doctor_id")
     if doctor is None or not str(doctor).strip():
@@ -127,7 +143,16 @@ def linqmd_user_id_from_workspace_token(token: str) -> str:
             "Workspace select token has no appointment_doctor_id "
             "(select a doctor workspace first)"
         )
-    return str(doctor).strip()
+    return {
+        "linqmd_user_id": str(doctor).strip(),
+        "workspace_id": _optional_int_claim(claims, "workspace_id"),
+        "ws_user_id": _optional_int_claim(claims, "user_id"),
+    }
+
+
+def linqmd_user_id_from_workspace_token(token: str) -> str:
+    """Drupal doctor uid from ``appointment_doctor_id`` in the workspace select token."""
+    return workspace_identity_from_token(token)["linqmd_user_id"]
 
 
 async def fetch_pending_counts(workspace_access_token: str) -> dict[str, dict[str, Any]]:

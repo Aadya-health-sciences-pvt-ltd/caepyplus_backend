@@ -38,7 +38,7 @@ src/app/linq360/
   schemas/
     __init__.py                    schema exports
     engagement.py                  glance and content-engagement JSON models
-    dashboard.py                   appointments_json shape, not used at runtime yet
+    dashboard.py                   appointment_json shape, not used at runtime yet
   models/
     __init__.py                    model exports
     dashboard.py                   linq360 dashboard tables
@@ -103,11 +103,11 @@ Glance functions:
 | `_counts_from_glance` | Reads the three stored `pending_count` values. |
 | `_content_block` | Builds `content`, including `total_pending_counts` as the sum. |
 | `_glance_document` | One JSON for the database and both HTTP responses. Keeps existing cards. Drops `messages`. |
-| `GlanceDashboardMissing` | Uid is not numeric, so it cannot be `user_id`. |
+| `GlanceDashboardMissing` | Uid is not numeric, so it cannot be `ph_user_id`. |
 | `get_glance` | Read path. No Drupal call. |
 | `upsert_pending_glance` | Write path. |
 | `sync_pending_glance` | Fetch Practice Hub, upsert glance, then `get_glance`. |
-| `_dashboards_for_uid` | Rows where `user_id` equals the Drupal uid. |
+| `_dashboards_for_uid` | Rows where `ph_user_id` equals the Drupal uid. |
 | `_ensure_dashboard` | Those rows, or one new row when none exist. |
 | `_first_dashboard` | The row get uses when several appointments exist. |
 | `_refresh_todays_glance_content` | Writes `_glance_document` onto every matching row. |
@@ -146,7 +146,7 @@ Published-metric functions (not used by glance):
 
 ### `schemas/dashboard.py`
 
-`WorkspaceAppointmentItem` is the planned shape of one object inside `appointments_json`: patient, appointment type, consultation type, time slot. Glance does not write this column. The sample file `data/workspace_appointments.sample.json` matches this model and is not loaded at runtime.
+`WorkspaceAppointmentItem` is the planned shape of one object inside `appointment_json`: patient, appointment type, consultation type, time slot. Glance does not write this column. The sample file `data/workspace_appointments.sample.json` matches this model and is not loaded at runtime.
 
 ### `models/dashboard.py`
 
@@ -190,9 +190,10 @@ Two Postgres schemas. Seven tables.
 | Column | Type | What is stored now |
 |--------|------|--------------------|
 | `appointment_id` | integer PK | Database-generated. |
-| `workspace_id` | integer | `0` when glance sync created the row. |
-| `user_id` | integer | Drupal uid, for example `884`. Not `doctors.id`. |
-| `appointments_json` | jsonb | `{}`. Not filled yet. |
+| `appointment_json` | jsonb | `{}`. Not filled yet. |
+| `workspace_id` | integer | From workspace select token. |
+| `ws_user_id` | integer | Portal `user_id` from token (nullable). |
+| `ph_user_id` | integer | Practice Hub / Drupal uid (`appointment_doctor_id`). |
 | `todays_glance` | jsonb | Pending glance JSON below. |
 
 **`doctor_dashboard`** — shell for a later doctor-level dashboard.

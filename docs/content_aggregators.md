@@ -31,10 +31,19 @@ CAEPY GET /v1/linq360/glance
 
 ## Identity (pending glance)
 
-| Key | Role |
-|-----|------|
-| `linqmd_user_id` | Drupal uid. Matches `workspace_doctor_dashboard.user_id`. |
-| `doctors.id` | Optional for published metrics / comment stats. |
+From the workspace select JWT:
+
+Dashboard columns (order):
+
+`appointment_id` · `appointment_json` · `workspace_id` · `ws_user_id` · `ph_user_id` · `todays_glance`
+
+| Token claim | Dashboard column | Example |
+|-------------|------------------|---------|
+| `workspace_id` | `workspace_id` | `161` |
+| `user_id` | `ws_user_id` | `325` |
+| `appointment_doctor_id` | `ph_user_id` (Practice Hub / Drupal uid) | `892` |
+
+Glance is looked up by `ph_user_id`.
 
 ## Tables
 

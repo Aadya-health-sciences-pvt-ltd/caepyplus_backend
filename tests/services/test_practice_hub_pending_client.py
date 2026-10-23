@@ -9,6 +9,7 @@ from src.app.linq360.services.practice_hub_pending_client import (
     linqmd_user_id_from_workspace_token,
     parse_pending_counts,
     parse_pending_payload,
+    workspace_identity_from_token,
 )
 
 
@@ -96,6 +97,23 @@ def test_linqmd_user_id_from_workspace_token() -> None:
     )
     assert linqmd_user_id_from_workspace_token(token) == "892"
     assert linqmd_user_id_from_workspace_token(f"Bearer {token}") == "892"
+
+
+def test_workspace_identity_from_token() -> None:
+    token = _jwt(
+        {
+            "user_id": "325",
+            "workspace_id": "161",
+            "appointment_doctor_id": "892",
+            "email": "workspace7@gmail.com",
+        }
+    )
+    identity = workspace_identity_from_token(f"Bearer {token}")
+    assert identity == {
+        "linqmd_user_id": "892",
+        "workspace_id": 161,
+        "ws_user_id": 325,
+    }
 
 
 def test_linqmd_user_id_missing_appointment_doctor() -> None:

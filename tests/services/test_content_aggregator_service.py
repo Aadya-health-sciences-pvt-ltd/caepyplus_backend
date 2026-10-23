@@ -143,8 +143,8 @@ class TestMainUpsertAndGlance:
     async def test_approved_adjust_does_not_write_glance(self, db_session: AsyncSession) -> None:
         dash = WorkspaceDoctorDashboard(
             workspace_id=1,
-            user_id=40,
-            appointments_json={},
+            ph_user_id=40,
+            appointment_json={},
             todays_glance={},
         )
         db_session.add(dash)
@@ -163,8 +163,8 @@ class TestMainUpsertAndGlance:
     ) -> None:
         dash = WorkspaceDoctorDashboard(
             workspace_id=1,
-            user_id=884,
-            appointments_json={},
+            ph_user_id=884,
+            appointment_json={},
             todays_glance={},
         )
         db_session.add(dash)
@@ -185,8 +185,8 @@ class TestMainUpsertAndGlance:
     async def test_stored_glance_row_and_dashboard(self, db_session: AsyncSession) -> None:
         dash = WorkspaceDoctorDashboard(
             workspace_id=1,
-            user_id=884,
-            appointments_json={},
+            ph_user_id=884,
+            appointment_json={},
             todays_glance={"appointments": {"kept": True}, "requests": {}, "payments": {}},
         )
         db_session.add(dash)
@@ -250,7 +250,7 @@ class TestMainUpsertAndGlance:
         glance = await svc.get_glance("884")
         assert glance["content"]["reviews"]["pending_count"] == 1
         result = await db_session.execute(
-            select(WorkspaceDoctorDashboard).where(WorkspaceDoctorDashboard.user_id == 884)
+            select(WorkspaceDoctorDashboard).where(WorkspaceDoctorDashboard.ph_user_id == 884)
         )
         row = result.scalar_one()
         assert row.todays_glance["content"]["reviews"]["pending_count"] == 1
@@ -365,7 +365,13 @@ class TestBlogPodcastCommentStats:
             body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
             return f"{header}.{body}.sig"
 
-        token = _jwt({"appointment_doctor_id": "884", "user_id": "320"})
+        token = _jwt(
+            {
+                "appointment_doctor_id": "884",
+                "user_id": "325",
+                "workspace_id": "161",
+            }
+        )
 
         async def _fake_fetch(access_token: str) -> dict:
             return {
@@ -394,6 +400,19 @@ class TestBlogPodcastCommentStats:
         assert glance["content"]["blog_comments"]["comment_id"] == [2]
         assert glance["content"]["blog_comments"]["blog_id"] == [5]
         assert glance["content"]["total_pending_counts"] == 3
+
+        from src.app.linq360.models.dashboard import WorkspaceDoctorDashboard
+        from sqlalchemy import select
+
+        dash = (
+            await db_session.execute(
+                select(WorkspaceDoctorDashboard).where(
+                    WorkspaceDoctorDashboard.ph_user_id == 884
+                )
+            )
+        ).scalar_one()
+        assert dash.workspace_id == 161
+        assert dash.ws_user_id == 325
 
 
 class TestRebuildBlog:

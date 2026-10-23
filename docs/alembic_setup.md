@@ -227,7 +227,9 @@ python scripts/migrate.py baseline --upgrade
 | `016` | `reviews_pending_aggregator` keyed by `linqmd_user_id` |
 | `017` | `content_pending_glance` (dropped in `018`) |
 | `018` | Glance counts live in `workspace_doctor_dashboard.todays_glance` |
-| `019` | `reviews_aggregator`, `blog_comment_stats`, `podcast_comment_stats`, review/podcast mirrors (fully up to date) |
+| `019` | `reviews_aggregator`, `blog_comment_stats`, `podcast_comment_stats`, review/podcast mirrors |
+| `020` | `workspace_doctor_dashboard.workspace_user_id` |
+| `021` | Rename to `appointment_json` / `ws_user_id` / `ph_user_id` (fully up to date) |
 
 ---
 
@@ -253,7 +255,9 @@ python scripts/migrate.py baseline --upgrade
 | `016` | `016_reviews_pending_by_linqmd_user.py` | Pending reviews keyed by Drupal `linqmd_user_id` |
 | `017` | `017_content_pending_glance.py` | Temporary public glance table (dropped by `018`) |
 | `018` | `018_drop_content_pending_glance.py` | Drop public glance table; counts stay in `todays_glance` |
-| `019` | `019_pending_counter_stats.py` | Pending counter tables + review/podcast mirrors + `parent_comment_id` (head) |
+| `019` | `019_pending_counter_stats.py` | Pending counter tables + review/podcast mirrors + `parent_comment_id` |
+| `020` | `020_workspace_user_id.py` | Portal `workspace_user_id` on dashboard |
+| `021` | `021_dashboard_column_rename.py` | `appointment_json`, `ws_user_id`, `ph_user_id` (head) |
 
 ### Tables Created
 
@@ -266,7 +270,7 @@ python scripts/migrate.py baseline --upgrade
 | `doctor_status_history` | Immutable audit log |
 | `dropdown_options` | Curated dropdown values with approval workflow |
 | `users` | RBAC user accounts |
-| `linq360.workspace_doctor_dashboard` | `appointment_id`, `workspace_id`, `user_id`, `appointments_json`, `todays_glance` |
+| `linq360.workspace_doctor_dashboard` | `appointment_id`, `appointment_json`, `workspace_id`, `ws_user_id`, `ph_user_id`, `todays_glance` |
 | `linq360.doctor_dashboard` | Linq360 doctor dashboard shell (columns TBD) |
 | `linq360.content_source_aggregator` | Per-doctor per-source content engagement rollup |
 | `blog_comments_aggregator` | Approved blog comment counts per doctor |
@@ -294,7 +298,7 @@ python scripts/migrate.py baseline --upgrade
 
 ## Key Design Decisions
 
-1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`019`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
+1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`021`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
 4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.

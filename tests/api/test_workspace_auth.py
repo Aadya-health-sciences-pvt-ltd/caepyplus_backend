@@ -17,9 +17,17 @@ def _jwt(payload: dict) -> str:
 
 
 def test_require_workspace_select_auth_ok() -> None:
-    token = _jwt({"appointment_doctor_id": "892", "user_id": "320"})
+    token = _jwt(
+        {
+            "appointment_doctor_id": "892",
+            "user_id": "325",
+            "workspace_id": "161",
+        }
+    )
     auth = require_workspace_select_auth(authorization=f"Bearer {token}")
     assert auth.linqmd_user_id == "892"
+    assert auth.ws_user_id == 325
+    assert auth.workspace_id == 161
     assert auth.authorization.startswith("Bearer ")
 
 

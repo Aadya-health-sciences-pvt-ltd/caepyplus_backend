@@ -7,7 +7,7 @@ from ..models.enums import AppointmentType, ConsultationType
 
 
 class WorkspaceAppointmentItem(BaseModel):
-    """Single appointment object stored in ``appointments_json``."""
+    """Single appointment object stored in ``appointment_json``."""
 
     model_config = ConfigDict(use_enum_values=True)
 
