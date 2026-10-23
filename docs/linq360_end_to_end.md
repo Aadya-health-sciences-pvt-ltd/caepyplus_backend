@@ -1,8 +1,9 @@
 # LinQ360 end to end
 
-Current map of the LinQ360 package: every file, every table, and how the code connects.
+**Frontend handbook (APIs, auth, response shapes, recommended flow):**  
+→ **[linq360_frontend_handbook.md](linq360_frontend_handbook.md)**
 
-Local URLs use the app prefix `/caepy/api`. Step-by-step history is in [linq360_progress.md](linq360_progress.md).
+This file is the internal package / table map. Local URLs use the app prefix `/caepy/api`. Step-by-step history is in [linq360_progress.md](linq360_progress.md).
 
 Two workflows live in this package. They do not share a table.
 
