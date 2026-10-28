@@ -4,8 +4,8 @@ GET {LINQMD_PRACTICE_HUB_API_URL}/api/linq360/pending-counts
 
 No user_id in the URL or body. Doctor comes from the workspace select
 Bearer token (``appointment_doctor_id``). CAEPY does not implement this GET;
-it pulls the Drupal payload into todays_glance via POST /linq360/glance/sync,
-keeping both pending_count and id arrays.
+it pulls the Drupal payload into doctor_dashboard.todays_glance via
+POST /linq360/glance/sync, keeping both pending_count and id arrays.
 """
 from __future__ import annotations
 
@@ -27,7 +27,8 @@ class PracticeHubPendingError(Exception):
 
 
 PENDING_SOURCES = ("reviews", "blog_comments", "podcast_comments")
-GLANCE_CARDS = ("appointments", "requests", "payments")
+# Workspace-card keys returned on glance (stored on workspace_doctor_dashboard).
+WORKSPACE_GLANCE_CARDS = ("appointments", "requests")
 
 _SOURCE_ID_KEYS: dict[str, tuple[str, ...]] = {
     "reviews": ("review_id",),

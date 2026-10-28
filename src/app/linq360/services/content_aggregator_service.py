@@ -26,9 +26,8 @@ from ..models.aggregators import (
     ReviewsPendingAggregator,
     ReviewsSummaryAggregator,
 )
-from ..models.dashboard import WorkspaceDoctorDashboard
+from ..models.dashboard import DoctorDashboard, WorkspaceDoctorDashboard
 from .practice_hub_pending_client import (
-    GLANCE_CARDS,
     PENDING_SOURCES,
     fetch_pending_counts,
     non_negative_int,
@@ -88,17 +87,27 @@ def _avg_rating(rating_sum: Decimal, review_count: int) -> Decimal | None:
     return (rating_sum / Decimal(review_count)).quantize(Decimal("0.0001"))
 
 
-def _payload_from_glance(existing: dict[str, Any] | None) -> dict[str, Any]:
-    """Read stored source blocks (counts + ids) from todays_glance."""
-    content = (existing or {}).get("content") if isinstance(existing, dict) else None
+def _payload_from_stored_content(existing: dict[str, Any] | None) -> dict[str, Any]:
+    """Read source blocks from doctor_dashboard.todays_glance (content-only).
+
+    Also accepts a legacy wrapped ``{"content": {...}}`` shape.
+    """
+    raw = existing if isinstance(existing, dict) else {}
+    if isinstance(raw.get("content"), dict) and any(
+        key in raw["content"] for key in PENDING_SOURCES
+    ):
+        content = raw["content"]
+    elif any(key in raw for key in PENDING_SOURCES):
+        content = raw
+    else:
+        content = raw.get("content") if isinstance(raw.get("content"), dict) else raw
     content = content if isinstance(content, dict) else {}
     return {source: content.get(source) or {} for source in PENDING_SOURCES}
 
 
 def _counts_from_glance(existing: dict[str, Any] | None) -> dict[str, int]:
-    content = (existing or {}).get("content") if isinstance(existing, dict) else None
-    content = content if isinstance(content, dict) else {}
-    return {source: pending_count_from_block(content.get(source)) for source in PENDING_SOURCES}
+    payload = _payload_from_stored_content(existing)
+    return {source: pending_count_from_block(payload.get(source)) for source in PENDING_SOURCES}
 
 
 def _content_block(payload: dict[str, Any]) -> dict[str, Any]:
@@ -113,26 +122,32 @@ def _content_block(payload: dict[str, Any]) -> dict[str, Any]:
     return block
 
 
-def _glance_document(
-    existing: dict[str, Any] | None, payload: dict[str, Any]
+def _card_dict(value: object) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _merge_glance_response(
+    content_payload: dict[str, Any],
+    *,
+    requests: object = None,
+    appointments: object = None,
 ) -> dict[str, Any]:
-    """API and stored glance shape. Other cards are left as already stored."""
-    stored = dict(existing or {})
-    stored.pop("messages", None)
-    document: dict[str, Any] = {"content": _content_block(payload)}
-    for card in GLANCE_CARDS:
-        value = stored.get(card)
-        document[card] = dict(value) if isinstance(value, dict) else {}
-    return document
+    """API glance shape: content from doctor_dashboard; cards from workspace."""
+    return {
+        "content": _content_block(content_payload),
+        "requests": _card_dict(requests),
+        "appointments": _card_dict(appointments),
+        "payments": {},
+    }
 
 
 class GlanceDashboardMissing(Exception):
-    """No workspace_doctor_dashboard row exists for this Drupal uid."""
+    """Cannot store glance for a non-numeric Drupal uid."""
 
     def __init__(self, linqmd_user_id: str) -> None:
         super().__init__(
-            "No linq360.workspace_doctor_dashboard row with ph_user_id="
-            f"{linqmd_user_id}. todays_glance can only be stored on that row."
+            "Cannot store linq360.doctor_dashboard.todays_glance for ph_user_id="
+            f"{linqmd_user_id} (must be numeric)."
         )
         self.linqmd_user_id = linqmd_user_id
 
@@ -340,14 +355,27 @@ class ContentAggregatorService:
             return
 
     async def get_glance(self, linqmd_user_id: str) -> dict[str, Any]:
-        """Read pending inbox from ``linq360.workspace_doctor_dashboard.todays_glance``.
+        """Merge glance from both dashboard tables.
 
-        Returns counts and id arrays when stored by sync. Missing row → zeros / [].
+        - ``content`` ← ``doctor_dashboard.todays_glance``
+        - ``requests`` / ``appointments`` ← ``workspace_doctor_dashboard``
+        - ``payments`` ← always ``{}``
+
+        Missing rows → empty defaults (still a full glance document).
         """
         uid = str(linqmd_user_id).strip()
-        dash = await self._first_dashboard(uid)
-        stored = dash.todays_glance if dash is not None and dash.todays_glance else None
-        return _glance_document(stored, _payload_from_glance(stored))
+        doctor = await self._get_doctor_dashboard(uid)
+        workspace = await self._first_workspace_dashboard(uid)
+        stored = (
+            doctor.todays_glance
+            if doctor is not None and doctor.todays_glance
+            else None
+        )
+        return _merge_glance_response(
+            _payload_from_stored_content(stored),
+            requests=workspace.requests if workspace is not None else {},
+            appointments=workspace.appointments if workspace is not None else {},
+        )
 
     async def upsert_pending_glance(
         self,
@@ -357,7 +385,10 @@ class ContentAggregatorService:
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> None:
-        """Write pending payload (counts + ids) into ``todays_glance``."""
+        """Write pending content into ``doctor_dashboard.todays_glance``.
+
+        Also ensures a workspace row exists (requests/appointments untouched).
+        """
         await self._refresh_todays_glance_content(
             str(linqmd_user_id).strip(),
             payload,
@@ -369,9 +400,11 @@ class ContentAggregatorService:
         """GET Practice Hub pending counts with workspace select token; upsert glance.
 
         Calls ``GET …/api/linq360/pending-counts`` (no user_id). From the token:
-        - ``appointment_doctor_id`` → dashboard ``ph_user_id`` (Drupal / PH uid)
-        - ``workspace_id`` → dashboard ``workspace_id``
-        - ``user_id`` → dashboard ``ws_user_id`` (portal user)
+        - ``appointment_doctor_id`` → ``ph_user_id`` on both dashboards
+        - ``workspace_id`` → ``workspace_doctor_dashboard.workspace_id``
+        - ``user_id`` → ``ws_user_id`` on both dashboards
+
+        Returns the same merged shape as ``get_glance``.
         """
         identity = workspace_identity_from_token(workspace_access_token)
         uid = str(identity["linqmd_user_id"])
@@ -633,7 +666,9 @@ class ContentAggregatorService:
             lambda: ReviewsPendingAggregator(linqmd_user_id=linqmd_user_id, pending_count=0),
         )
 
-    async def _dashboards_for_uid(self, linqmd_user_id: str) -> list[WorkspaceDoctorDashboard]:
+    async def _workspace_dashboards_for_uid(
+        self, linqmd_user_id: str
+    ) -> list[WorkspaceDoctorDashboard]:
         if not linqmd_user_id.isdigit():
             return []
         result = await self.session.execute(
@@ -643,17 +678,33 @@ class ContentAggregatorService:
         )
         return list(result.scalars().all())
 
-    async def _ensure_dashboard(
+    async def _first_workspace_dashboard(
+        self, linqmd_user_id: str
+    ) -> WorkspaceDoctorDashboard | None:
+        rows = await self._workspace_dashboards_for_uid(linqmd_user_id)
+        return rows[0] if rows else None
+
+    async def _get_doctor_dashboard(self, linqmd_user_id: str) -> DoctorDashboard | None:
+        if not linqmd_user_id.isdigit():
+            return None
+        result = await self.session.execute(
+            select(DoctorDashboard).where(
+                DoctorDashboard.ph_user_id == int(linqmd_user_id)
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _ensure_workspace_dashboard(
         self,
         linqmd_user_id: str,
         *,
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> list[WorkspaceDoctorDashboard]:
-        """Return dashboard rows for this Practice Hub uid, creating one when none exist."""
+        """Return workspace rows for this PH uid, creating one when none exist."""
         if not linqmd_user_id.isdigit():
             raise GlanceDashboardMissing(linqmd_user_id)
-        rows = await self._dashboards_for_uid(linqmd_user_id)
+        rows = await self._workspace_dashboards_for_uid(linqmd_user_id)
         if rows:
             for row in rows:
                 if workspace_id is not None:
@@ -667,15 +718,36 @@ class ContentAggregatorService:
             workspace_id=int(workspace_id) if workspace_id is not None else 0,
             ws_user_id=int(ws_user_id) if ws_user_id is not None else None,
             ph_user_id=int(linqmd_user_id),
-            todays_glance={},
+            requests={},
+            appointments={},
         )
         self.session.add(row)
         await self.session.flush()
         return [row]
 
-    async def _first_dashboard(self, linqmd_user_id: str) -> WorkspaceDoctorDashboard | None:
-        rows = await self._dashboards_for_uid(linqmd_user_id)
-        return rows[0] if rows else None
+    async def _ensure_doctor_dashboard(
+        self,
+        linqmd_user_id: str,
+        *,
+        ws_user_id: int | None = None,
+    ) -> DoctorDashboard:
+        """Return doctor_dashboard for this PH uid, creating one when missing."""
+        if not linqmd_user_id.isdigit():
+            raise GlanceDashboardMissing(linqmd_user_id)
+        row = await self._get_doctor_dashboard(linqmd_user_id)
+        if row is not None:
+            if ws_user_id is not None:
+                row.ws_user_id = int(ws_user_id)
+            await self.session.flush()
+            return row
+        row = DoctorDashboard(
+            ph_user_id=int(linqmd_user_id),
+            ws_user_id=int(ws_user_id) if ws_user_id is not None else None,
+            todays_glance={},
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
 
     async def _refresh_todays_glance_content(
         self,
@@ -685,17 +757,19 @@ class ContentAggregatorService:
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> None:
-        """Write pending payload into ``todays_glance`` keyed by ``ph_user_id``.
+        """Write pending content into ``doctor_dashboard.todays_glance``.
 
-        Also stores portal ``workspace_id`` / ``ws_user_id`` from the token.
-        Creates one dashboard row when none exists so the JSON can be stored.
+        Ensures a workspace row exists for requests/appointments merge on GET.
+        Does not overwrite workspace ``requests`` / ``appointments``.
         """
-        dashboards = await self._ensure_dashboard(
+        doctor = await self._ensure_doctor_dashboard(
+            linqmd_user_id, ws_user_id=ws_user_id
+        )
+        doctor.todays_glance = _content_block(payload)
+        flag_modified(doctor, "todays_glance")
+        await self._ensure_workspace_dashboard(
             linqmd_user_id,
             workspace_id=workspace_id,
             ws_user_id=ws_user_id,
         )
-        for dash in dashboards:
-            dash.todays_glance = _glance_document(dash.todays_glance, payload)
-            flag_modified(dash, "todays_glance")
         await self.session.flush()

@@ -28,15 +28,20 @@ That API returns pending reviews / blog comments / podcast comments (counts + id
        (JWT: appointment_doctor_id = Drupal doctor uid)
 
 2. Frontend → POST /linq360/glance/sync  (Bearer token)
-              CAEPY calls Drupal pending-counts, stores todays_glance,
-              returns GlanceResponse
+              CAEPY calls Drupal pending-counts,
+              stores content in doctor_dashboard.todays_glance,
+              returns merged GlanceResponse
 
 3. Later     → GET /linq360/glance
-              CAEPY returns stored todays_glance
+              CAEPY merges both tables into one GlanceResponse:
+                content       ← doctor_dashboard.todays_glance
+                requests      ← workspace_doctor_dashboard.requests
+                appointments  ← workspace_doctor_dashboard.appointments
+                payments      ← {}
 ```
 
 ```text
-Drupal pending-counts  →  CAEPY (sync + store)  →  Frontend (sync / get)
+Drupal pending-counts  →  CAEPY store (two tables)  →  Frontend (sync / get merge)
 ```
 
 ---
@@ -186,9 +191,12 @@ Frontend          CAEPY                    Practice Hub
    │                │ Bearer ws_token            │
    │                │───────────────────────────►│
    │                │◄────── pending JSON ───────│
-   │                │ save todays_glance         │
+   │                │ save doctor_dashboard      │
+   │                │   .todays_glance (content) │
    │◄── GlanceResponse ──│                       │
 ```
+
+GET reads `doctor_dashboard` + `workspace_doctor_dashboard` and merges the same shape.
 
 ---
 

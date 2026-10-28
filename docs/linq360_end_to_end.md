@@ -191,19 +191,23 @@ Two Postgres schemas. Seven tables.
 | Column | Type | What is stored now |
 |--------|------|--------------------|
 | `appointment_id` | integer PK | Database-generated. |
-| `appointment_json` | jsonb | `{}`. Not filled yet. |
-| `workspace_id` | integer | From workspace select token. |
-| `ws_user_id` | integer | Portal `user_id` from token (nullable). |
 | `ph_user_id` | integer | Practice Hub / Drupal uid (`appointment_doctor_id`). |
-| `todays_glance` | jsonb | Pending glance JSON below. |
+| `ws_user_id` | integer | Portal `user_id` from token (nullable). |
+| `workspace_id` | integer | From workspace select token. |
+| `appointments` | jsonb | Workspace appointments card (`{}` until filled). |
+| `requests` | jsonb | Workspace requests card (`{}` until filled). |
+| `appointment_json` | jsonb | `{}`. Not filled yet. |
 
-**`doctor_dashboard`** — shell for a later doctor-level dashboard.
+**`doctor_dashboard`** — pending content for Today-at-a-Glance.
 
-| Column | Type |
-|--------|------|
-| `id` | integer PK |
+| Column | Type | What is stored now |
+|--------|------|--------------------|
+| `id` | integer PK | Database-generated. |
+| `ph_user_id` | integer | Practice Hub / Drupal uid (unique). |
+| `ws_user_id` | integer | Portal `user_id` from token (nullable). |
+| `todays_glance` | jsonb | Content only (reviews / blog / podcast pending). |
 
-No business columns yet.
+`GET /linq360/glance` merges `doctor_dashboard.todays_glance` → `content` with workspace `requests` / `appointments` (`payments` always `{}`).
 
 **`content_source_aggregator`** — published totals. Empty until an approve or publish event runs. Unique `(doctor_id, source)`.
 

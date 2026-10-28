@@ -4,8 +4,8 @@ Two separate concerns:
 
 1. **Published metrics** — source aggregators + `linq360.content_source_aggregator`
    + `GET …/content-engagement` (approved / published item counts and ratings).
-2. **Pending moderation inbox badge** — `todays_glance` JSON, filled by pulling
-   Practice Hub pending counts (old pull-sync flow).
+2. **Pending moderation inbox badge** — content in `doctor_dashboard.todays_glance`,
+   workspace cards on `workspace_doctor_dashboard`; filled by Practice Hub pull-sync.
 
 ## Pending counts flow (counts only)
 
@@ -18,30 +18,31 @@ CAEPY POST /v1/linq360/glance/sync
         ↓
 Drupal GET /api/linq360/pending-counts   (no user_id; doctor from token)
         ↓
-write pending counts + id arrays into todays_glance for uid 892
+write content into doctor_dashboard.todays_glance for uid 892
         ↓
 CAEPY GET /v1/linq360/glance
   Authorization: Bearer <same workspace_select_token>
+  merges doctor_dashboard + workspace_doctor_dashboard
 ```
 
 - CAEPY does **not** implement `GET /api/linq360/pending-counts`.
 - No `user_id` in URL or body for glance GET/sync; doctor comes from the token.
-- Sync stores Drupal counts and id arrays; GET returns that stored JSON.
-- `payments` / `requests` / `appointments` stay empty objects on glance.
+- Sync stores Drupal content counts + ids; GET merges both tables.
+- `payments` is always `{}` (not stored). `requests` / `appointments` live on the workspace table.
 
 ## Identity (pending glance)
 
 From the workspace select JWT:
 
-Dashboard columns (order):
+**`doctor_dashboard`:** `id` · `ph_user_id` · `ws_user_id` · `todays_glance` (content only)
 
-`appointment_id` · `appointment_json` · `workspace_id` · `ws_user_id` · `ph_user_id` · `todays_glance`
+**`workspace_doctor_dashboard`:** `appointment_id` · `ph_user_id` · `ws_user_id` · `workspace_id` · `appointments` · `requests` · `appointment_json`
 
-| Token claim | Dashboard column | Example |
-|-------------|------------------|---------|
-| `workspace_id` | `workspace_id` | `161` |
-| `user_id` | `ws_user_id` | `325` |
-| `appointment_doctor_id` | `ph_user_id` (Practice Hub / Drupal uid) | `892` |
+| Token claim | Column | Example |
+|-------------|--------|---------|
+| `workspace_id` | `workspace_doctor_dashboard.workspace_id` | `161` |
+| `user_id` | `ws_user_id` (both tables) | `325` |
+| `appointment_doctor_id` | `ph_user_id` (both tables) | `892` |
 
 Glance is looked up by `ph_user_id`.
 
@@ -49,7 +50,11 @@ Glance is looked up by `ph_user_id`.
 
 ### Glance (read path for badge counts)
 
-`linq360.workspace_doctor_dashboard.todays_glance` — written by sync from Drupal.
+| Table | What GET reads |
+|-------|----------------|
+| `linq360.doctor_dashboard.todays_glance` | `content` (pending reviews / blog / podcast) |
+| `linq360.workspace_doctor_dashboard.requests` | `requests` |
+| `linq360.workspace_doctor_dashboard.appointments` | `appointments` |
 
 ### Pending counter tables (webhook deltas; not the glance read)
 

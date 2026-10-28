@@ -16,7 +16,7 @@ from src.app.linq360.models.aggregators import (
     ReviewsPendingAggregator,
     ReviewsSummaryAggregator,
 )
-from src.app.linq360.models.dashboard import WorkspaceDoctorDashboard
+from src.app.linq360.models.dashboard import DoctorDashboard, WorkspaceDoctorDashboard
 from src.app.linq360.services.content_aggregator_service import (
     ContentAggregatorService,
     blog_comment_delta,
@@ -141,33 +141,35 @@ class TestMainUpsertAndGlance:
         assert count == 1
 
     async def test_approved_adjust_does_not_write_glance(self, db_session: AsyncSession) -> None:
-        dash = WorkspaceDoctorDashboard(
+        doctor = DoctorDashboard(ph_user_id=40, todays_glance={})
+        workspace = WorkspaceDoctorDashboard(
             workspace_id=1,
             ph_user_id=40,
             appointment_json={},
-            todays_glance={},
+            requests={},
+            appointments={},
         )
-        db_session.add(dash)
+        db_session.add_all([doctor, workspace])
         await db_session.flush()
 
         svc = ContentAggregatorService(db_session)
         await svc.adjust_blog_comments(40, 2)
         await svc.adjust_reviews(40, 5, 1)
-        await db_session.refresh(dash)
-        assert dash.todays_glance == {} or "reviews" not in (dash.todays_glance or {}).get(
-            "content", {}
-        )
+        await db_session.refresh(doctor)
+        assert doctor.todays_glance == {} or "reviews" not in (doctor.todays_glance or {})
 
     async def test_webhook_pending_does_not_write_glance(
         self, db_session: AsyncSession
     ) -> None:
-        dash = WorkspaceDoctorDashboard(
+        doctor = DoctorDashboard(ph_user_id=884, todays_glance={})
+        workspace = WorkspaceDoctorDashboard(
             workspace_id=1,
             ph_user_id=884,
             appointment_json={},
-            todays_glance={},
+            requests={},
+            appointments={},
         )
-        db_session.add(dash)
+        db_session.add_all([doctor, workspace])
         await db_session.flush()
 
         svc = ContentAggregatorService(db_session)
@@ -177,19 +179,19 @@ class TestMainUpsertAndGlance:
         row = await db_session.get(ReviewsPendingAggregator, "884")
         assert row is not None
         assert row.pending_count == 0
-        await db_session.refresh(dash)
-        assert dash.todays_glance == {} or "reviews" not in (dash.todays_glance or {}).get(
-            "content", {}
-        )
+        await db_session.refresh(doctor)
+        assert doctor.todays_glance == {} or "reviews" not in (doctor.todays_glance or {})
 
     async def test_stored_glance_row_and_dashboard(self, db_session: AsyncSession) -> None:
-        dash = WorkspaceDoctorDashboard(
+        doctor = DoctorDashboard(ph_user_id=884, todays_glance={})
+        workspace = WorkspaceDoctorDashboard(
             workspace_id=1,
             ph_user_id=884,
             appointment_json={},
-            todays_glance={"appointments": {"kept": True}, "requests": {}, "payments": {}},
+            requests={},
+            appointments={"kept": True},
         )
-        db_session.add(dash)
+        db_session.add_all([doctor, workspace])
         await db_session.flush()
 
         svc = ContentAggregatorService(db_session)
@@ -199,6 +201,7 @@ class TestMainUpsertAndGlance:
         assert empty["content"]["podcast_comments"]["pending_count"] == 0
         assert empty["content"]["total_pending_counts"] == 0
         assert empty["appointments"] == {"kept": True}
+        assert empty["payments"] == {}
 
         await svc.upsert_pending_glance(
             "884",
@@ -229,15 +232,16 @@ class TestMainUpsertAndGlance:
         assert "messages" not in glance
         assert "linqmd_user_id" not in glance
 
-        await db_session.refresh(dash)
-        content = dash.todays_glance["content"]
+        await db_session.refresh(doctor)
+        await db_session.refresh(workspace)
+        content = doctor.todays_glance
         assert content["reviews"]["pending_count"] == 2
         assert content["reviews"]["review_id"] == [3, 9]
         assert content["blog_comments"]["pending_count"] == 1
         assert content["total_pending_counts"] == 3
         assert "item_count" not in content["reviews"]
-        assert dash.todays_glance["appointments"] == {"kept": True}
-        assert "messages" not in dash.todays_glance
+        assert workspace.appointments == {"kept": True}
+        assert "content" not in workspace.appointments
 
     async def test_upsert_creates_dashboard_row_when_missing(
         self, db_session: AsyncSession
@@ -249,11 +253,21 @@ class TestMainUpsertAndGlance:
         )
         glance = await svc.get_glance("884")
         assert glance["content"]["reviews"]["pending_count"] == 1
-        result = await db_session.execute(
-            select(WorkspaceDoctorDashboard).where(WorkspaceDoctorDashboard.ph_user_id == 884)
-        )
-        row = result.scalar_one()
-        assert row.todays_glance["content"]["reviews"]["pending_count"] == 1
+        doctor = (
+            await db_session.execute(
+                select(DoctorDashboard).where(DoctorDashboard.ph_user_id == 884)
+            )
+        ).scalar_one()
+        assert doctor.todays_glance["reviews"]["pending_count"] == 1
+        workspace = (
+            await db_session.execute(
+                select(WorkspaceDoctorDashboard).where(
+                    WorkspaceDoctorDashboard.ph_user_id == 884
+                )
+            )
+        ).scalar_one()
+        assert workspace.requests == {}
+        assert workspace.appointments == {}
 
     async def test_pending_saved_without_dashboard_or_doctor(
         self, db_session: AsyncSession
@@ -401,7 +415,6 @@ class TestBlogPodcastCommentStats:
         assert glance["content"]["blog_comments"]["blog_id"] == [5]
         assert glance["content"]["total_pending_counts"] == 3
 
-        from src.app.linq360.models.dashboard import WorkspaceDoctorDashboard
         from sqlalchemy import select
 
         dash = (
@@ -413,6 +426,13 @@ class TestBlogPodcastCommentStats:
         ).scalar_one()
         assert dash.workspace_id == 161
         assert dash.ws_user_id == 325
+        doctor = (
+            await db_session.execute(
+                select(DoctorDashboard).where(DoctorDashboard.ph_user_id == 884)
+            )
+        ).scalar_one()
+        assert doctor.ws_user_id == 325
+        assert doctor.todays_glance["reviews"]["pending_count"] == 2
 
 
 class TestRebuildBlog:
