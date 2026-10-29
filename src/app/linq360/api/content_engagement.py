@@ -12,6 +12,7 @@ from ...models.user import User
 from ...repositories.doctor_repository import DoctorRepository
 from ..schemas.engagement import (
     ContentEngagementResponse,
+    DashboardWebhookPayload,
     GlanceApiResponse,
     GlanceResponse,
 )
@@ -27,6 +28,7 @@ public_router = APIRouter()
 
 _MSG_GLANCE_GET = "Glance retrieved successfully"
 _MSG_GLANCE_SYNC = "Glance synced successfully"
+_MSG_DASHBOARD_WEBHOOK = "Dashboard webhook processed successfully"
 
 
 async def require_doctor_engagement_access(
@@ -80,6 +82,7 @@ async def get_glance(
     data = await ContentAggregatorService(db).get_glance(
         auth.linqmd_user_id,
         workspace_id=auth.workspace_id,
+        ws_user_id=auth.ws_user_id,
     )
     return GlanceApiResponse(
         status_code=status.HTTP_200_OK,
@@ -117,5 +120,48 @@ async def sync_glance(
     return GlanceApiResponse(
         status_code=status.HTTP_200_OK,
         msg=_MSG_GLANCE_SYNC,
+        data=GlanceResponse.model_validate(data),
+    )
+
+
+@public_router.post("/webhooks/dashboard", response_model=GlanceApiResponse)
+async def dashboard_webhook(
+    payload: DashboardWebhookPayload,
+    db: DbSession,
+    auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
+) -> GlanceApiResponse:
+    """Appointment-system webhook: store schedule/counts, sync pending, return glance.
+
+    Auth: ``Authorization: Bearer <workspace_select_access_token>`` (required for
+    Drupal pending-counts sync). Body supplies ``ph_user_id``, ``workspace_id``,
+    ``appointments``, ``requests``, and ``todays_schedule``.
+    """
+    schedule = [item.model_dump(mode="json") for item in payload.todays_schedule]
+    try:
+        data = await ContentAggregatorService(db).process_dashboard_webhook(
+            auth.authorization,
+            ph_user_id=payload.ph_user_id,
+            workspace_id=payload.workspace_id,
+            ws_user_id=payload.ws_user_id,
+            appointments=payload.appointments,
+            requests=payload.requests,
+            todays_schedule=schedule,
+        )
+        await db.commit()
+    except GlanceDashboardMissing as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PracticeHubPendingError as exc:
+        if exc.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    return GlanceApiResponse(
+        status_code=status.HTTP_200_OK,
+        msg=_MSG_DASHBOARD_WEBHOOK,
         data=GlanceResponse.model_validate(data),
     )

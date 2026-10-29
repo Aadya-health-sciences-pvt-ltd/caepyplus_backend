@@ -196,7 +196,7 @@ Two Postgres schemas. Seven tables.
 | `workspace_id` | integer | From workspace select token. |
 | `appointments` | jsonb | Workspace appointments card (`{}` until filled). |
 | `requests` | jsonb | Workspace requests card (`{}` until filled). |
-| `appointment_json` | jsonb | `{ "todays_schedule": [ ...patient objects ] }`. Unique row per `(ph_user_id, workspace_id)`. |
+| `appointment_json` | jsonb | `{ "todays_schedule": [ ...patient objects ] }`. Unique row per `(ws_user_id, ph_user_id, workspace_id)`. |
 
 **`doctor_dashboard`** — pending content for Today-at-a-Glance.
 

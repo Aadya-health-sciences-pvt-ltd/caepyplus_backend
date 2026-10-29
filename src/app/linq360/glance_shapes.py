@@ -87,6 +87,11 @@ def as_count(value: object, *, fallback: int = 0) -> int:
     return fallback if fallback >= 0 else 0
 
 
+def count_document(value: object) -> dict[str, int]:
+    """Store badge counts as ``{"count": N}`` for JSON columns (DRY with ``as_count``)."""
+    return {"count": as_count(value, fallback=0)}
+
+
 def merge_glance_response(
     content: dict[str, Any],
     *,

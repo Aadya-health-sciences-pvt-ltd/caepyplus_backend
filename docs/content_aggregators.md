@@ -29,7 +29,7 @@ CAEPY GET /v1/linq360/glance
 - No `user_id` in URL or body for glance GET/sync; doctor comes from the token.
 - Sync stores Drupal content counts + ids; GET merges both tables.
 - `payments` is always `{}` (not stored).
-- Workspace row is unique on `(ph_user_id, workspace_id)`.
+- Workspace row is unique on `(ws_user_id, ph_user_id, workspace_id)`.
 - Glance `appointments` comes from `appointment_json` as `{ "todays_schedule": [ ... ] }`.
 
 ## Identity (pending glance)
@@ -47,7 +47,7 @@ From the workspace select JWT:
 | `user_id` | `ws_user_id` (both tables) | `325` |
 | `appointment_doctor_id` | `ph_user_id` (both tables) | `892` |
 
-Content is looked up by `ph_user_id`. Workspace cards/schedule by `(ph_user_id, workspace_id)`.
+Content is looked up by `ph_user_id`. Workspace cards/schedule by `(ws_user_id, ph_user_id, workspace_id)`.
 
 ## Tables
 

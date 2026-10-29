@@ -27,6 +27,8 @@ from ..models.aggregators import (
     ReviewsSummaryAggregator,
 )
 from ..glance_shapes import (
+    TODAYS_SCHEDULE_KEY,
+    count_document,
     empty_todays_schedule,
     merge_glance_response,
     normalize_todays_schedule,
@@ -35,6 +37,7 @@ from ..glance_shapes import (
 from ..models.dashboard import DoctorDashboard, WorkspaceDoctorDashboard
 from .practice_hub_pending_client import (
     PENDING_SOURCES,
+    PracticeHubPendingError,
     fetch_pending_counts,
     non_negative_int,
     parse_source_block,
@@ -345,6 +348,7 @@ class ContentAggregatorService:
         linqmd_user_id: str,
         *,
         workspace_id: int | None = None,
+        ws_user_id: int | None = None,
     ) -> dict[str, Any]:
         """Merge glance from both dashboard tables for one workspace.
 
@@ -353,13 +357,15 @@ class ContentAggregatorService:
         - ``todays_schedule`` ← ``appointment_json`` patient list
         - ``payments`` ← always ``{}``
 
-        Workspace row is keyed by ``(ph_user_id, workspace_id)``.
+        Workspace row is keyed by ``(ws_user_id, ph_user_id, workspace_id)``.
         Missing rows → empty defaults (still a full glance document).
         """
         uid = str(linqmd_user_id).strip()
         ws_id = workspace_id_or_zero(workspace_id)
         doctor = await self._get_doctor_dashboard(uid)
-        workspace = await self._get_workspace_dashboard(uid, ws_id)
+        workspace = await self._get_workspace_dashboard(
+            uid, ws_id, ws_user_id=ws_user_id
+        )
         stored = (
             doctor.todays_glance
             if doctor is not None and doctor.todays_glance
@@ -407,13 +413,93 @@ class ContentAggregatorService:
         uid = str(identity["linqmd_user_id"])
         payload = await fetch_pending_counts(workspace_access_token)
         workspace_id = identity.get("workspace_id")
+        ws_user = identity.get("ws_user_id")
         await self.upsert_pending_glance(
             uid,
             payload,
             workspace_id=workspace_id,
-            ws_user_id=identity.get("ws_user_id"),
+            ws_user_id=ws_user,
         )
-        return await self.get_glance(uid, workspace_id=workspace_id)
+        return await self.get_glance(
+            uid, workspace_id=workspace_id, ws_user_id=ws_user
+        )
+
+    async def upsert_workspace_schedule(
+        self,
+        *,
+        ph_user_id: int,
+        workspace_id: int,
+        ws_user_id: int | None = None,
+        appointments: int = 0,
+        requests: int = 0,
+        todays_schedule: list[dict[str, Any]] | None = None,
+    ) -> WorkspaceDoctorDashboard:
+        """Write appointment/request counts + ``todays_schedule`` on one workspace row."""
+        uid = str(ph_user_id)
+        row = await self._ensure_workspace_dashboard(
+            uid,
+            workspace_id=workspace_id,
+            ws_user_id=ws_user_id,
+        )
+        schedule = todays_schedule if isinstance(todays_schedule, list) else []
+        row.appointments = count_document(appointments)
+        row.requests = count_document(requests)
+        row.appointment_json = normalize_todays_schedule(
+            {TODAYS_SCHEDULE_KEY: schedule}
+        )
+        flag_modified(row, "appointments")
+        flag_modified(row, "requests")
+        flag_modified(row, "appointment_json")
+        await self.session.flush()
+        return row
+
+    async def process_dashboard_webhook(
+        self,
+        workspace_access_token: str,
+        *,
+        ph_user_id: int,
+        workspace_id: int,
+        ws_user_id: int | None = None,
+        appointments: int = 0,
+        requests: int = 0,
+        todays_schedule: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Webhook: store schedule/counts, sync pending content, return merged glance.
+
+        Bearer token must match ``ph_user_id`` (``appointment_doctor_id``).
+        """
+        identity = workspace_identity_from_token(workspace_access_token)
+        token_uid = str(identity["linqmd_user_id"])
+        if token_uid != str(ph_user_id):
+            raise PracticeHubPendingError(
+                "Workspace select token appointment_doctor_id does not match "
+                f"ph_user_id={ph_user_id}",
+                status_code=401,
+            )
+        token_ws = identity.get("workspace_id")
+        if token_ws is not None and int(token_ws) != int(workspace_id):
+            raise PracticeHubPendingError(
+                "Workspace select token workspace_id does not match "
+                f"workspace_id={workspace_id}",
+                status_code=401,
+            )
+        resolved_ws_user = (
+            ws_user_id if ws_user_id is not None else identity.get("ws_user_id")
+        )
+        await self.upsert_workspace_schedule(
+            ph_user_id=ph_user_id,
+            workspace_id=workspace_id,
+            ws_user_id=resolved_ws_user,
+            appointments=appointments,
+            requests=requests,
+            todays_schedule=todays_schedule,
+        )
+        await self.sync_pending_glance(workspace_access_token)
+        return await self.get_glance(
+            str(ph_user_id),
+            workspace_id=workspace_id,
+            ws_user_id=resolved_ws_user,
+        )
 
     # ------------------------------------------------------------------
     # Rebuild helpers
@@ -668,16 +754,34 @@ class ContentAggregatorService:
         self,
         linqmd_user_id: str,
         workspace_id: int,
+        *,
+        ws_user_id: int | None = None,
     ) -> WorkspaceDoctorDashboard | None:
         if not linqmd_user_id.isdigit():
             return None
+        clauses = [
+            WorkspaceDoctorDashboard.ph_user_id == int(linqmd_user_id),
+            WorkspaceDoctorDashboard.workspace_id == int(workspace_id),
+        ]
+        if ws_user_id is not None:
+            clauses.append(WorkspaceDoctorDashboard.ws_user_id == int(ws_user_id))
+        else:
+            clauses.append(WorkspaceDoctorDashboard.ws_user_id.is_(None))
         result = await self.session.execute(
-            select(WorkspaceDoctorDashboard).where(
-                WorkspaceDoctorDashboard.ph_user_id == int(linqmd_user_id),
-                WorkspaceDoctorDashboard.workspace_id == int(workspace_id),
-            )
+            select(WorkspaceDoctorDashboard).where(*clauses)
         )
-        return result.scalar_one_or_none()
+        row = result.scalar_one_or_none()
+        # Adopt legacy null-ws row when looking up with a concrete ws_user_id.
+        if row is None and ws_user_id is not None:
+            result = await self.session.execute(
+                select(WorkspaceDoctorDashboard).where(
+                    WorkspaceDoctorDashboard.ph_user_id == int(linqmd_user_id),
+                    WorkspaceDoctorDashboard.workspace_id == int(workspace_id),
+                    WorkspaceDoctorDashboard.ws_user_id.is_(None),
+                )
+            )
+            row = result.scalar_one_or_none()
+        return row
 
     async def _get_doctor_dashboard(self, linqmd_user_id: str) -> DoctorDashboard | None:
         if not linqmd_user_id.isdigit():
@@ -696,14 +800,17 @@ class ContentAggregatorService:
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> WorkspaceDoctorDashboard:
-        """Upsert one row for ``(ph_user_id, workspace_id)``."""
+        """Upsert one row for ``(ws_user_id, ph_user_id, workspace_id)``."""
         if not linqmd_user_id.isdigit():
             raise GlanceDashboardMissing(linqmd_user_id)
         ws_id = workspace_id_or_zero(workspace_id)
-        row = await self._get_workspace_dashboard(linqmd_user_id, ws_id)
+        resolved_ws = int(ws_user_id) if ws_user_id is not None else None
+        row = await self._get_workspace_dashboard(
+            linqmd_user_id, ws_id, ws_user_id=resolved_ws
+        )
         if row is not None:
-            if ws_user_id is not None:
-                row.ws_user_id = int(ws_user_id)
+            if resolved_ws is not None and row.ws_user_id is None:
+                row.ws_user_id = resolved_ws
             # Normalize legacy appointment_json shapes on read/ensure.
             normalized = normalize_todays_schedule(row.appointment_json)
             if row.appointment_json != normalized:
@@ -714,7 +821,7 @@ class ContentAggregatorService:
         row = WorkspaceDoctorDashboard(
             appointment_json=empty_todays_schedule(),
             workspace_id=ws_id,
-            ws_user_id=int(ws_user_id) if ws_user_id is not None else None,
+            ws_user_id=resolved_ws,
             ph_user_id=int(linqmd_user_id),
             requests={},
             appointments={},

@@ -75,3 +75,14 @@ class GlanceSyncRequest(BaseModel):
     """Optional body for glance sync (unused; doctor comes from Bearer token)."""
 
     model_config = {"extra": "ignore"}
+
+
+class DashboardWebhookPayload(BaseModel):
+    """Appointment-system webhook body for workspace schedule + badge counts."""
+
+    ph_user_id: int
+    workspace_id: int
+    ws_user_id: int | None = None
+    appointments: int = 0
+    requests: int = 0
+    todays_schedule: list[WorkspaceAppointmentItem] = Field(default_factory=list)

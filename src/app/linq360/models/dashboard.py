@@ -13,7 +13,11 @@ from ..glance_shapes import empty_todays_schedule
 class WorkspaceDoctorDashboard(Base):
     """Workspace-level doctor dashboard row (schema ``linq360``).
 
-    One row per ``(ph_user_id, workspace_id)``.
+    One row per ``(ws_user_id, ph_user_id, workspace_id)``.
+
+    Same portal user + doctor + workspace → upsert.
+    Same portal user + doctor + different workspace → new row
+    (a doctor can work in multiple workspaces).
 
     Column order:
     appointment_id, ph_user_id, ws_user_id, workspace_id,
@@ -26,9 +30,10 @@ class WorkspaceDoctorDashboard(Base):
     __tablename__ = "workspace_doctor_dashboard"
     __table_args__ = (
         UniqueConstraint(
+            "ws_user_id",
             "ph_user_id",
             "workspace_id",
-            name="uq_workspace_doctor_dashboard_ph_workspace",
+            name="uq_workspace_doctor_dashboard_ws_ph_workspace",
         ),
         {"schema": "linq360"},
     )

@@ -3,6 +3,7 @@ from .dashboard import AppointmentJsonDocument, WorkspaceAppointmentItem
 from .engagement import (
     ContentEngagementResponse,
     ContentSourceEngagement,
+    DashboardWebhookPayload,
     GlanceApiResponse,
     GlanceResponse,
     GlanceSyncRequest,
@@ -13,6 +14,7 @@ __all__ = [
     "WorkspaceAppointmentItem",
     "ContentSourceEngagement",
     "ContentEngagementResponse",
+    "DashboardWebhookPayload",
     "GlanceApiResponse",
     "GlanceResponse",
     "GlanceSyncRequest",

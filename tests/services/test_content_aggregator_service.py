@@ -292,20 +292,59 @@ class TestMainUpsertAndGlance:
             "884",
             {"reviews": 1, "blog_comments": 0, "podcast_comments": 0},
             workspace_id=10,
+            ws_user_id=325,
         )
         await svc.upsert_pending_glance(
             "884",
             {"reviews": 1, "blog_comments": 0, "podcast_comments": 0},
             workspace_id=20,
+            ws_user_id=325,
         )
         rows = (
             await db_session.execute(
                 select(WorkspaceDoctorDashboard).where(
-                    WorkspaceDoctorDashboard.ph_user_id == 884
+                    WorkspaceDoctorDashboard.ph_user_id == 884,
+                    WorkspaceDoctorDashboard.ws_user_id == 325,
                 )
             )
         ).scalars().all()
         assert {row.workspace_id for row in rows} == {10, 20}
+
+    async def test_same_ws_ph_workspace_upserts_one_row(
+        self, db_session: AsyncSession
+    ) -> None:
+        svc = ContentAggregatorService(db_session)
+        await svc.upsert_workspace_schedule(
+            ph_user_id=884,
+            workspace_id=10,
+            ws_user_id=325,
+            appointments=1,
+            requests=2,
+            todays_schedule=[{"patient_name": "A"}],
+        )
+        await svc.upsert_workspace_schedule(
+            ph_user_id=884,
+            workspace_id=10,
+            ws_user_id=325,
+            appointments=3,
+            requests=4,
+            todays_schedule=[{"patient_name": "B"}],
+        )
+        rows = (
+            await db_session.execute(
+                select(WorkspaceDoctorDashboard).where(
+                    WorkspaceDoctorDashboard.ph_user_id == 884,
+                    WorkspaceDoctorDashboard.ws_user_id == 325,
+                    WorkspaceDoctorDashboard.workspace_id == 10,
+                )
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].appointments == {"count": 3}
+        assert rows[0].requests == {"count": 4}
+        assert rows[0].appointment_json["todays_schedule"] == [
+            {"patient_name": "B"}
+        ]
 
     async def test_upsert_creates_dashboard_row_when_missing(
         self, db_session: AsyncSession
@@ -502,6 +541,81 @@ class TestBlogPodcastCommentStats:
         ).scalar_one()
         assert doctor.ws_user_id == 325
         assert doctor.todays_glance["reviews"]["pending_count"] == 2
+
+    async def test_dashboard_webhook_writes_schedule_then_syncs(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import base64
+        import json
+
+        def _jwt(payload: dict) -> str:
+            header = base64.urlsafe_b64encode(b'{"alg":"none"}').decode().rstrip("=")
+            body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+            return f"{header}.{body}.sig"
+
+        token = _jwt(
+            {
+                "appointment_doctor_id": "884",
+                "user_id": "325",
+                "workspace_id": "161",
+            }
+        )
+        patient = {
+            "patient_meta_code": "PAT-001",
+            "appointment_type": "BOOKING",
+            "patient_name": "Rajesh Kumar",
+            "first_name": "Rajesh",
+            "last_name": "Kumar",
+            "consultation_type": "in-person",
+            "time_slot": "10:30 AM",
+        }
+
+        async def _fake_fetch(access_token: str) -> dict:
+            return {
+                "reviews": {"pending_count": 1, "review_id": [9]},
+                "blog_comments": {
+                    "pending_count": 0,
+                    "comment_id": [],
+                    "blog_id": [],
+                },
+                "podcast_comments": {
+                    "pending_count": 0,
+                    "comment_id": [],
+                    "podcast_id": [],
+                },
+            }
+
+        monkeypatch.setattr(
+            "src.app.linq360.services.content_aggregator_service.fetch_pending_counts",
+            _fake_fetch,
+        )
+        svc = ContentAggregatorService(db_session)
+        glance = await svc.process_dashboard_webhook(
+            token,
+            ph_user_id=884,
+            workspace_id=161,
+            ws_user_id=325,
+            appointments=2,
+            requests=1,
+            todays_schedule=[patient],
+        )
+        assert glance["appointments"] == 2
+        assert glance["requests"] == 1
+        assert glance["todays_schedule"] == [patient]
+        assert glance["content"]["reviews"]["pending_count"] == 1
+        assert glance["content"]["total_pending_counts"] == 1
+
+        dash = (
+            await db_session.execute(
+                select(WorkspaceDoctorDashboard).where(
+                    WorkspaceDoctorDashboard.ph_user_id == 884,
+                    WorkspaceDoctorDashboard.workspace_id == 161,
+                )
+            )
+        ).scalar_one()
+        assert dash.appointments == {"count": 2}
+        assert dash.requests == {"count": 1}
+        assert dash.appointment_json["todays_schedule"] == [patient]
 
 
 class TestRebuildBlog:

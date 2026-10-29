@@ -1,11 +1,12 @@
 # LinQ360 — Frontend Developer Handbook
 
-Wire **Today-at-a-Glance** pending badges with these two CAEPY APIs:
+Wire **Today-at-a-Glance** with these CAEPY APIs:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/linq360/glance/sync` | Fresh pending data → save → return glance |
+| `POST` | `/linq360/glance/sync` | Fresh pending content → save → return glance |
 | `GET` | `/linq360/glance` | Read last stored glance |
+| `POST` | `/linq360/webhooks/dashboard` | Appointment webhook: store schedule/counts → sync content → return glance |
 
 ---
 
@@ -32,30 +33,40 @@ That API returns pending reviews / blog comments / podcast comments (counts + id
               stores content in doctor_dashboard.todays_glance,
               returns merged GlanceResponse
 
-3. Later     → GET /linq360/glance
-              CAEPY merges both tables (row keyed by ph_user_id + workspace_id):
-                content       ← doctor_dashboard.todays_glance
-                requests      ← workspace_doctor_dashboard.requests
-                appointments  ← appointment_json → { todays_schedule: [...] }
-                payments      ← {}
+3. Appointment system → POST /linq360/webhooks/dashboard
+              (Bearer + body: appointments, requests, todays_schedule)
+              CAEPY stores workspace counts/schedule, then runs pending sync,
+              returns full glance envelope
+
+4. Later     → GET /linq360/glance
+              content          ← doctor_dashboard.todays_glance
+              appointments     ← int count
+              requests         ← int count
+              todays_schedule  ← patient array
+              payments         ← {}
 ```
 
 ```text
-Drupal pending-counts  →  CAEPY store (two tables)  →  Frontend (sync / get merge)
+Drupal pending-counts ──► sync ──┐
+                                 ├──► Postgres ──► GET glance / webhook response
+Appointment webhook ─────────────┘
 ```
 
 ---
 
 ## Base URL
 
+With `ROOT_PATH=/caepy/api` (default local setup), LinQ360 routes are:
+
 ```text
-{ROOT_PATH}/api/v1/linq360/...
+http://127.0.0.1:8000/caepy/api/v1/linq360/...
 ```
 
-| Environment | Example |
-|-------------|---------|
-| Local | `http://localhost:8000/api/v1` |
-| `ROOT_PATH=/caepy` | `http://host/caepy/api/v1` |
+| Method | Full path |
+|--------|-----------|
+| `POST` | `/caepy/api/v1/linq360/glance/sync` |
+| `GET` | `/caepy/api/v1/linq360/glance` |
+| `POST` | `/caepy/api/v1/linq360/webhooks/dashboard` |
 
 ---
 
@@ -107,9 +118,47 @@ No query params. Empty store → zeros / `[]` with **200**.
 | `200` | OK |
 | `401` | Bad token |
 
+### Dashboard webhook (appointments + requests + schedule)
+
+```http
+POST {BASE}/linq360/webhooks/dashboard
+Authorization: Bearer <workspace_select_access_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "ph_user_id": 892,
+  "workspace_id": 161,
+  "ws_user_id": 325,
+  "appointments": 2,
+  "requests": 1,
+  "todays_schedule": [
+    {
+      "patient_meta_code": "PAT-001",
+      "appointment_type": "BOOKING",
+      "patient_name": "Rajesh Kumar",
+      "first_name": "Rajesh",
+      "last_name": "Kumar",
+      "consultation_type": "in-person",
+      "time_slot": "10:30 AM"
+    }
+  ]
+}
+```
+
+Bearer `appointment_doctor_id` / `workspace_id` must match the body. Response is the same glance envelope (`msg`: `Dashboard webhook processed successfully`).
+
+| Status | When |
+|--------|------|
+| `200` | OK |
+| `401` | Bad token / identity mismatch |
+| `502` | Practice Hub sync failed |
+| `422` | Invalid body |
+
 ---
 
-## Response (sync and get — same envelope)
+## Response (sync, get, and webhook — same envelope)
 
 Read glance fields from **`response.data`**.
 

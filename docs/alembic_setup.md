@@ -232,7 +232,8 @@ python scripts/migrate.py baseline --upgrade
 | `021` | Rename to `appointment_json` / `ws_user_id` / `ph_user_id` |
 | `022` | Split glance: content on `doctor_dashboard`; requests/appointments on workspace |
 | `023` | Reorder `workspace_doctor_dashboard` columns |
-| `024` | `appointment_json.todays_schedule` + unique `(ph_user_id, workspace_id)` (head) |
+| `024` | `appointment_json.todays_schedule` + unique `(ph_user_id, workspace_id)` |
+| `025` | unique `(ws_user_id, ph_user_id, workspace_id)` (head) |
 
 ---
 
@@ -263,7 +264,8 @@ python scripts/migrate.py baseline --upgrade
 | `021` | `021_dashboard_column_rename.py` | `appointment_json`, `ws_user_id`, `ph_user_id` |
 | `022` | `022_split_dashboard_glance.py` | Content on `doctor_dashboard`; workspace `requests`/`appointments` |
 | `023` | `023_workspace_dashboard_column_order.py` | Reorder workspace dashboard columns |
-| `024` | `024_appointment_json_todays_schedule.py` | `todays_schedule` array + unique ph/workspace (head) |
+| `024` | `024_appointment_json_todays_schedule.py` | `todays_schedule` array + unique ph/workspace |
+| `025` | `025_workspace_dashboard_unique_ws_ph_workspace.py` | unique `(ws_user_id, ph_user_id, workspace_id)` (head) |
 
 ### Tables Created
 
