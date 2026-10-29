@@ -28,7 +28,9 @@ CAEPY GET /v1/linq360/glance
 - CAEPY does **not** implement `GET /api/linq360/pending-counts`.
 - No `user_id` in URL or body for glance GET/sync; doctor comes from the token.
 - Sync stores Drupal content counts + ids; GET merges both tables.
-- `payments` is always `{}` (not stored). `requests` / `appointments` live on the workspace table.
+- `payments` is always `{}` (not stored).
+- Workspace row is unique on `(ph_user_id, workspace_id)`.
+- Glance `appointments` comes from `appointment_json` as `{ "todays_schedule": [ ... ] }`.
 
 ## Identity (pending glance)
 
@@ -36,7 +38,8 @@ From the workspace select JWT:
 
 **`doctor_dashboard`:** `id` · `ph_user_id` · `ws_user_id` · `todays_glance` (content only)
 
-**`workspace_doctor_dashboard`:** `appointment_id` · `ph_user_id` · `ws_user_id` · `workspace_id` · `appointments` · `requests` · `appointment_json`
+**`workspace_doctor_dashboard`:** `appointment_id` · `ph_user_id` · `ws_user_id` · `workspace_id` · `appointments` · `requests` · `appointment_json`  
+(`appointment_json` = `{ "todays_schedule": [ ... ] }`)
 
 | Token claim | Column | Example |
 |-------------|--------|---------|
@@ -44,7 +47,7 @@ From the workspace select JWT:
 | `user_id` | `ws_user_id` (both tables) | `325` |
 | `appointment_doctor_id` | `ph_user_id` (both tables) | `892` |
 
-Glance is looked up by `ph_user_id`.
+Content is looked up by `ph_user_id`. Workspace cards/schedule by `(ph_user_id, workspace_id)`.
 
 ## Tables
 
@@ -54,7 +57,7 @@ Glance is looked up by `ph_user_id`.
 |-------|----------------|
 | `linq360.doctor_dashboard.todays_glance` | `content` (pending reviews / blog / podcast) |
 | `linq360.workspace_doctor_dashboard.requests` | `requests` |
-| `linq360.workspace_doctor_dashboard.appointments` | `appointments` |
+| `linq360.workspace_doctor_dashboard.appointment_json` | `appointments` → `{ todays_schedule: [...] }` |
 
 ### Pending counter tables (webhook deltas; not the glance read)
 

@@ -27,8 +27,6 @@ class PracticeHubPendingError(Exception):
 
 
 PENDING_SOURCES = ("reviews", "blog_comments", "podcast_comments")
-# Workspace-card keys returned on glance (stored on workspace_doctor_dashboard).
-WORKSPACE_GLANCE_CARDS = ("appointments", "requests")
 
 _SOURCE_ID_KEYS: dict[str, tuple[str, ...]] = {
     "reviews": ("review_id",),

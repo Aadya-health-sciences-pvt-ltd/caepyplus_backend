@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from .dashboard import AppointmentJsonDocument
+
 
 class ContentSourceEngagement(BaseModel):
     """Per-source engagement rollup."""
@@ -46,10 +48,15 @@ class GlanceContent(BaseModel):
 
 
 class GlanceResponse(BaseModel):
-    """Today-at-a-glance pending inbox. Same shape for sync and get."""
+    """Today-at-a-glance. Same shape for sync and get.
+
+    ``appointments`` matches ``appointment_json`` / ``AppointmentJsonDocument``.
+    """
 
     content: GlanceContent
-    appointments: dict = Field(default_factory=dict)
+    appointments: AppointmentJsonDocument = Field(
+        default_factory=AppointmentJsonDocument.empty
+    )
     requests: dict = Field(default_factory=dict)
     payments: dict = Field(default_factory=dict)
 

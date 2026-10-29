@@ -183,24 +183,33 @@ class TestMainUpsertAndGlance:
         assert doctor.todays_glance == {} or "reviews" not in (doctor.todays_glance or {})
 
     async def test_stored_glance_row_and_dashboard(self, db_session: AsyncSession) -> None:
+        patient = {
+            "patient_meta_code": "PAT-001",
+            "appointment_type": "BOOKING",
+            "patient_name": "Rajesh Kumar",
+            "first_name": "Rajesh",
+            "last_name": "Kumar",
+            "consultation_type": "in-person",
+            "time_slot": "10:30 AM",
+        }
         doctor = DoctorDashboard(ph_user_id=884, todays_glance={})
         workspace = WorkspaceDoctorDashboard(
             workspace_id=1,
             ph_user_id=884,
-            appointment_json={},
+            appointment_json={"todays_schedule": [patient]},
             requests={},
-            appointments={"kept": True},
+            appointments={},
         )
         db_session.add_all([doctor, workspace])
         await db_session.flush()
 
         svc = ContentAggregatorService(db_session)
-        empty = await svc.get_glance("884")
+        empty = await svc.get_glance("884", workspace_id=1)
         assert empty["content"]["reviews"]["pending_count"] == 0
         assert empty["content"]["blog_comments"]["pending_count"] == 0
         assert empty["content"]["podcast_comments"]["pending_count"] == 0
         assert empty["content"]["total_pending_counts"] == 0
-        assert empty["appointments"] == {"kept": True}
+        assert empty["appointments"] == {"todays_schedule": [patient]}
         assert empty["payments"] == {}
 
         await svc.upsert_pending_glance(
@@ -218,9 +227,10 @@ class TestMainUpsertAndGlance:
                     "podcast_id": [],
                 },
             },
+            workspace_id=1,
         )
 
-        glance = await svc.get_glance("884")
+        glance = await svc.get_glance("884", workspace_id=1)
         assert glance["content"]["reviews"]["pending_count"] == 2
         assert glance["content"]["reviews"]["review_id"] == [3, 9]
         assert glance["content"]["blog_comments"]["pending_count"] == 1
@@ -228,7 +238,7 @@ class TestMainUpsertAndGlance:
         assert glance["content"]["blog_comments"]["blog_id"] == [5]
         assert glance["content"]["podcast_comments"]["pending_count"] == 0
         assert glance["content"]["total_pending_counts"] == 3
-        assert glance["appointments"] == {"kept": True}
+        assert glance["appointments"]["todays_schedule"] == [patient]
         assert "messages" not in glance
         assert "linqmd_user_id" not in glance
 
@@ -240,8 +250,58 @@ class TestMainUpsertAndGlance:
         assert content["blog_comments"]["pending_count"] == 1
         assert content["total_pending_counts"] == 3
         assert "item_count" not in content["reviews"]
-        assert workspace.appointments == {"kept": True}
-        assert "content" not in workspace.appointments
+        assert workspace.appointment_json["todays_schedule"] == [patient]
+
+    async def test_legacy_flat_appointment_json_normalizes(
+        self, db_session: AsyncSession
+    ) -> None:
+        flat = {
+            "patient_meta_code": "PAT-001",
+            "appointment_type": "BOOKING",
+            "patient_name": "Rajesh Kumar",
+            "first_name": "Rajesh",
+            "last_name": "Kumar",
+            "consultation_type": "in-person",
+            "time_slot": "10:30 AM",
+        }
+        db_session.add(
+            WorkspaceDoctorDashboard(
+                workspace_id=7,
+                ph_user_id=900,
+                appointment_json=flat,
+                requests={},
+                appointments={},
+            )
+        )
+        await db_session.flush()
+
+        glance = await ContentAggregatorService(db_session).get_glance(
+            "900", workspace_id=7
+        )
+        assert glance["appointments"] == {"todays_schedule": [flat]}
+
+    async def test_different_workspace_is_separate_row(
+        self, db_session: AsyncSession
+    ) -> None:
+        svc = ContentAggregatorService(db_session)
+        await svc.upsert_pending_glance(
+            "884",
+            {"reviews": 1, "blog_comments": 0, "podcast_comments": 0},
+            workspace_id=10,
+        )
+        await svc.upsert_pending_glance(
+            "884",
+            {"reviews": 1, "blog_comments": 0, "podcast_comments": 0},
+            workspace_id=20,
+        )
+        rows = (
+            await db_session.execute(
+                select(WorkspaceDoctorDashboard).where(
+                    WorkspaceDoctorDashboard.ph_user_id == 884
+                )
+            )
+        ).scalars().all()
+        assert {row.workspace_id for row in rows} == {10, 20}
 
     async def test_upsert_creates_dashboard_row_when_missing(
         self, db_session: AsyncSession
@@ -250,9 +310,11 @@ class TestMainUpsertAndGlance:
         await svc.upsert_pending_glance(
             "884",
             {"reviews": 1, "blog_comments": 0, "podcast_comments": 0},
+            workspace_id=5,
         )
-        glance = await svc.get_glance("884")
+        glance = await svc.get_glance("884", workspace_id=5)
         assert glance["content"]["reviews"]["pending_count"] == 1
+        assert glance["appointments"] == {"todays_schedule": []}
         doctor = (
             await db_session.execute(
                 select(DoctorDashboard).where(DoctorDashboard.ph_user_id == 884)
@@ -262,12 +324,13 @@ class TestMainUpsertAndGlance:
         workspace = (
             await db_session.execute(
                 select(WorkspaceDoctorDashboard).where(
-                    WorkspaceDoctorDashboard.ph_user_id == 884
+                    WorkspaceDoctorDashboard.ph_user_id == 884,
+                    WorkspaceDoctorDashboard.workspace_id == 5,
                 )
             )
         ).scalar_one()
         assert workspace.requests == {}
-        assert workspace.appointments == {}
+        assert workspace.appointment_json == {"todays_schedule": []}
 
     async def test_pending_saved_without_dashboard_or_doctor(
         self, db_session: AsyncSession

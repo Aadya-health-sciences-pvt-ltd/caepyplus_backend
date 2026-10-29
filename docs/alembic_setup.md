@@ -231,7 +231,8 @@ python scripts/migrate.py baseline --upgrade
 | `020` | `workspace_doctor_dashboard.workspace_user_id` |
 | `021` | Rename to `appointment_json` / `ws_user_id` / `ph_user_id` |
 | `022` | Split glance: content on `doctor_dashboard`; requests/appointments on workspace |
-| `023` | Reorder `workspace_doctor_dashboard` columns (head) |
+| `023` | Reorder `workspace_doctor_dashboard` columns |
+| `024` | `appointment_json.todays_schedule` + unique `(ph_user_id, workspace_id)` (head) |
 
 ---
 
@@ -261,7 +262,8 @@ python scripts/migrate.py baseline --upgrade
 | `020` | `020_workspace_user_id.py` | Portal `workspace_user_id` on dashboard |
 | `021` | `021_dashboard_column_rename.py` | `appointment_json`, `ws_user_id`, `ph_user_id` |
 | `022` | `022_split_dashboard_glance.py` | Content on `doctor_dashboard`; workspace `requests`/`appointments` |
-| `023` | `023_workspace_dashboard_column_order.py` | Reorder workspace dashboard columns (head) |
+| `023` | `023_workspace_dashboard_column_order.py` | Reorder workspace dashboard columns |
+| `024` | `024_appointment_json_todays_schedule.py` | `todays_schedule` array + unique ph/workspace (head) |
 
 ### Tables Created
 
@@ -302,7 +304,7 @@ python scripts/migrate.py baseline --upgrade
 
 ## Key Design Decisions
 
-1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`023`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
+1. **Initial migration + incremental revisions** — `001` creates the base schema; later revisions (`002`–`024`) apply incremental DDL. Fresh databases run `upgrade head` once; existing databases may need `stamp` if `alembic_version` was lost.
 2. **Async URL auto-conversion** — `env.py` converts `+asyncpg` to `+psycopg2` automatically, so you don't need separate sync/async URLs.
 3. **3-tier URL resolution** — CLI flag > env var > app settings. This gives maximum flexibility for different deployment scenarios.
 4. **Offline mode support** — You can generate SQL scripts for DBA review without a live database connection.

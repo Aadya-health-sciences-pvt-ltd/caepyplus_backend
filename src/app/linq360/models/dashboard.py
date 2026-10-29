@@ -3,24 +3,35 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, Integer
+from sqlalchemy import JSON, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...db.session import Base
+from ..glance_shapes import empty_todays_schedule
 
 
 class WorkspaceDoctorDashboard(Base):
     """Workspace-level doctor dashboard row (schema ``linq360``).
 
+    One row per ``(ph_user_id, workspace_id)``.
+
     Column order:
     appointment_id, ph_user_id, ws_user_id, workspace_id,
     appointments, requests, appointment_json
 
+    ``appointment_json`` shape: ``{ "todays_schedule": [ ...patient objects ] }``.
     Pending content lives on ``DoctorDashboard.todays_glance``, not here.
     """
 
     __tablename__ = "workspace_doctor_dashboard"
-    __table_args__ = {"schema": "linq360"}
+    __table_args__ = (
+        UniqueConstraint(
+            "ph_user_id",
+            "workspace_id",
+            name="uq_workspace_doctor_dashboard_ph_workspace",
+        ),
+        {"schema": "linq360"},
+    )
 
     appointment_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # Practice Hub / Drupal doctor uid (``appointment_doctor_id``, e.g. 892).
@@ -33,7 +44,7 @@ class WorkspaceDoctorDashboard(Base):
     appointment_json: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
-        default=dict,
+        default=empty_todays_schedule,
     )
 
 

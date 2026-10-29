@@ -1,9 +1,22 @@
 {
-  "patient_meta_code": "PAT-001",
-  "appointment_type": "BOOKING",
-  "patient_name": "Rajesh Kumar",
-  "first_name": "Rajesh",
-  "last_name": "Kumar",
-  "consultation_type": "in-person",
-  "time_slot": "10:30 AM"
+  "todays_schedule": [
+    {
+      "patient_meta_code": "PAT-001",
+      "appointment_type": "BOOKING",
+      "patient_name": "Rajesh Kumar",
+      "first_name": "Rajesh",
+      "last_name": "Kumar",
+      "consultation_type": "in-person",
+      "time_slot": "10:30 AM"
+    },
+    {
+      "patient_meta_code": "PAT-002",
+      "appointment_type": "Request",
+      "patient_name": "Rajanna S",
+      "first_name": "Rajanna",
+      "last_name": "S",
+      "consultation_type": "in-person",
+      "time_slot": "10:50 AM"
+    }
+  ]
 }

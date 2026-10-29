@@ -1,5 +1,5 @@
 """Linq360 Pydantic schemas."""
-from .dashboard import WorkspaceAppointmentItem
+from .dashboard import AppointmentJsonDocument, WorkspaceAppointmentItem
 from .engagement import (
     ContentEngagementResponse,
     ContentSourceEngagement,
@@ -8,6 +8,7 @@ from .engagement import (
 )
 
 __all__ = [
+    "AppointmentJsonDocument",
     "WorkspaceAppointmentItem",
     "ContentSourceEngagement",
     "ContentEngagementResponse",

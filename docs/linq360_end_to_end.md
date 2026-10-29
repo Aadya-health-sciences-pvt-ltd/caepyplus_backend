@@ -196,7 +196,7 @@ Two Postgres schemas. Seven tables.
 | `workspace_id` | integer | From workspace select token. |
 | `appointments` | jsonb | Workspace appointments card (`{}` until filled). |
 | `requests` | jsonb | Workspace requests card (`{}` until filled). |
-| `appointment_json` | jsonb | `{}`. Not filled yet. |
+| `appointment_json` | jsonb | `{ "todays_schedule": [ ...patient objects ] }`. Unique row per `(ph_user_id, workspace_id)`. |
 
 **`doctor_dashboard`** — pending content for Today-at-a-Glance.
 
@@ -207,7 +207,7 @@ Two Postgres schemas. Seven tables.
 | `ws_user_id` | integer | Portal `user_id` from token (nullable). |
 | `todays_glance` | jsonb | Content only (reviews / blog / podcast pending). |
 
-`GET /linq360/glance` merges `doctor_dashboard.todays_glance` → `content` with workspace `requests` / `appointments` (`payments` always `{}`).
+`GET /linq360/glance` merges `doctor_dashboard.todays_glance` → `content`, workspace `requests`, and `appointment_json` → `appointments.todays_schedule` (`payments` always `{}`).
 
 **`content_source_aggregator`** — published totals. Empty until an approve or publish event runs. Unique `(doctor_id, source)`.
 

@@ -33,10 +33,10 @@ That API returns pending reviews / blog comments / podcast comments (counts + id
               returns merged GlanceResponse
 
 3. Later     → GET /linq360/glance
-              CAEPY merges both tables into one GlanceResponse:
+              CAEPY merges both tables (row keyed by ph_user_id + workspace_id):
                 content       ← doctor_dashboard.todays_glance
                 requests      ← workspace_doctor_dashboard.requests
-                appointments  ← workspace_doctor_dashboard.appointments
+                appointments  ← appointment_json → { todays_schedule: [...] }
                 payments      ← {}
 ```
 
@@ -130,9 +130,21 @@ No query params. Empty store → zeros / `[]` with **200**.
     },
     "total_pending_counts": 3
   },
-  "appointments": {},
   "requests": {},
-  "payments": {}
+  "payments": {},
+  "appointments": {
+    "todays_schedule": [
+      {
+        "patient_meta_code": "PAT-001",
+        "appointment_type": "BOOKING",
+        "patient_name": "Rajesh Kumar",
+        "first_name": "Rajesh",
+        "last_name": "Kumar",
+        "consultation_type": "in-person",
+        "time_slot": "10:30 AM"
+      }
+    ]
+  }
 }
 ```
 
@@ -142,9 +154,20 @@ No query params. Empty store → zeros / `[]` with **200**.
 | `content.blog_comments.*` | Blog comments badge + ids |
 | `content.podcast_comments.*` | Podcast comments badge + ids |
 | `content.total_pending_counts` | Sum of the three |
-| `appointments` / `requests` / `payments` | `{}` for now |
+| `appointments.todays_schedule` | Array of today’s patient appointments |
+| `requests` / `payments` | `{}` until filled |
 
 ```ts
+type ScheduleItem = {
+  patient_meta_code: string;
+  appointment_type: string;
+  patient_name: string;
+  first_name: string;
+  last_name: string;
+  consultation_type: string;
+  time_slot: string;
+};
+
 type GlanceResponse = {
   content: {
     reviews: { pending_count: number; review_id: number[] };
@@ -160,7 +183,7 @@ type GlanceResponse = {
     };
     total_pending_counts: number;
   };
-  appointments: Record<string, unknown>;
+  appointments: { todays_schedule: ScheduleItem[] };
   requests: Record<string, unknown>;
   payments: Record<string, unknown>;
 };

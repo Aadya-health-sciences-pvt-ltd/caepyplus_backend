@@ -70,7 +70,10 @@ async def get_glance(
     Auth: ``Authorization: Bearer <workspace_select_access_token>``.
     No ``linqmd_user_id`` query param — uses ``appointment_doctor_id`` from the JWT.
     """
-    data = await ContentAggregatorService(db).get_glance(auth.linqmd_user_id)
+    data = await ContentAggregatorService(db).get_glance(
+        auth.linqmd_user_id,
+        workspace_id=auth.workspace_id,
+    )
     return GlanceResponse.model_validate(data)
 
 
