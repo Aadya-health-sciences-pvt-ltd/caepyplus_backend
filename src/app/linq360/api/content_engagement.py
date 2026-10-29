@@ -10,7 +10,11 @@ from ...db.session import DbSession
 from ...models.enums import UserRole
 from ...models.user import User
 from ...repositories.doctor_repository import DoctorRepository
-from ..schemas.engagement import ContentEngagementResponse, GlanceResponse
+from ..schemas.engagement import (
+    ContentEngagementResponse,
+    GlanceApiResponse,
+    GlanceResponse,
+)
 from ..services.content_aggregator_service import (
     ContentAggregatorService,
     GlanceDashboardMissing,
@@ -20,6 +24,9 @@ from .workspace_auth import WorkspaceSelectAuth, require_workspace_select_auth
 
 router = APIRouter()
 public_router = APIRouter()
+
+_MSG_GLANCE_GET = "Glance retrieved successfully"
+_MSG_GLANCE_SYNC = "Glance synced successfully"
 
 
 async def require_doctor_engagement_access(
@@ -60,11 +67,11 @@ async def get_content_engagement(
     return ContentEngagementResponse.model_validate(data)
 
 
-@public_router.get("/glance", response_model=GlanceResponse)
+@public_router.get("/glance", response_model=GlanceApiResponse)
 async def get_glance(
     db: DbSession,
     auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
-) -> GlanceResponse:
+) -> GlanceApiResponse:
     """Read stored pending inbox for the doctor on the workspace select token.
 
     Auth: ``Authorization: Bearer <workspace_select_access_token>``.
@@ -74,14 +81,18 @@ async def get_glance(
         auth.linqmd_user_id,
         workspace_id=auth.workspace_id,
     )
-    return GlanceResponse.model_validate(data)
+    return GlanceApiResponse(
+        status_code=status.HTTP_200_OK,
+        msg=_MSG_GLANCE_GET,
+        data=GlanceResponse.model_validate(data),
+    )
 
 
-@public_router.post("/glance/sync", response_model=GlanceResponse)
+@public_router.post("/glance/sync", response_model=GlanceApiResponse)
 async def sync_glance(
     db: DbSession,
     auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
-) -> GlanceResponse:
+) -> GlanceApiResponse:
     """Pull LinQ360 pending counts with the workspace select token and store them.
 
     Auth: ``Authorization: Bearer <workspace_select_access_token>``.
@@ -103,4 +114,8 @@ async def sync_glance(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
-    return GlanceResponse.model_validate(data)
+    return GlanceApiResponse(
+        status_code=status.HTTP_200_OK,
+        msg=_MSG_GLANCE_SYNC,
+        data=GlanceResponse.model_validate(data),
+    )

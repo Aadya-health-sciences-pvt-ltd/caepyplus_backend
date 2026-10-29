@@ -109,30 +109,35 @@ No query params. Empty store → zeros / `[]` with **200**.
 
 ---
 
-## Response (sync and get — same)
+## Response (sync and get — same envelope)
+
+Read glance fields from **`response.data`**.
 
 ```json
 {
-  "content": {
-    "reviews": {
-      "pending_count": 2,
-      "review_id": [101, 102]
+  "status_code": 200,
+  "msg": "Glance retrieved successfully",
+  "data": {
+    "content": {
+      "reviews": {
+        "pending_count": 2,
+        "review_id": [101, 102]
+      },
+      "blog_comments": {
+        "pending_count": 1,
+        "comment_id": [55],
+        "blog_id": [12]
+      },
+      "podcast_comments": {
+        "pending_count": 0,
+        "comment_id": [],
+        "podcast_id": []
+      },
+      "total_pending_counts": 3
     },
-    "blog_comments": {
-      "pending_count": 1,
-      "comment_id": [55],
-      "blog_id": [12]
-    },
-    "podcast_comments": {
-      "pending_count": 0,
-      "comment_id": [],
-      "podcast_id": []
-    },
-    "total_pending_counts": 3
-  },
-  "requests": {},
-  "payments": {},
-  "appointments": {
+    "appointments": 1,
+    "requests": 0,
+    "payments": {},
     "todays_schedule": [
       {
         "patient_meta_code": "PAT-001",
@@ -150,12 +155,13 @@ No query params. Empty store → zeros / `[]` with **200**.
 
 | Field | Use |
 |-------|-----|
-| `content.reviews.*` | Reviews badge + ids |
-| `content.blog_comments.*` | Blog comments badge + ids |
-| `content.podcast_comments.*` | Podcast comments badge + ids |
-| `content.total_pending_counts` | Sum of the three |
-| `appointments.todays_schedule` | Array of today’s patient appointments |
-| `requests` / `payments` | `{}` until filled |
+| `status_code` | `200` on success |
+| `msg` | GET: `Glance retrieved successfully`; sync: `Glance synced successfully` |
+| `data.content.*` | Pending content badges + ids |
+| `data.appointments` | Integer count for dashboard appointments badge |
+| `data.requests` | Integer count for dashboard requests badge |
+| `data.todays_schedule` | Patient detail array for today’s schedule |
+| `data.payments` | `{}` until filled |
 
 ```ts
 type ScheduleItem = {
@@ -168,7 +174,7 @@ type ScheduleItem = {
   time_slot: string;
 };
 
-type GlanceResponse = {
+type GlanceData = {
   content: {
     reviews: { pending_count: number; review_id: number[] };
     blog_comments: {
@@ -183,9 +189,16 @@ type GlanceResponse = {
     };
     total_pending_counts: number;
   };
-  appointments: { todays_schedule: ScheduleItem[] };
-  requests: Record<string, unknown>;
+  appointments: number;
+  requests: number;
   payments: Record<string, unknown>;
+  todays_schedule: ScheduleItem[];
+};
+
+type GlanceApiResponse = {
+  status_code: number;
+  msg: string;
+  data: GlanceData;
 };
 ```
 

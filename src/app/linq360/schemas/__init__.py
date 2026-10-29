@@ -3,6 +3,7 @@ from .dashboard import AppointmentJsonDocument, WorkspaceAppointmentItem
 from .engagement import (
     ContentEngagementResponse,
     ContentSourceEngagement,
+    GlanceApiResponse,
     GlanceResponse,
     GlanceSyncRequest,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "WorkspaceAppointmentItem",
     "ContentSourceEngagement",
     "ContentEngagementResponse",
+    "GlanceApiResponse",
     "GlanceResponse",
     "GlanceSyncRequest",
 ]

@@ -1,9 +1,11 @@
 """Content engagement response schemas."""
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
-from .dashboard import AppointmentJsonDocument
+from .dashboard import WorkspaceAppointmentItem
 
 
 class ContentSourceEngagement(BaseModel):
@@ -48,17 +50,25 @@ class GlanceContent(BaseModel):
 
 
 class GlanceResponse(BaseModel):
-    """Today-at-a-glance. Same shape for sync and get.
+    """Today-at-a-glance payload under the API envelope ``data``.
 
-    ``appointments`` matches ``appointment_json`` / ``AppointmentJsonDocument``.
+    Dashboard badges: ``appointments`` / ``requests`` are integer counts.
+    Patient details: ``todays_schedule`` array.
     """
 
     content: GlanceContent
-    appointments: AppointmentJsonDocument = Field(
-        default_factory=AppointmentJsonDocument.empty
-    )
-    requests: dict = Field(default_factory=dict)
-    payments: dict = Field(default_factory=dict)
+    appointments: int = 0
+    requests: int = 0
+    payments: dict[str, Any] = Field(default_factory=dict)
+    todays_schedule: list[WorkspaceAppointmentItem] = Field(default_factory=list)
+
+
+class GlanceApiResponse(BaseModel):
+    """HTTP envelope for glance GET / sync."""
+
+    status_code: int = 200
+    msg: str
+    data: GlanceResponse
 
 
 class GlanceSyncRequest(BaseModel):

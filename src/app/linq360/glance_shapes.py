@@ -13,17 +13,18 @@ GLANCE_APPOINTMENTS_KEY = "appointments"
 GLANCE_REQUESTS_KEY = "requests"
 GLANCE_PAYMENTS_KEY = "payments"
 
-# Top-level glance response keys (API contract).
+# Top-level glance ``data`` keys (API contract).
 GLANCE_RESPONSE_KEYS = (
     GLANCE_CONTENT_KEY,
     GLANCE_APPOINTMENTS_KEY,
     GLANCE_REQUESTS_KEY,
     GLANCE_PAYMENTS_KEY,
+    TODAYS_SCHEDULE_KEY,
 )
 
 
 def empty_todays_schedule() -> dict[str, list[Any]]:
-    """Empty ``appointment_json`` / glance ``appointments`` document."""
+    """Empty stored ``appointment_json`` document."""
     return {TODAYS_SCHEDULE_KEY: []}
 
 
@@ -62,22 +63,48 @@ def normalize_todays_schedule(appointment_json: object) -> dict[str, list[Any]]:
     return empty_todays_schedule()
 
 
-def card_dict(value: object) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
+def schedule_items(appointment_json: object) -> list[dict[str, Any]]:
+    """Patient list only (for glance ``todays_schedule``)."""
+    return list(normalize_todays_schedule(appointment_json)[TODAYS_SCHEDULE_KEY])
+
+
+def as_count(value: object, *, fallback: int = 0) -> int:
+    """Coerce stored JSON/int count to a non-negative int for the glance API."""
+    if value is None:
+        return fallback if fallback >= 0 else 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value if value >= 0 else 0
+    if isinstance(value, float):
+        number = int(value)
+        return number if number >= 0 else 0
+    if isinstance(value, dict):
+        if "count" in value:
+            return as_count(value.get("count"), fallback=fallback)
+        if not value:
+            return fallback if fallback >= 0 else 0
+    return fallback if fallback >= 0 else 0
 
 
 def merge_glance_response(
     content: dict[str, Any],
     *,
     requests: object = None,
+    appointments: object = None,
     appointment_json: object = None,
 ) -> dict[str, Any]:
-    """One glance document for sync and get (``content`` already built)."""
+    """One glance document for sync and get.
+
+    Dashboard badges use integer counts; patient details are ``todays_schedule``.
+    """
+    schedule = schedule_items(appointment_json)
     return {
         GLANCE_CONTENT_KEY: content,
-        GLANCE_REQUESTS_KEY: card_dict(requests),
-        GLANCE_APPOINTMENTS_KEY: normalize_todays_schedule(appointment_json),
+        GLANCE_APPOINTMENTS_KEY: as_count(appointments, fallback=len(schedule)),
+        GLANCE_REQUESTS_KEY: as_count(requests, fallback=0),
         GLANCE_PAYMENTS_KEY: {},
+        TODAYS_SCHEDULE_KEY: schedule,
     }
 
 

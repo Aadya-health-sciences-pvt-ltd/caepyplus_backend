@@ -209,7 +209,9 @@ class TestMainUpsertAndGlance:
         assert empty["content"]["blog_comments"]["pending_count"] == 0
         assert empty["content"]["podcast_comments"]["pending_count"] == 0
         assert empty["content"]["total_pending_counts"] == 0
-        assert empty["appointments"] == {"todays_schedule": [patient]}
+        assert empty["appointments"] == 1
+        assert empty["requests"] == 0
+        assert empty["todays_schedule"] == [patient]
         assert empty["payments"] == {}
 
         await svc.upsert_pending_glance(
@@ -238,7 +240,8 @@ class TestMainUpsertAndGlance:
         assert glance["content"]["blog_comments"]["blog_id"] == [5]
         assert glance["content"]["podcast_comments"]["pending_count"] == 0
         assert glance["content"]["total_pending_counts"] == 3
-        assert glance["appointments"]["todays_schedule"] == [patient]
+        assert glance["appointments"] == 1
+        assert glance["todays_schedule"] == [patient]
         assert "messages" not in glance
         assert "linqmd_user_id" not in glance
 
@@ -278,7 +281,8 @@ class TestMainUpsertAndGlance:
         glance = await ContentAggregatorService(db_session).get_glance(
             "900", workspace_id=7
         )
-        assert glance["appointments"] == {"todays_schedule": [flat]}
+        assert glance["appointments"] == 1
+        assert glance["todays_schedule"] == [flat]
 
     async def test_different_workspace_is_separate_row(
         self, db_session: AsyncSession
@@ -314,7 +318,9 @@ class TestMainUpsertAndGlance:
         )
         glance = await svc.get_glance("884", workspace_id=5)
         assert glance["content"]["reviews"]["pending_count"] == 1
-        assert glance["appointments"] == {"todays_schedule": []}
+        assert glance["appointments"] == 0
+        assert glance["requests"] == 0
+        assert glance["todays_schedule"] == []
         doctor = (
             await db_session.execute(
                 select(DoctorDashboard).where(DoctorDashboard.ph_user_id == 884)

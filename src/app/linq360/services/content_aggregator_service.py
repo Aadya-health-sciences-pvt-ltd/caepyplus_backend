@@ -349,8 +349,8 @@ class ContentAggregatorService:
         """Merge glance from both dashboard tables for one workspace.
 
         - ``content`` ← ``doctor_dashboard.todays_glance``
-        - ``requests`` ← ``workspace_doctor_dashboard.requests``
-        - ``appointments`` ← ``appointment_json`` as ``{ todays_schedule: [...] }``
+        - ``requests`` / ``appointments`` ← integer counts from workspace columns
+        - ``todays_schedule`` ← ``appointment_json`` patient list
         - ``payments`` ← always ``{}``
 
         Workspace row is keyed by ``(ph_user_id, workspace_id)``.
@@ -367,7 +367,8 @@ class ContentAggregatorService:
         )
         return merge_glance_response(
             _content_block(_payload_from_stored_content(stored)),
-            requests=workspace.requests if workspace is not None else {},
+            requests=workspace.requests if workspace is not None else 0,
+            appointments=workspace.appointments if workspace is not None else 0,
             appointment_json=(
                 workspace.appointment_json if workspace is not None else None
             ),
