@@ -21,7 +21,11 @@ from ..services.content_aggregator_service import (
     GlanceDashboardMissing,
 )
 from ..services.practice_hub_pending_client import PracticeHubPendingError
-from .workspace_auth import WorkspaceSelectAuth, require_workspace_select_auth
+from .workspace_auth import (
+    WorkspaceSelectAuth,
+    require_dashboard_webhook_auth,
+    require_workspace_select_auth,
+)
 
 router = APIRouter()
 public_router = APIRouter()
@@ -128,21 +132,18 @@ async def sync_glance(
 async def dashboard_webhook(
     payload: DashboardWebhookPayload,
     db: DbSession,
-    auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
+    auth: Annotated[WorkspaceSelectAuth, Depends(require_dashboard_webhook_auth)],
 ) -> GlanceApiResponse:
     """Appointment-system webhook: store schedule/counts, sync pending, return glance.
 
-    Auth: ``Authorization: Bearer <workspace_select_access_token>`` (required for
-    Drupal pending-counts sync). Body supplies ``ph_user_id``, ``workspace_id``,
-    ``appointments``, ``requests``, and ``todays_schedule``.
+    Auth: trusted ``Origin``/``Referer`` (``AI_SUGGESTIONS_OPEN_DOMAINS``) **or**
+    Bearer; successful write always needs Bearer so JWT supplies
+    ``ph_user_id`` / ``workspace_id`` / ``ws_user_id``. Body is schedule/counts only.
     """
     schedule = [item.model_dump(mode="json") for item in payload.todays_schedule]
     try:
         data = await ContentAggregatorService(db).process_dashboard_webhook(
             auth.authorization,
-            ph_user_id=payload.ph_user_id,
-            workspace_id=payload.workspace_id,
-            ws_user_id=payload.ws_user_id,
             appointments=payload.appointments,
             requests=payload.requests,
             todays_schedule=schedule,

@@ -123,14 +123,12 @@ No query params. Empty store → zeros / `[]` with **200**.
 ```http
 POST {BASE}/linq360/webhooks/dashboard
 Authorization: Bearer <workspace_select_access_token>
+Origin: https://dev1.linqmd.com
 Content-Type: application/json
 ```
 
 ```json
 {
-  "ph_user_id": 892,
-  "workspace_id": 161,
-  "ws_user_id": 325,
   "appointments": 2,
   "requests": 1,
   "todays_schedule": [
@@ -147,12 +145,14 @@ Content-Type: application/json
 }
 ```
 
-Bearer `appointment_doctor_id` / `workspace_id` must match the body. Response is the same glance envelope (`msg`: `Dashboard webhook processed successfully`).
+Identity comes from the Bearer JWT only (`appointment_doctor_id` → `ph_user_id`, `workspace_id`, `user_id` → `ws_user_id`). Body does **not** send those three fields.
+
+Auth gate (Nest-style): trusted `Origin`/`Referer` listed in `AI_SUGGESTIONS_OPEN_DOMAINS` **or** Bearer. A successful write still requires Bearer so the doctor/workspace can be resolved. Response is the same glance envelope (`msg`: `Dashboard webhook processed successfully`).
 
 | Status | When |
 |--------|------|
 | `200` | OK |
-| `401` | Bad token / identity mismatch |
+| `401` | Missing/bad Bearer (domain-only is not enough for identity) |
 | `502` | Practice Hub sync failed |
 | `422` | Invalid body |
 

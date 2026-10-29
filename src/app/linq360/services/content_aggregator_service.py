@@ -457,35 +457,19 @@ class ContentAggregatorService:
         self,
         workspace_access_token: str,
         *,
-        ph_user_id: int,
-        workspace_id: int,
-        ws_user_id: int | None = None,
         appointments: int = 0,
         requests: int = 0,
         todays_schedule: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Webhook: store schedule/counts, sync pending content, return merged glance.
 
-        Bearer token must match ``ph_user_id`` (``appointment_doctor_id``).
+        Identity comes only from the workspace select JWT:
+        ``appointment_doctor_id`` / ``workspace_id`` / ``user_id``.
         """
         identity = workspace_identity_from_token(workspace_access_token)
-        token_uid = str(identity["linqmd_user_id"])
-        if token_uid != str(ph_user_id):
-            raise PracticeHubPendingError(
-                "Workspace select token appointment_doctor_id does not match "
-                f"ph_user_id={ph_user_id}",
-                status_code=401,
-            )
-        token_ws = identity.get("workspace_id")
-        if token_ws is not None and int(token_ws) != int(workspace_id):
-            raise PracticeHubPendingError(
-                "Workspace select token workspace_id does not match "
-                f"workspace_id={workspace_id}",
-                status_code=401,
-            )
-        resolved_ws_user = (
-            ws_user_id if ws_user_id is not None else identity.get("ws_user_id")
-        )
+        ph_user_id = int(identity["linqmd_user_id"])
+        workspace_id = workspace_id_or_zero(identity.get("workspace_id"))
+        resolved_ws_user = identity.get("ws_user_id")
         await self.upsert_workspace_schedule(
             ph_user_id=ph_user_id,
             workspace_id=workspace_id,

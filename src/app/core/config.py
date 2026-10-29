@@ -473,6 +473,14 @@ class Settings(BaseSettings):
         default="",
         description="Pre-authenticated cookie for LinQMD Practice Hub API if necessary"
     )
+    AI_SUGGESTIONS_OPEN_DOMAINS: str = Field(
+        default="[]",
+        description=(
+            "Trusted origins for LinQ360 dashboard webhook domain auth bypass "
+            '(JSON array or comma-separated), e.g. '
+            '["https://dev1.linqmd.com","https://app.linqmd.com"]'
+        ),
+    )
 
     # ========================================
     # SMS/OTP Configuration (onlysms.co.in)
@@ -585,6 +593,13 @@ class Settings(BaseSettings):
         if self.CORS_ORIGINS == "*":
             return ["*"]
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def ai_suggestions_open_domains_list(self) -> list[str]:
+        """Parse ``AI_SUGGESTIONS_OPEN_DOMAINS`` JSON array or comma-separated list."""
+        from ..linq360.open_domains import parse_open_domains
+
+        return parse_open_domains(self.AI_SUGGESTIONS_OPEN_DOMAINS)
 
     @property
     def cors_methods_list(self) -> list[str]:

@@ -592,9 +592,6 @@ class TestBlogPodcastCommentStats:
         svc = ContentAggregatorService(db_session)
         glance = await svc.process_dashboard_webhook(
             token,
-            ph_user_id=884,
-            workspace_id=161,
-            ws_user_id=325,
             appointments=2,
             requests=1,
             todays_schedule=[patient],

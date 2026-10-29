@@ -78,11 +78,12 @@ class GlanceSyncRequest(BaseModel):
 
 
 class DashboardWebhookPayload(BaseModel):
-    """Appointment-system webhook body for workspace schedule + badge counts."""
+    """Appointment-system webhook body for workspace schedule + badge counts.
 
-    ph_user_id: int
-    workspace_id: int
-    ws_user_id: int | None = None
+    Doctor / workspace identity comes from the workspace select Bearer JWT
+    (``appointment_doctor_id``, ``workspace_id``, ``user_id``) — not the body.
+    """
+
     appointments: int = 0
     requests: int = 0
     todays_schedule: list[WorkspaceAppointmentItem] = Field(default_factory=list)
