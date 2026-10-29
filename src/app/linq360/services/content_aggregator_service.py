@@ -6,8 +6,6 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
-
 from ...models.blog import Blog, BlogComment
 from ...models.enums import CommentStatus, ReviewStatus
 from ...models.podcast_comment import PodcastComment
@@ -26,23 +24,18 @@ from ..models.aggregators import (
     ReviewsPendingAggregator,
     ReviewsSummaryAggregator,
 )
-from ..glance_shapes import (
-    TODAYS_SCHEDULE_KEY,
-    count_document,
-    empty_todays_schedule,
-    merge_glance_response,
-    normalize_todays_schedule,
-    workspace_id_or_zero,
+from ..dashboard.dashboard_content import content_block, payload_from_stored_content
+from ..dashboard.dashboard_repository import (
+    DashboardRepository,
+    GlanceDashboardMissing,
 )
+from ..dashboard.config.dashboard_service import DashboardService
 from ..models.dashboard import DoctorDashboard, WorkspaceDoctorDashboard
 from .practice_hub_pending_client import (
     PENDING_SOURCES,
-    PracticeHubPendingError,
-    fetch_pending_counts,
     non_negative_int,
     parse_source_block,
     pending_count_from_block,
-    workspace_identity_from_token,
 )
 
 
@@ -97,48 +90,26 @@ def _avg_rating(rating_sum: Decimal, review_count: int) -> Decimal | None:
 
 
 def _payload_from_stored_content(existing: dict[str, Any] | None) -> dict[str, Any]:
-    """Read source blocks from doctor_dashboard.todays_glance (content-only).
-
-    Also accepts a legacy wrapped ``{"content": {...}}`` shape.
-    """
-    raw = existing if isinstance(existing, dict) else {}
-    nested = raw.get("content")
-    if isinstance(nested, dict) and any(key in nested for key in PENDING_SOURCES):
-        content = nested
-    elif any(key in raw for key in PENDING_SOURCES):
-        content = raw
-    else:
-        content = nested if isinstance(nested, dict) else raw
-    content = content if isinstance(content, dict) else {}
-    return {source: content.get(source) or {} for source in PENDING_SOURCES}
+    return payload_from_stored_content(existing)
 
 
 def _counts_from_glance(existing: dict[str, Any] | None) -> dict[str, int]:
-    payload = _payload_from_stored_content(existing)
-    return {source: pending_count_from_block(payload.get(source)) for source in PENDING_SOURCES}
+    from ..dashboard.dashboard_content import counts_from_glance
+
+    return counts_from_glance(existing)
 
 
 def _content_block(payload: dict[str, Any]) -> dict[str, Any]:
-    """Build glance content using shared ``PENDING_SOURCES`` / parse helpers."""
-    block: dict[str, Any] = {}
-    total = 0
-    for source in PENDING_SOURCES:
-        entry = parse_source_block(source, payload.get(source))
-        block[source] = entry
-        total += int(entry["pending_count"])
-    block["total_pending_counts"] = total
-    return block
+    return content_block(payload)
 
 
-class GlanceDashboardMissing(Exception):
-    """Cannot store glance for a non-numeric Drupal uid."""
-
-    def __init__(self, linqmd_user_id: str) -> None:
-        super().__init__(
-            "Cannot store linq360.doctor_dashboard.todays_glance for ph_user_id="
-            f"{linqmd_user_id} (must be numeric)."
-        )
-        self.linqmd_user_id = linqmd_user_id
+# Re-export for existing imports.
+__all__ = [
+    "ContentAggregatorService",
+    "GlanceDashboardMissing",
+    "blog_comment_delta",
+    "pending_status_delta",
+]
 
 
 class ContentAggregatorService:
@@ -350,34 +321,11 @@ class ContentAggregatorService:
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> dict[str, Any]:
-        """Merge glance from both dashboard tables for one workspace.
-
-        - ``content`` ← ``doctor_dashboard.todays_glance``
-        - ``requests`` / ``appointments`` ← integer counts from workspace columns
-        - ``todays_schedule`` ← ``appointment_json`` patient list
-        - ``payments`` ← always ``{}``
-
-        Workspace row is keyed by ``(ws_user_id, ph_user_id, workspace_id)``.
-        Missing rows → empty defaults (still a full glance document).
-        """
-        uid = str(linqmd_user_id).strip()
-        ws_id = workspace_id_or_zero(workspace_id)
-        doctor = await self._get_doctor_dashboard(uid)
-        workspace = await self._get_workspace_dashboard(
-            uid, ws_id, ws_user_id=ws_user_id
-        )
-        stored = (
-            doctor.todays_glance
-            if doctor is not None and doctor.todays_glance
-            else None
-        )
-        return merge_glance_response(
-            _content_block(_payload_from_stored_content(stored)),
-            requests=workspace.requests if workspace is not None else 0,
-            appointments=workspace.appointments if workspace is not None else 0,
-            appointment_json=(
-                workspace.appointment_json if workspace is not None else None
-            ),
+        """Delegate to DashboardService (FAQ layering)."""
+        return await DashboardService(self.session).get_glance(
+            linqmd_user_id,
+            workspace_id=workspace_id,
+            ws_user_id=ws_user_id,
         )
 
     async def upsert_pending_glance(
@@ -388,40 +336,16 @@ class ContentAggregatorService:
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> None:
-        """Write pending content into ``doctor_dashboard.todays_glance``.
-
-        Also ensures a workspace row exists (requests/appointments untouched).
-        """
-        await self._refresh_todays_glance_content(
-            str(linqmd_user_id).strip(),
+        await DashboardService(self.session).upsert_pending_glance(
+            linqmd_user_id,
             payload,
             workspace_id=workspace_id,
             ws_user_id=ws_user_id,
         )
 
     async def sync_pending_glance(self, workspace_access_token: str) -> dict[str, Any]:
-        """GET Practice Hub pending counts with workspace select token; upsert glance.
-
-        Calls ``GET …/api/linq360/pending-counts`` (no user_id). From the token:
-        - ``appointment_doctor_id`` → ``ph_user_id`` on both dashboards
-        - ``workspace_id`` → ``workspace_doctor_dashboard.workspace_id``
-        - ``user_id`` → ``ws_user_id`` on both dashboards
-
-        Returns the same merged shape as ``get_glance``.
-        """
-        identity = workspace_identity_from_token(workspace_access_token)
-        uid = str(identity["linqmd_user_id"])
-        payload = await fetch_pending_counts(workspace_access_token)
-        workspace_id = identity.get("workspace_id")
-        ws_user = identity.get("ws_user_id")
-        await self.upsert_pending_glance(
-            uid,
-            payload,
-            workspace_id=workspace_id,
-            ws_user_id=ws_user,
-        )
-        return await self.get_glance(
-            uid, workspace_id=workspace_id, ws_user_id=ws_user
+        return await DashboardService(self.session).sync_pending_glance(
+            workspace_access_token
         )
 
     async def upsert_workspace_schedule(
@@ -434,24 +358,14 @@ class ContentAggregatorService:
         requests: int = 0,
         todays_schedule: list[dict[str, Any]] | None = None,
     ) -> WorkspaceDoctorDashboard:
-        """Write appointment/request counts + ``todays_schedule`` on one workspace row."""
-        uid = str(ph_user_id)
-        row = await self._ensure_workspace_dashboard(
-            uid,
+        return await DashboardService(self.session).upsert_workspace_schedule(
+            ph_user_id=ph_user_id,
             workspace_id=workspace_id,
             ws_user_id=ws_user_id,
+            appointments=appointments,
+            requests=requests,
+            todays_schedule=todays_schedule,
         )
-        schedule = todays_schedule if isinstance(todays_schedule, list) else []
-        row.appointments = count_document(appointments)
-        row.requests = count_document(requests)
-        row.appointment_json = normalize_todays_schedule(
-            {TODAYS_SCHEDULE_KEY: schedule}
-        )
-        flag_modified(row, "appointments")
-        flag_modified(row, "requests")
-        flag_modified(row, "appointment_json")
-        await self.session.flush()
-        return row
 
     async def process_dashboard_webhook(
         self,
@@ -461,28 +375,11 @@ class ContentAggregatorService:
         requests: int = 0,
         todays_schedule: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Webhook: store schedule/counts, sync pending content, return merged glance.
-
-        Identity comes only from the workspace select JWT:
-        ``appointment_doctor_id`` / ``workspace_id`` / ``user_id``.
-        """
-        identity = workspace_identity_from_token(workspace_access_token)
-        ph_user_id = int(identity["linqmd_user_id"])
-        workspace_id = workspace_id_or_zero(identity.get("workspace_id"))
-        resolved_ws_user = identity.get("ws_user_id")
-        await self.upsert_workspace_schedule(
-            ph_user_id=ph_user_id,
-            workspace_id=workspace_id,
-            ws_user_id=resolved_ws_user,
+        return await DashboardService(self.session).process_dashboard_webhook(
+            workspace_access_token,
             appointments=appointments,
             requests=requests,
             todays_schedule=todays_schedule,
-        )
-        await self.sync_pending_glance(workspace_access_token)
-        return await self.get_glance(
-            str(ph_user_id),
-            workspace_id=workspace_id,
-            ws_user_id=resolved_ws_user,
         )
 
     # ------------------------------------------------------------------
@@ -741,41 +638,14 @@ class ContentAggregatorService:
         *,
         ws_user_id: int | None = None,
     ) -> WorkspaceDoctorDashboard | None:
-        if not linqmd_user_id.isdigit():
-            return None
-        clauses = [
-            WorkspaceDoctorDashboard.ph_user_id == int(linqmd_user_id),
-            WorkspaceDoctorDashboard.workspace_id == int(workspace_id),
-        ]
-        if ws_user_id is not None:
-            clauses.append(WorkspaceDoctorDashboard.ws_user_id == int(ws_user_id))
-        else:
-            clauses.append(WorkspaceDoctorDashboard.ws_user_id.is_(None))
-        result = await self.session.execute(
-            select(WorkspaceDoctorDashboard).where(*clauses)
+        return await DashboardRepository(self.session).get_workspace_dashboard(
+            linqmd_user_id, workspace_id, ws_user_id=ws_user_id
         )
-        row = result.scalar_one_or_none()
-        # Adopt legacy null-ws row when looking up with a concrete ws_user_id.
-        if row is None and ws_user_id is not None:
-            result = await self.session.execute(
-                select(WorkspaceDoctorDashboard).where(
-                    WorkspaceDoctorDashboard.ph_user_id == int(linqmd_user_id),
-                    WorkspaceDoctorDashboard.workspace_id == int(workspace_id),
-                    WorkspaceDoctorDashboard.ws_user_id.is_(None),
-                )
-            )
-            row = result.scalar_one_or_none()
-        return row
 
     async def _get_doctor_dashboard(self, linqmd_user_id: str) -> DoctorDashboard | None:
-        if not linqmd_user_id.isdigit():
-            return None
-        result = await self.session.execute(
-            select(DoctorDashboard).where(
-                DoctorDashboard.ph_user_id == int(linqmd_user_id)
-            )
+        return await DashboardRepository(self.session).get_doctor_dashboard(
+            linqmd_user_id
         )
-        return result.scalar_one_or_none()
 
     async def _ensure_workspace_dashboard(
         self,
@@ -784,35 +654,11 @@ class ContentAggregatorService:
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> WorkspaceDoctorDashboard:
-        """Upsert one row for ``(ws_user_id, ph_user_id, workspace_id)``."""
-        if not linqmd_user_id.isdigit():
-            raise GlanceDashboardMissing(linqmd_user_id)
-        ws_id = workspace_id_or_zero(workspace_id)
-        resolved_ws = int(ws_user_id) if ws_user_id is not None else None
-        row = await self._get_workspace_dashboard(
-            linqmd_user_id, ws_id, ws_user_id=resolved_ws
+        return await DashboardRepository(self.session).ensure_workspace_dashboard(
+            linqmd_user_id,
+            workspace_id=workspace_id,
+            ws_user_id=ws_user_id,
         )
-        if row is not None:
-            if resolved_ws is not None and row.ws_user_id is None:
-                row.ws_user_id = resolved_ws
-            # Normalize legacy appointment_json shapes on read/ensure.
-            normalized = normalize_todays_schedule(row.appointment_json)
-            if row.appointment_json != normalized:
-                row.appointment_json = normalized
-                flag_modified(row, "appointment_json")
-            await self.session.flush()
-            return row
-        row = WorkspaceDoctorDashboard(
-            appointment_json=empty_todays_schedule(),
-            workspace_id=ws_id,
-            ws_user_id=resolved_ws,
-            ph_user_id=int(linqmd_user_id),
-            requests={},
-            appointments={},
-        )
-        self.session.add(row)
-        await self.session.flush()
-        return row
 
     async def _ensure_doctor_dashboard(
         self,
@@ -820,23 +666,9 @@ class ContentAggregatorService:
         *,
         ws_user_id: int | None = None,
     ) -> DoctorDashboard:
-        """Return doctor_dashboard for this PH uid, creating one when missing."""
-        if not linqmd_user_id.isdigit():
-            raise GlanceDashboardMissing(linqmd_user_id)
-        row = await self._get_doctor_dashboard(linqmd_user_id)
-        if row is not None:
-            if ws_user_id is not None:
-                row.ws_user_id = int(ws_user_id)
-            await self.session.flush()
-            return row
-        row = DoctorDashboard(
-            ph_user_id=int(linqmd_user_id),
-            ws_user_id=int(ws_user_id) if ws_user_id is not None else None,
-            todays_glance={},
+        return await DashboardRepository(self.session).ensure_doctor_dashboard(
+            linqmd_user_id, ws_user_id=ws_user_id
         )
-        self.session.add(row)
-        await self.session.flush()
-        return row
 
     async def _refresh_todays_glance_content(
         self,
@@ -846,19 +678,9 @@ class ContentAggregatorService:
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> None:
-        """Write pending content into ``doctor_dashboard.todays_glance``.
-
-        Ensures a workspace row exists for requests/appointments merge on GET.
-        Does not overwrite workspace ``requests`` / ``appointments``.
-        """
-        doctor = await self._ensure_doctor_dashboard(
-            linqmd_user_id, ws_user_id=ws_user_id
-        )
-        doctor.todays_glance = _content_block(payload)
-        flag_modified(doctor, "todays_glance")
-        await self._ensure_workspace_dashboard(
+        await DashboardService(self.session).upsert_pending_glance(
             linqmd_user_id,
+            payload,
             workspace_id=workspace_id,
             ws_user_id=ws_user_id,
         )
-        await self.session.flush()

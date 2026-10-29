@@ -1,38 +1,46 @@
-"""Linq360 content engagement API."""
+"""Dashboard HTTP handlers (glance, webhook, content engagement).
+
+Routes are registered in ``dashboard.config.routing``.
+"""
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status
 
 from ...core.rbac import get_current_user
 from ...db.session import DbSession
 from ...models.enums import UserRole
 from ...models.user import User
 from ...repositories.doctor_repository import DoctorRepository
-from ..schemas.engagement import (
-    ContentEngagementResponse,
-    DashboardWebhookPayload,
-    GlanceApiResponse,
-    GlanceResponse,
-)
-from ..services.content_aggregator_service import (
-    ContentAggregatorService,
-    GlanceDashboardMissing,
-)
-from ..services.practice_hub_pending_client import PracticeHubPendingError
-from .workspace_auth import (
+from ..common.base_controller import BaseController
+from ..config.auth import (
     WorkspaceSelectAuth,
     require_dashboard_webhook_auth,
     require_workspace_select_auth,
 )
-
-router = APIRouter()
-public_router = APIRouter()
+from ..services.practice_hub_pending_client import PracticeHubPendingError
+from .config.dashboard_service import DashboardService, GlanceDashboardMissing
+from .dashboard_fields import (
+    ContentEngagementResponse,
+    DashboardWebhookPayload,
+    GlanceApiResponse,
+)
+from .dashboard_response import DashboardResponse
 
 _MSG_GLANCE_GET = "Glance retrieved successfully"
 _MSG_GLANCE_SYNC = "Glance synced successfully"
 _MSG_DASHBOARD_WEBHOOK = "Dashboard webhook processed successfully"
+
+
+class DashboardController(BaseController):
+    """Thin HTTP adapter over DashboardService."""
+
+    def __init__(self) -> None:
+        self.dashboard_response = DashboardResponse()
+
+
+_controller = DashboardController()
 
 
 async def require_doctor_engagement_access(
@@ -40,7 +48,6 @@ async def require_doctor_engagement_access(
     db: DbSession,
     user: Annotated[User, Depends(get_current_user)],
 ) -> int:
-    """Allow admin/operation/content_creator, or the linked doctor."""
     doctor = await DoctorRepository(db).get_by_id(doctor_id)
     if doctor is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
@@ -60,55 +67,51 @@ async def require_doctor_engagement_access(
     )
 
 
-@router.get(
-    "/doctors/{doctor_id}/content-engagement",
-    response_model=ContentEngagementResponse,
-)
 async def get_content_engagement(
     doctor_id: Annotated[int, Depends(require_doctor_engagement_access)],
     db: DbSession,
 ) -> ContentEngagementResponse:
-    """Return per-source content engagement counts for a doctor."""
-    data = await ContentAggregatorService(db).get_engagement(doctor_id)
+    data = await DashboardService(db).get_engagement(doctor_id)
     return ContentEngagementResponse.model_validate(data)
 
 
-@public_router.get("/glance", response_model=GlanceApiResponse)
 async def get_glance(
     db: DbSession,
     auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
 ) -> GlanceApiResponse:
-    """Read stored pending inbox for the doctor on the workspace select token.
+    async def _run(_: Any = None) -> dict[str, Any]:
+        return await DashboardService(db).get_glance(
+            auth.linqmd_user_id,
+            workspace_id=auth.workspace_id,
+            ws_user_id=auth.ws_user_id,
+        )
 
-    Auth: ``Authorization: Bearer <workspace_select_access_token>``.
-    No ``linqmd_user_id`` query param — uses ``appointment_doctor_id`` from the JWT.
-    """
-    data = await ContentAggregatorService(db).get_glance(
-        auth.linqmd_user_id,
-        workspace_id=auth.workspace_id,
-        ws_user_id=auth.ws_user_id,
+    envelope = await _controller.execute_method(
+        _run, None, success_msg=_MSG_GLANCE_GET, pass_payload=True
     )
-    return GlanceApiResponse(
-        status_code=status.HTTP_200_OK,
-        msg=_MSG_GLANCE_GET,
-        data=GlanceResponse.model_validate(data),
+    if envelope.get("status_code") != 200:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=envelope.get("msg") or "Glance failed",
+        )
+    return _controller.dashboard_response.glance_success(
+        _MSG_GLANCE_GET, envelope["data"]
     )
 
 
-@public_router.post("/glance/sync", response_model=GlanceApiResponse)
 async def sync_glance(
     db: DbSession,
     auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
 ) -> GlanceApiResponse:
-    """Pull LinQ360 pending counts with the workspace select token and store them.
-
-    Auth: ``Authorization: Bearer <workspace_select_access_token>``.
-    No request body / user_id. Calls Drupal ``GET …/pending-counts`` with the same
-    Bearer token; stores under ``appointment_doctor_id``.
-    """
     try:
-        data = await ContentAggregatorService(db).sync_pending_glance(auth.authorization)
-        await db.commit()
+        async def _run(_: Any = None) -> dict[str, Any]:
+            data = await DashboardService(db).sync_pending_glance(auth.authorization)
+            await db.commit()
+            return data
+
+        envelope = await _controller.execute_method(
+            _run, None, success_msg=_MSG_GLANCE_SYNC, pass_payload=True
+        )
     except GlanceDashboardMissing as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PracticeHubPendingError as exc:
@@ -121,34 +124,36 @@ async def sync_glance(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
-    return GlanceApiResponse(
-        status_code=status.HTTP_200_OK,
-        msg=_MSG_GLANCE_SYNC,
-        data=GlanceResponse.model_validate(data),
+    if envelope.get("status_code") != 200:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=envelope.get("msg") or "Glance sync failed",
+        )
+    return _controller.dashboard_response.glance_success(
+        _MSG_GLANCE_SYNC, envelope["data"]
     )
 
 
-@public_router.post("/webhooks/dashboard", response_model=GlanceApiResponse)
 async def dashboard_webhook(
     payload: DashboardWebhookPayload,
     db: DbSession,
     auth: Annotated[WorkspaceSelectAuth, Depends(require_dashboard_webhook_auth)],
 ) -> GlanceApiResponse:
-    """Appointment-system webhook: store schedule/counts, sync pending, return glance.
-
-    Auth: trusted ``Origin``/``Referer`` (``AI_SUGGESTIONS_OPEN_DOMAINS``) **or**
-    Bearer; successful write always needs Bearer so JWT supplies
-    ``ph_user_id`` / ``workspace_id`` / ``ws_user_id``. Body is schedule/counts only.
-    """
     schedule = [item.model_dump(mode="json") for item in payload.todays_schedule]
     try:
-        data = await ContentAggregatorService(db).process_dashboard_webhook(
-            auth.authorization,
-            appointments=payload.appointments,
-            requests=payload.requests,
-            todays_schedule=schedule,
+        async def _run(_: Any = None) -> dict[str, Any]:
+            data = await DashboardService(db).process_dashboard_webhook(
+                auth.authorization,
+                appointments=payload.appointments,
+                requests=payload.requests,
+                todays_schedule=schedule,
+            )
+            await db.commit()
+            return data
+
+        envelope = await _controller.execute_method(
+            _run, None, success_msg=_MSG_DASHBOARD_WEBHOOK, pass_payload=True
         )
-        await db.commit()
     except GlanceDashboardMissing as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PracticeHubPendingError as exc:
@@ -161,8 +166,11 @@ async def dashboard_webhook(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
-    return GlanceApiResponse(
-        status_code=status.HTTP_200_OK,
-        msg=_MSG_DASHBOARD_WEBHOOK,
-        data=GlanceResponse.model_validate(data),
+    if envelope.get("status_code") != 200:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=envelope.get("msg") or "Dashboard webhook failed",
+        )
+    return _controller.dashboard_response.glance_success(
+        _MSG_DASHBOARD_WEBHOOK, envelope["data"]
     )

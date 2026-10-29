@@ -1,4 +1,4 @@
-"""Shared workspace-select Bearer auth for LinQ360 glance endpoints."""
+"""Shared workspace-select Bearer auth for LinQ360 glance / webhook endpoints."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,12 +6,12 @@ from typing import Annotated
 
 from fastapi import Header, HTTPException, Request, status
 
-from ...core.config import get_settings
-from ..open_domains import parse_open_domains, request_matches_open_domain
-from ..services.practice_hub_pending_client import (
+from ...common.open_domains import request_matches_open_domain
+from ...services.practice_hub_pending_client import (
     PracticeHubPendingError,
     workspace_identity_from_token,
 )
+from ..settings import ai_suggestions_open_domains
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,13 +64,10 @@ def require_dashboard_webhook_auth(
 ) -> WorkspaceSelectAuth:
     """Nest-style OR gate for dashboard webhook.
 
-    - Trusted ``Origin`` / ``Referer`` (``AI_SUGGESTIONS_OPEN_DOMAINS``) bypasses
-      the domain check, but this webhook still needs Bearer for doctor identity
-      (body no longer carries ``ph_user_id`` / ``workspace_id`` / ``ws_user_id``).
-    - Otherwise require a valid workspace select Bearer (same as glance).
+    Trusted Origin/Referer matches ``AI_SUGGESTIONS_OPEN_DOMAINS``, but a
+    successful write still needs Bearer so JWT supplies doctor/workspace ids.
     """
-    settings = get_settings()
-    allowlist = parse_open_domains(settings.AI_SUGGESTIONS_OPEN_DOMAINS)
+    allowlist = ai_suggestions_open_domains()
     domain_ok = request_matches_open_domain(
         request.headers.get("origin"),
         request.headers.get("referer"),

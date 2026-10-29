@@ -1,4 +1,4 @@
-"""Content engagement response schemas."""
+"""Engagement / glance schemas (owned by dashboard fields; kept for import paths)."""
 from __future__ import annotations
 
 from typing import Any
@@ -9,8 +9,6 @@ from .dashboard import WorkspaceAppointmentItem
 
 
 class ContentSourceEngagement(BaseModel):
-    """Per-source engagement rollup."""
-
     source: str
     item_count: int = 0
     avg_rating: float | None = None
@@ -18,8 +16,6 @@ class ContentSourceEngagement(BaseModel):
 
 
 class ContentEngagementResponse(BaseModel):
-    """Doctor content engagement across review / blog / podcast."""
-
     doctor_id: int
     sources: list[ContentSourceEngagement] = Field(default_factory=list)
     total_item_count: int = 0
@@ -50,12 +46,6 @@ class GlanceContent(BaseModel):
 
 
 class GlanceResponse(BaseModel):
-    """Today-at-a-glance payload under the API envelope ``data``.
-
-    Dashboard badges: ``appointments`` / ``requests`` are integer counts.
-    Patient details: ``todays_schedule`` array.
-    """
-
     content: GlanceContent
     appointments: int = 0
     requests: int = 0
@@ -64,26 +54,16 @@ class GlanceResponse(BaseModel):
 
 
 class GlanceApiResponse(BaseModel):
-    """HTTP envelope for glance GET / sync."""
-
     status_code: int = 200
     msg: str
-    data: GlanceResponse
+    data: GlanceResponse | None = None
 
 
 class GlanceSyncRequest(BaseModel):
-    """Optional body for glance sync (unused; doctor comes from Bearer token)."""
-
     model_config = {"extra": "ignore"}
 
 
 class DashboardWebhookPayload(BaseModel):
-    """Appointment-system webhook body for workspace schedule + badge counts.
-
-    Doctor / workspace identity comes from the workspace select Bearer JWT
-    (``appointment_doctor_id``, ``workspace_id``, ``user_id``) — not the body.
-    """
-
     appointments: int = 0
     requests: int = 0
     todays_schedule: list[WorkspaceAppointmentItem] = Field(default_factory=list)

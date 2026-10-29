@@ -37,7 +37,7 @@ from .endpoints import (
     blogs,
 )
 from .endpoints.voice import voice_ws_router
-from ...linq360.api import content_engagement_router, glance_router
+from ...linq360.dashboard import content_engagement_router, glance_router
 
 router = APIRouter(prefix="/v1")
 

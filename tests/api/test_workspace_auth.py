@@ -7,7 +7,7 @@ import json
 import pytest
 from fastapi import HTTPException
 
-from src.app.linq360.api.workspace_auth import require_workspace_select_auth
+from src.app.linq360.config.auth import require_workspace_select_auth
 
 
 def _jwt(payload: dict) -> str:

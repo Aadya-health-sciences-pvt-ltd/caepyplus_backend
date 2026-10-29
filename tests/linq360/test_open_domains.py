@@ -1,7 +1,7 @@
 """Unit tests for Nest-ported open-domain helpers."""
 from __future__ import annotations
 
-from src.app.linq360.open_domains import (
+from src.app.linq360.common.open_domains import (
     origins_match,
     parse_open_domains,
     request_matches_open_domain,

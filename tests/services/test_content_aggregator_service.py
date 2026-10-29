@@ -511,7 +511,7 @@ class TestBlogPodcastCommentStats:
             }
 
         monkeypatch.setattr(
-            "src.app.linq360.services.content_aggregator_service.fetch_pending_counts",
+            "src.app.linq360.dashboard.config.dashboard_service.fetch_pending_counts",
             _fake_fetch,
         )
         svc = ContentAggregatorService(db_session)
@@ -586,7 +586,7 @@ class TestBlogPodcastCommentStats:
             }
 
         monkeypatch.setattr(
-            "src.app.linq360.services.content_aggregator_service.fetch_pending_counts",
+            "src.app.linq360.dashboard.config.dashboard_service.fetch_pending_counts",
             _fake_fetch,
         )
         svc = ContentAggregatorService(db_session)

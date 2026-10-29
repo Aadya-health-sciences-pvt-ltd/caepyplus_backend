@@ -595,13 +595,6 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
     @property
-    def ai_suggestions_open_domains_list(self) -> list[str]:
-        """Parse ``AI_SUGGESTIONS_OPEN_DOMAINS`` JSON array or comma-separated list."""
-        from ..linq360.open_domains import parse_open_domains
-
-        return parse_open_domains(self.AI_SUGGESTIONS_OPEN_DOMAINS)
-
-    @property
     def cors_methods_list(self) -> list[str]:
         """Parse CORS methods from comma-separated string."""
         return [method.strip() for method in self.CORS_ALLOW_METHODS.split(",")]
