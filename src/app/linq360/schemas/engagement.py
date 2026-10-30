@@ -64,6 +64,13 @@ class GlanceSyncRequest(BaseModel):
 
 
 class DashboardWebhookPayload(BaseModel):
+    """Appointment-system webhook body.
+
+    Identity from JWT. Optional ``event_type`` drives which dashboard sections
+    refresh after debounce (default: appointments + requests snapshot).
+    """
+
+    event_type: str | None = None
     appointments: int = 0
     requests: int = 0
     todays_schedule: list[WorkspaceAppointmentItem] = Field(default_factory=list)

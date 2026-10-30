@@ -481,6 +481,14 @@ class Settings(BaseSettings):
             '["https://dev1.linqmd.com","https://app.linqmd.com"]'
         ),
     )
+    DEBOUNCE_WINDOW_MS: int = Field(
+        default=2000,
+        ge=0,
+        description=(
+            "In-memory dashboard webhook debounce window in milliseconds "
+            "(group key: ws_user_id + workspace_id). Redis optional later."
+        ),
+    )
 
     # ========================================
     # SMS/OTP Configuration (onlysms.co.in)

@@ -6,7 +6,8 @@ Wire **Today-at-a-Glance** with these CAEPY APIs:
 |--------|------|---------|
 | `POST` | `/linq360/glance/sync` | Fresh pending content → save → return glance |
 | `GET` | `/linq360/glance` | Read last stored glance |
-| `POST` | `/linq360/webhooks/dashboard` | Appointment webhook: store schedule/counts → sync content → return glance |
+| `POST` | `/linq360/webhooks/dashboard` | Appointment webhook: upsert schedule → debounce refresh by `ws_user_id`+`workspace_id` → return glance |
+| `WS` | `/linq360/ws/dashboard?token=…` | Realtime room `dashboard:{workspace_id}:{ws_user_id}` after debounced upsert |
 
 ---
 
@@ -129,6 +130,7 @@ Content-Type: application/json
 
 ```json
 {
+  "event_type": "appointment.created",
   "appointments": 2,
   "requests": 1,
   "todays_schedule": [
@@ -145,9 +147,19 @@ Content-Type: application/json
 }
 ```
 
-Identity comes from the Bearer JWT only (`appointment_doctor_id` → `ph_user_id`, `workspace_id`, `user_id` → `ws_user_id`). Body does **not** send those three fields.
+Identity comes from the Bearer JWT only (`appointment_doctor_id` → `ph_user_id`, `workspace_id`, `user_id` → `ws_user_id`). Body does **not** send those three ids.
+
+Optional `event_type` maps to dashboard sections (appointments / requests / content / payments). Default snapshot refreshes appointments + requests. Schedule is upserted immediately; further section refresh is **debounced** (`DEBOUNCE_WINDOW_MS`, default 2000) grouped by `ws_user_id` + `workspace_id`, then pushed on WebSocket.
 
 Auth gate (Nest-style): trusted `Origin`/`Referer` listed in `AI_SUGGESTIONS_OPEN_DOMAINS` **or** Bearer. A successful write still requires Bearer so the doctor/workspace can be resolved. Response is the same glance envelope (`msg`: `Dashboard webhook processed successfully`).
+
+### Dashboard WebSocket
+
+```http
+WS {BASE}/linq360/ws/dashboard?token=<workspace_select_access_token>
+```
+
+Server joins room `dashboard:{workspace_id}:{ws_user_id}` from the JWT (client cannot pick the room). After debounced upsert, server sends JSON like `{ "event": "dashboard_updated", "sections": [...], "timestamp": "...", "data": { ...glance } }`.
 
 | Status | When |
 |--------|------|

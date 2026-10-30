@@ -586,10 +586,12 @@ class TestBlogPodcastCommentStats:
             }
 
         monkeypatch.setattr(
-            "src.app.linq360.dashboard.config.dashboard_service.fetch_pending_counts",
+            "src.app.linq360.dashboard.realtime.refresh_service.fetch_pending_counts",
             _fake_fetch,
         )
         svc = ContentAggregatorService(db_session)
+        # Snapshot webhook upserts schedule immediately; content refresh is
+        # section-scoped (not in default dashboard.snapshot map).
         glance = await svc.process_dashboard_webhook(
             token,
             appointments=2,
@@ -599,8 +601,6 @@ class TestBlogPodcastCommentStats:
         assert glance["appointments"] == 2
         assert glance["requests"] == 1
         assert glance["todays_schedule"] == [patient]
-        assert glance["content"]["reviews"]["pending_count"] == 1
-        assert glance["content"]["total_pending_counts"] == 1
 
         dash = (
             await db_session.execute(

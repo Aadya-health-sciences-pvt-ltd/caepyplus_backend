@@ -15,6 +15,7 @@ from ...glance_shapes import (
 )
 from ...models.dashboard import WorkspaceDoctorDashboard
 from ...services.practice_hub_pending_client import (
+    PracticeHubPendingError,
     fetch_pending_counts,
     workspace_identity_from_token,
 )
@@ -125,27 +126,66 @@ class DashboardService(BaseService):
         self,
         workspace_access_token: str,
         *,
+        event_type: str | None = None,
         appointments: int = 0,
         requests: int = 0,
         todays_schedule: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        """Apply authoritative schedule snapshot, debounce section refresh, return glance.
+
+        Group key for debounce / WebSocket: ``ws_user_id`` + ``workspace_id``.
+        """
+        from ..realtime.event_map import (
+            DashboardSection,
+            sections_for_event,
+        )
+        from ..realtime.refresh_service import enqueue_dashboard_event
+
         identity = workspace_identity_from_token(workspace_access_token)
         ph_user_id = int(identity["linqmd_user_id"])
         workspace_id = workspace_id_or_zero(identity.get("workspace_id"))
         resolved_ws_user = identity.get("ws_user_id")
-        await self.upsert_workspace_schedule(
-            ph_user_id=ph_user_id,
-            workspace_id=workspace_id,
-            ws_user_id=resolved_ws_user,
-            appointments=appointments,
-            requests=requests,
-            todays_schedule=todays_schedule,
+        if resolved_ws_user is None:
+            raise PracticeHubPendingError(
+                "Workspace select token missing user_id (ws_user_id) "
+                "required for dashboard debounce grouping",
+                status_code=401,
+            )
+
+        sections = set(sections_for_event(event_type))
+        # Snapshot body is authoritative for appointments/requests — write now.
+        if (
+            DashboardSection.APPOINTMENTS in sections
+            or DashboardSection.REQUESTS in sections
+            or todays_schedule is not None
+        ):
+            await self.upsert_workspace_schedule(
+                ph_user_id=ph_user_id,
+                workspace_id=workspace_id,
+                ws_user_id=int(resolved_ws_user),
+                appointments=appointments,
+                requests=requests,
+                todays_schedule=todays_schedule,
+            )
+
+        enqueue_dashboard_event(
+            ws_user_id=int(resolved_ws_user),
+            workspace_id=int(workspace_id),
+            sections=sections,
+            context={
+                "ph_user_id": ph_user_id,
+                "authorization": workspace_access_token,
+                "appointments": appointments,
+                "requests": requests,
+                "todays_schedule": todays_schedule or [],
+                "event_type": event_type,
+            },
         )
-        await self.sync_pending_glance(workspace_access_token)
+
         return await self.get_glance(
             str(ph_user_id),
             workspace_id=workspace_id,
-            ws_user_id=resolved_ws_user,
+            ws_user_id=int(resolved_ws_user),
         )
 
     async def get_engagement(self, doctor_id: int) -> dict[str, Any]:

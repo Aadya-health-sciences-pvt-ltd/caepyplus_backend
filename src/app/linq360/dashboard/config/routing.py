@@ -5,6 +5,7 @@ from fastapi import APIRouter
 
 from ..dashboard_controller import (
     dashboard_webhook,
+    dashboard_websocket,
     get_content_engagement,
     get_glance,
     sync_glance,
@@ -38,4 +39,8 @@ public_router.add_api_route(
     dashboard_webhook,
     methods=["POST"],
     response_model=GlanceApiResponse,
+)
+public_router.add_api_websocket_route(
+    "/ws/dashboard",
+    dashboard_websocket,
 )

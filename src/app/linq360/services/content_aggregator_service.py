@@ -371,12 +371,14 @@ class ContentAggregatorService:
         self,
         workspace_access_token: str,
         *,
+        event_type: str | None = None,
         appointments: int = 0,
         requests: int = 0,
         todays_schedule: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return await DashboardService(self.session).process_dashboard_webhook(
             workspace_access_token,
+            event_type=event_type,
             appointments=appointments,
             requests=requests,
             todays_schedule=todays_schedule,

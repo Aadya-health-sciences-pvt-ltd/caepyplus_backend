@@ -4,9 +4,10 @@ Routes are registered in ``dashboard.config.routing``.
 """
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect, status
 
 from ...core.rbac import get_current_user
 from ...db.session import DbSession
@@ -19,7 +20,10 @@ from ..config.auth import (
     require_dashboard_webhook_auth,
     require_workspace_select_auth,
 )
-from ..services.practice_hub_pending_client import PracticeHubPendingError
+from ..services.practice_hub_pending_client import (
+    PracticeHubPendingError,
+    workspace_identity_from_token,
+)
 from .config.dashboard_service import DashboardService, GlanceDashboardMissing
 from .dashboard_fields import (
     ContentEngagementResponse,
@@ -27,6 +31,9 @@ from .dashboard_fields import (
     GlanceApiResponse,
 )
 from .dashboard_response import DashboardResponse
+from .realtime.ws_hub import get_dashboard_ws_hub
+
+logger = logging.getLogger(__name__)
 
 _MSG_GLANCE_GET = "Glance retrieved successfully"
 _MSG_GLANCE_SYNC = "Glance synced successfully"
@@ -144,6 +151,7 @@ async def dashboard_webhook(
         async def _run(_: Any = None) -> dict[str, Any]:
             data = await DashboardService(db).process_dashboard_webhook(
                 auth.authorization,
+                event_type=payload.event_type,
                 appointments=payload.appointments,
                 requests=payload.requests,
                 todays_schedule=schedule,
@@ -174,3 +182,43 @@ async def dashboard_webhook(
     return _controller.dashboard_response.glance_success(
         _MSG_DASHBOARD_WEBHOOK, envelope["data"]
     )
+
+
+async def dashboard_websocket(websocket: WebSocket, token: str = "") -> None:
+    """Subscribe to ``dashboard:{workspace_id}:{ws_user_id}`` (token query auth).
+
+    Room membership is derived from the workspace select JWT — clients cannot
+    pick an arbitrary room id.
+    """
+    if not token or not str(token).strip():
+        await websocket.close(code=4401)
+        return
+    header = str(token).strip()
+    if not header.lower().startswith("bearer "):
+        header = f"Bearer {header}"
+    try:
+        identity = workspace_identity_from_token(header)
+    except PracticeHubPendingError:
+        await websocket.close(code=4401)
+        return
+
+    ws_user_id = identity.get("ws_user_id")
+    workspace_id = identity.get("workspace_id")
+    if ws_user_id is None or workspace_id is None:
+        await websocket.close(code=4403)
+        return
+
+    hub = get_dashboard_ws_hub()
+    room = await hub.connect(
+        websocket,
+        ws_user_id=int(ws_user_id),
+        workspace_id=int(workspace_id),
+    )
+    try:
+        # Keep connection alive; server pushes JSON events after debounced refresh.
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info("dashboard_ws_disconnected room=%s", room)
+    finally:
+        hub.disconnect(websocket, room)
