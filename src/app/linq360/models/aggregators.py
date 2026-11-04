@@ -5,13 +5,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...db.session import Base
-
-# JSON works on both PostgreSQL (maps to JSON/JSONB via dialect) and SQLite.
-from sqlalchemy import JSON
 
 
 class BlogCommentsAggregator(Base):
@@ -168,7 +165,6 @@ class ContentSourceAggregator(Base):
     )
 
 
-# Valid ``source`` values for ContentSourceAggregator
 SOURCE_REVIEW = "review"
 SOURCE_BLOG = "blog"
 SOURCE_PODCAST = "podcast"

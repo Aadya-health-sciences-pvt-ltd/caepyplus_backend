@@ -37,7 +37,6 @@ async def run_debounced_refresh(
         uid = str(ph_user_id)
 
         if DashboardSection.APPOINTMENTS in sections or DashboardSection.REQUESTS in sections:
-            # Prefer authoritative snapshot from webhook when present.
             if any(
                 k in context
                 for k in ("appointments", "requests", "todays_schedule")
@@ -64,8 +63,6 @@ async def run_debounced_refresh(
                 ws_user_id,
                 workspace_id,
             )
-
-        # payments: no external source yet — glance always returns {}
 
         snapshot = await svc.get_glance(
             uid,

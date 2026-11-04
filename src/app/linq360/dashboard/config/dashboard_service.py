@@ -153,11 +153,9 @@ class DashboardService(BaseService):
             )
 
         sections = set(sections_for_event(event_type))
-        # Snapshot body is authoritative for appointments/requests — write now.
         if (
             DashboardSection.APPOINTMENTS in sections
             or DashboardSection.REQUESTS in sections
-            or todays_schedule is not None
         ):
             await self.upsert_workspace_schedule(
                 ph_user_id=ph_user_id,

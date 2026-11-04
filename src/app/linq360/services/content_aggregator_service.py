@@ -103,7 +103,6 @@ def _content_block(payload: dict[str, Any]) -> dict[str, Any]:
     return content_block(payload)
 
 
-# Re-export for existing imports.
 __all__ = [
     "ContentAggregatorService",
     "GlanceDashboardMissing",
@@ -117,10 +116,6 @@ class ContentAggregatorService:
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-
-    # ------------------------------------------------------------------
-    # Adjust helpers (approved / published metrics)
-    # ------------------------------------------------------------------
 
     async def adjust_blog_comments(self, doctor_id: int, delta: int) -> BlogCommentsAggregator:
         return await self._adjust_comments(doctor_id, SOURCE_BLOG, delta)
@@ -173,10 +168,6 @@ class ContentAggregatorService:
         """Read the legacy pending inbox row by Drupal uid."""
         return await self.session.get(ReviewsPendingAggregator, str(linqmd_user_id).strip())
 
-    # ------------------------------------------------------------------
-    # Pending counters (reviews_aggregator / *_comment_stats)
-    # ------------------------------------------------------------------
-
     async def adjust_reviews_aggregator_pending(
         self,
         user_id: str,
@@ -195,8 +186,6 @@ class ContentAggregatorService:
         row = await self.session.get(ReviewsAggregator, uid)
         if row is None:
             count = await self._count_top_level_pending_reviews(uid)
-            # Seed from COUNT when local reviews exist (includes the flushed row).
-            # If there is no mirror yet, use a non-negative delta as the initial value.
             if count > 0:
                 initial = count
             else:
@@ -311,7 +300,6 @@ class ContentAggregatorService:
         try:
             await self._refresh_todays_glance_content(uid, counts)
         except GlanceDashboardMissing:
-            # Non-numeric uid cannot store glance; counters still persist.
             return
 
     async def get_glance(
@@ -321,7 +309,6 @@ class ContentAggregatorService:
         workspace_id: int | None = None,
         ws_user_id: int | None = None,
     ) -> dict[str, Any]:
-        """Delegate to DashboardService (FAQ layering)."""
         return await DashboardService(self.session).get_glance(
             linqmd_user_id,
             workspace_id=workspace_id,
@@ -384,10 +371,6 @@ class ContentAggregatorService:
             todays_schedule=todays_schedule,
         )
 
-    # ------------------------------------------------------------------
-    # Rebuild helpers
-    # ------------------------------------------------------------------
-
     async def rebuild_blog_comments(self, doctor_id: int) -> BlogCommentsAggregator:
         result = await self.session.execute(
             select(func.count())
@@ -442,10 +425,6 @@ class ContentAggregatorService:
             "avg_rating": float(reviews.avg_rating) if reviews.avg_rating is not None else None,
         }
 
-    # ------------------------------------------------------------------
-    # Engagement read (published metrics only)
-    # ------------------------------------------------------------------
-
     async def get_engagement(self, doctor_id: int) -> dict[str, Any]:
         result = await self.session.execute(
             select(ContentSourceAggregator).where(ContentSourceAggregator.doctor_id == doctor_id)
@@ -481,10 +460,6 @@ class ContentAggregatorService:
             "sources": sources,
             "total_item_count": total,
         }
-
-    # ------------------------------------------------------------------
-    # Internal: get-or-create / upsert / glance
-    # ------------------------------------------------------------------
 
     async def _resolve_identity(
         self,

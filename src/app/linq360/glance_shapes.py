@@ -6,14 +6,12 @@ from __future__ import annotations
 
 from typing import Any
 
-# Keys
 TODAYS_SCHEDULE_KEY = "todays_schedule"
 GLANCE_CONTENT_KEY = "content"
 GLANCE_APPOINTMENTS_KEY = "appointments"
 GLANCE_REQUESTS_KEY = "requests"
 GLANCE_PAYMENTS_KEY = "payments"
 
-# Top-level glance ``data`` keys (API contract).
 GLANCE_RESPONSE_KEYS = (
     GLANCE_CONTENT_KEY,
     GLANCE_APPOINTMENTS_KEY,
@@ -56,7 +54,6 @@ def normalize_todays_schedule(appointment_json: object) -> dict[str, list[Any]]:
             TODAYS_SCHEDULE_KEY: [item for item in schedule if isinstance(item, dict)]
         }
 
-    # Legacy flat patient object.
     if appointment_json.get("patient_meta_code") is not None:
         return {TODAYS_SCHEDULE_KEY: [dict(appointment_json)]}
 

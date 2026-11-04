@@ -215,7 +215,6 @@ async def dashboard_websocket(websocket: WebSocket, token: str = "") -> None:
         workspace_id=int(workspace_id),
     )
     try:
-        # Keep connection alive; server pushes JSON events after debounced refresh.
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

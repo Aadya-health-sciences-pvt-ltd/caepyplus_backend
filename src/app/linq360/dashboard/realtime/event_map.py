@@ -12,7 +12,6 @@ class DashboardSection(StrEnum):
     PAYMENTS = "payments"
 
 
-# Canonical event names → sections that must refresh.
 EVENT_SECTION_MAP: dict[str, frozenset[DashboardSection]] = {
     "appointment.created": frozenset({DashboardSection.APPOINTMENTS}),
     "appointment.updated": frozenset({DashboardSection.APPOINTMENTS}),
@@ -29,7 +28,6 @@ EVENT_SECTION_MAP: dict[str, frozenset[DashboardSection]] = {
     "podcast_comment.created": frozenset({DashboardSection.CONTENT}),
     "payment.created": frozenset({DashboardSection.PAYMENTS}),
     "payment.updated": frozenset({DashboardSection.PAYMENTS}),
-    # Full dashboard push (existing appointment-system webhook).
     "dashboard.snapshot": frozenset(
         {
             DashboardSection.APPOINTMENTS,

@@ -116,7 +116,7 @@ Caller must be the doctor themselves, or `ADMIN` / `OPERATION` / `CONTENT_CREATO
 | Debounce (~2s, `DEBOUNCE_WINDOW_MS`) | Same `ws_user_id` + `workspace_id` → one background refresh + one WS push |
 | Continuous full sync on every event | **No** — only mapped sections |
 
-**Webhook rule:** always send the **current full snapshot** of `appointments`, `requests`, and `todays_schedule`. Omitted fields default to `0` / `[]` and **overwrite** stored values.
+**Webhook rule:** for appointment/request/`dashboard.snapshot` events, send the **current full snapshot** of `appointments`, `requests`, and `todays_schedule` (omitted fields default to `0` / `[]` and overwrite). Content-only events do **not** rewrite schedule rows.
 
 ---
 

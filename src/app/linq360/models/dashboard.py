@@ -39,9 +39,7 @@ class WorkspaceDoctorDashboard(Base):
     )
 
     appointment_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # Practice Hub / Drupal doctor uid (``appointment_doctor_id``, e.g. 892).
     ph_user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    # Portal workspace user from select token (``user_id`` claim, e.g. 325).
     ws_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     workspace_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     appointments: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
@@ -63,11 +61,8 @@ class DoctorDashboard(Base):
     __table_args__ = {"schema": "linq360"}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # Practice Hub / Drupal doctor uid — unique glance key.
     ph_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
-    # Portal user from workspace select token.
     ws_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    # Content block only (not wrapped in {"content": ...}).
     todays_glance: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         nullable=False,
