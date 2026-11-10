@@ -72,8 +72,21 @@ def parse_source_block(source: str, block: object) -> dict[str, Any]:
 
 
 def parse_pending_payload(body: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Map Drupal pending-counts JSON to three source blocks (counts + ids)."""
-    source = body.get("content") if isinstance(body.get("content"), dict) else body
+    """Map Drupal pending-counts JSON to three source blocks (counts + ids).
+
+    Accepts:
+    - ``{ "content": { reviews, blog_comments, podcast_comments } }``
+    - envelope ``{ "status_code", "msg", "data": { "content": {...} } }``
+    - flat ``{ reviews, blog_comments, podcast_comments }``
+    """
+    root: dict[str, Any] = body if isinstance(body, dict) else {}
+    data = root.get("data")
+    if isinstance(data, dict) and (
+        isinstance(data.get("content"), dict)
+        or any(name in data for name in PENDING_SOURCES)
+    ):
+        root = data
+    source = root.get("content") if isinstance(root.get("content"), dict) else root
     if not isinstance(source, dict):
         source = {}
     return {name: parse_source_block(name, source.get(name)) for name in PENDING_SOURCES}

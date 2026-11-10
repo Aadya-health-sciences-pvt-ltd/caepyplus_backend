@@ -31,6 +31,53 @@ def test_parse_pending_counts() -> None:
     assert counts == {"reviews": 2, "blog_comments": 0, "podcast_comments": 3}
 
 
+def test_parse_practice_hub_envelope_data_content() -> None:
+    """Practice Hub returns status_code/msg/data.content — unwrap before sync."""
+    payload = parse_pending_payload(
+        {
+            "status_code": 200,
+            "msg": "Pending counts retrieved successfully",
+            "data": {
+                "content": {
+                    "reviews": {"pending_count": 1, "review_id": [1091]},
+                    "blog_comments": {
+                        "pending_count": 1,
+                        "comment_id": [1],
+                        "blog_id": [2],
+                    },
+                    "podcast_comments": {
+                        "pending_count": 1,
+                        "comment_id": [1],
+                        "podcast_id": [1],
+                    },
+                    "total_pending_counts": 3,
+                },
+                "payments": {},
+                "requests": 0,
+                "appointments": 0,
+                "todays_schedule": [],
+            },
+        }
+    )
+    assert payload["reviews"] == {"pending_count": 1, "review_id": [1091]}
+    assert payload["blog_comments"] == {
+        "pending_count": 1,
+        "comment_id": [1],
+        "blog_id": [2],
+    }
+    assert payload["podcast_comments"] == {
+        "pending_count": 1,
+        "comment_id": [1],
+        "podcast_id": [1],
+    }
+    assert parse_pending_counts(
+        {
+            "status_code": 200,
+            "data": {"content": payload},
+        }
+    ) == {"reviews": 1, "blog_comments": 1, "podcast_comments": 1}
+
+
 def test_parse_nested_content_keeps_id_arrays() -> None:
     payload = parse_pending_payload(
         {
