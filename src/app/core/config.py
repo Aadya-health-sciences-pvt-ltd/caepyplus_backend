@@ -236,6 +236,18 @@ class Settings(BaseSettings):
         description="JWT access token expiration time (minutes)"
     )
 
+    # LinQ360 only: Practice Hub workspace JWT secret (AUTH_JWT_SECRET /
+    # workspace_jwt_secret). Used by linq360 auth to verify identity/select
+    # tokens. Does not change Caepy app login / get_current_user.
+    # When empty: LinQ360 payload-decodes and forwards Bearer to Practice Hub.
+    WORKSPACE_JWT_SECRET: str | None = Field(
+        default=None,
+        description=(
+            "LinQ360: HS256 secret for workspace identity/select tokens "
+            "(AUTH_JWT_SECRET / workspace_jwt_secret)"
+        ),
+    )
+
     # OIDC (linqmd_workspace_backend_code's Authorization Server), additive
     # alongside the legacy SECRET_KEY/HS256 scheme above. OIDC_ENABLED false/
     # unset: _decode_jwt is unchanged, legacy HS256 only. true: also accepts

@@ -7,10 +7,15 @@ from ..dashboard_controller import (
     dashboard_webhook,
     dashboard_websocket,
     get_content_engagement,
-    get_glance,
+    get_glance_appointments,
+    get_glance_content,
     sync_glance,
 )
-from ..dashboard_fields import ContentEngagementResponse, GlanceApiResponse
+from ..dashboard_fields import (
+    AppointmentsGlanceApiResponse,
+    ContentEngagementResponse,
+    ContentGlanceApiResponse,
+)
 
 router = APIRouter()
 public_router = APIRouter()
@@ -23,22 +28,28 @@ router.add_api_route(
 )
 
 public_router.add_api_route(
-    "/glance",
-    get_glance,
+    "/glance/content",
+    get_glance_content,
     methods=["GET"],
-    response_model=GlanceApiResponse,
+    response_model=ContentGlanceApiResponse,
+)
+public_router.add_api_route(
+    "/glance/appointments",
+    get_glance_appointments,
+    methods=["GET"],
+    response_model=AppointmentsGlanceApiResponse,
 )
 public_router.add_api_route(
     "/glance/sync",
     sync_glance,
     methods=["POST"],
-    response_model=GlanceApiResponse,
+    response_model=ContentGlanceApiResponse,
 )
 public_router.add_api_route(
     "/webhooks/dashboard",
     dashboard_webhook,
     methods=["POST"],
-    response_model=GlanceApiResponse,
+    response_model=AppointmentsGlanceApiResponse,
 )
 public_router.add_api_websocket_route(
     "/ws/dashboard",

@@ -1,0 +1,121 @@
+{
+  "info": {
+    "name": "LinQ360 Auth Tokens (Caepy)",
+    "description": "Split glance GETs.\n\n1. Login → identity_access_token\n2. Select → workspace_access_token_main (appointments only)\n3. Content sync/GET use identity; appointments GET + WS use select; webhook uses body ids (no Bearer).\n\nDo not log raw tokens or PHI.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "workspace_base", "value": "https://dev1.workspace.example/api/v1" },
+    { "key": "caepy_base", "value": "https://dev1.caepy.linqmd.com/caepy/api/v1/linq360" },
+    { "key": "identity_access_token", "value": "" },
+    { "key": "workspace_access_token_main", "value": "" },
+    { "key": "workspace_id", "value": "161" },
+    { "key": "ph_user_id", "value": "893" },
+    { "key": "ws_user_id", "value": "327" }
+  ],
+  "item": [
+    {
+      "name": "1. Login → identity_access_token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "const token = json?.data?.access_token || json?.access_token;",
+              "if (token) { pm.collectionVariables.set('identity_access_token', token); }",
+              "pm.test('Login returned access_token', function () { pm.expect(token).to.be.ok; });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"demo1testing@gmail.com\",\n  \"password\": \"{{password}}\"\n}"
+        },
+        "url": "{{workspace_base}}/auth/workspace/login"
+      }
+    },
+    {
+      "name": "2. Select → workspace_access_token_main",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const json = pm.response.json();",
+              "const token = json?.data?.access_token || json?.access_token;",
+              "if (token) { pm.collectionVariables.set('workspace_access_token_main', token); }",
+              "pm.test('Select returned access_token', function () { pm.expect(token).to.be.ok; });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{identity_access_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"workspace_id\": {{workspace_id}}\n}"
+        },
+        "url": "{{workspace_base}}/auth/workspace/select"
+      }
+    },
+    {
+      "name": "3. Glance sync (identity / content)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{identity_access_token}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": "{{caepy_base}}/glance/sync"
+      }
+    },
+    {
+      "name": "4. Glance content GET (identity)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{identity_access_token}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": "{{caepy_base}}/glance/content"
+      }
+    },
+    {
+      "name": "5. Glance appointments GET (select)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{workspace_access_token_main}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": "{{caepy_base}}/glance/appointments"
+      }
+    },
+    {
+      "name": "6. Dashboard webhook (no Bearer)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Accept", "value": "application/json" },
+          { "key": "Origin", "value": "https://dev1.linqmd.com" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ph_user_id\": {{ph_user_id}},\n  \"ws_user_id\": {{ws_user_id}},\n  \"workspace_id\": {{workspace_id}},\n  \"event_type\": \"appointment.created\",\n  \"appointments\": 1,\n  \"requests\": 0,\n  \"todays_schedule\": []\n}"
+        },
+        "url": "{{caepy_base}}/webhooks/dashboard",
+        "description": "No Authorization header. Identity in body."
+      }
+    }
+  ]
+}

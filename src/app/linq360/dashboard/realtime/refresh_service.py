@@ -64,7 +64,8 @@ async def run_debounced_refresh(
                 workspace_id,
             )
 
-        snapshot = await svc.get_glance(
+        # WS room is appointment-scoped; push appointments snapshot.
+        snapshot = await svc.get_appointments_glance(
             uid,
             workspace_id=int(workspace_id),
             ws_user_id=int(ws_user_id),

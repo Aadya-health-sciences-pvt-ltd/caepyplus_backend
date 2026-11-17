@@ -158,12 +158,31 @@ def test_workspace_identity_from_token() -> None:
     identity = workspace_identity_from_token(f"Bearer {token}")
     assert identity == {
         "linqmd_user_id": "892",
+        "ph_user_id": "892",
         "workspace_id": 161,
         "ws_user_id": 325,
+        "email": "workspace7@gmail.com",
     }
+
+
+def test_workspace_identity_prefers_ph_user_id_and_ws_user_id() -> None:
+    token = _jwt(
+        {
+            "id": "1",
+            "user_id": "1",
+            "ws_user_id": "327",
+            "ph_user_id": "893",
+            "appointment_doctor_id": "999",
+            "email": "demo1testing@gmail.com",
+        }
+    )
+    identity = workspace_identity_from_token(token)
+    assert identity["linqmd_user_id"] == "893"
+    assert identity["ph_user_id"] == "893"
+    assert identity["ws_user_id"] == 327
 
 
 def test_linqmd_user_id_missing_appointment_doctor() -> None:
     token = _jwt({"user_id": "320", "appointment_doctor_id": None})
-    with pytest.raises(PracticeHubPendingError, match="appointment_doctor_id"):
+    with pytest.raises(PracticeHubPendingError, match="ph_user_id / appointment_doctor_id"):
         linqmd_user_id_from_workspace_token(token)

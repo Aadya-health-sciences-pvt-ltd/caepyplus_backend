@@ -7,17 +7,21 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 
+from ...core.config import Settings, get_settings
+from ...core.exceptions import ForbiddenError, UnauthorizedError
 from ...core.rbac import get_current_user
 from ...db.session import DbSession
 from ...models.enums import UserRole
-from ...models.user import User
 from ...repositories.doctor_repository import DoctorRepository
+from ...repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
 from ..common.base_controller import BaseController
 from ..config.auth import (
+    WorkspaceIdentityAuth,
     WorkspaceSelectAuth,
     require_dashboard_webhook_auth,
+    require_identity_auth,
     require_workspace_select_auth,
 )
 from ..services.practice_hub_pending_client import (
@@ -26,16 +30,18 @@ from ..services.practice_hub_pending_client import (
 )
 from .config.dashboard_service import DashboardService, GlanceDashboardMissing
 from .dashboard_fields import (
+    AppointmentsGlanceApiResponse,
     ContentEngagementResponse,
+    ContentGlanceApiResponse,
     DashboardWebhookPayload,
-    GlanceApiResponse,
 )
 from .dashboard_response import DashboardResponse
 from .realtime.ws_hub import get_dashboard_ws_hub
 
 logger = logging.getLogger(__name__)
 
-_MSG_GLANCE_GET = "Glance retrieved successfully"
+_MSG_CONTENT_GET = "Glance content retrieved successfully"
+_MSG_APPOINTMENTS_GET = "Glance appointments retrieved successfully"
 _MSG_GLANCE_SYNC = "Glance synced successfully"
 _MSG_DASHBOARD_WEBHOOK = "Dashboard webhook processed successfully"
 
@@ -52,21 +58,61 @@ _controller = DashboardController()
 
 async def require_doctor_engagement_access(
     doctor_id: int,
+    request: Request,
     db: DbSession,
-    user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> int:
+    """Authorize content-engagement without changing Caepy ``rbac`` / ``security``.
+
+    1. Caepy app JWT via unmodified ``get_current_user`` (admin / own doctor).
+    2. Else LinQ360 ``identity_access_token`` → own doctor via linqmd creds.
+    """
     doctor = await DoctorRepository(db).get_by_id(doctor_id)
     if doctor is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
 
-    privileged = {
-        UserRole.ADMIN.value,
-        UserRole.OPERATION.value,
-        UserRole.CONTENT_CREATOR.value,
-    }
-    if user.role in privileged:
-        return doctor_id
-    if user.doctor_id is not None and int(user.doctor_id) == doctor_id:
+    try:
+        user = await get_current_user(request, settings, db)
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=exc.message,
+        ) from exc
+    except UnauthorizedError:
+        user = None
+
+    if user is not None:
+        privileged = {
+            UserRole.ADMIN.value,
+            UserRole.OPERATION.value,
+            UserRole.CONTENT_CREATOR.value,
+        }
+        if user.role in privileged:
+            return doctor_id
+        if user.doctor_id is not None and int(user.doctor_id) == doctor_id:
+            return doctor_id
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to view this doctor's content engagement",
+        )
+
+    try:
+        identity = await require_identity_auth(
+            db, request.headers.get("Authorization")
+        )
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Authentication required. Pass Caepy JWT or "
+                "Authorization: Bearer <identity_access_token>"
+            ),
+        ) from None
+
+    creds = await LinqmdCredentialsRepository(db).get_by_linqmd_user_id(
+        identity.linqmd_user_id
+    )
+    if creds is not None and int(creds.doctor_id) == doctor_id:
         return doctor_id
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -82,34 +128,63 @@ async def get_content_engagement(
     return ContentEngagementResponse.model_validate(data)
 
 
-async def get_glance(
+async def get_glance_content(
     db: DbSession,
-    auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
-) -> GlanceApiResponse:
+    auth: Annotated[WorkspaceIdentityAuth, Depends(require_identity_auth)],
+) -> ContentGlanceApiResponse:
+    """Content panel: identity token only (no appointments)."""
+
     async def _run(_: Any = None) -> dict[str, Any]:
-        return await DashboardService(db).get_glance(
-            auth.linqmd_user_id,
-            workspace_id=auth.workspace_id,
-            ws_user_id=auth.ws_user_id,
-        )
+        return await DashboardService(db).get_content_glance(auth.linqmd_user_id)
 
     envelope = await _controller.execute_method(
-        _run, None, success_msg=_MSG_GLANCE_GET, pass_payload=True
+        _run, None, success_msg=_MSG_CONTENT_GET, pass_payload=True
     )
     if envelope.get("status_code") != 200:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=envelope.get("msg") or "Glance failed",
+            detail=envelope.get("msg") or "Glance content failed",
         )
-    return _controller.dashboard_response.glance_success(
-        _MSG_GLANCE_GET, envelope["data"]
+    return _controller.dashboard_response.content_success(
+        _MSG_CONTENT_GET, envelope["data"]
+    )
+
+
+async def get_glance_appointments(
+    db: DbSession,
+    auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
+) -> AppointmentsGlanceApiResponse:
+    """Appointments panel: workspace select token only."""
+    if auth.workspace_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="workspace_access_token_main must include workspace_id",
+        )
+
+    async def _run(_: Any = None) -> dict[str, Any]:
+        return await DashboardService(db).get_appointments_glance(
+            auth.linqmd_user_id,
+            workspace_id=int(auth.workspace_id),
+            ws_user_id=auth.ws_user_id,
+        )
+
+    envelope = await _controller.execute_method(
+        _run, None, success_msg=_MSG_APPOINTMENTS_GET, pass_payload=True
+    )
+    if envelope.get("status_code") != 200:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=envelope.get("msg") or "Glance appointments failed",
+        )
+    return _controller.dashboard_response.appointments_success(
+        _MSG_APPOINTMENTS_GET, envelope["data"]
     )
 
 
 async def sync_glance(
     db: DbSession,
-    auth: Annotated[WorkspaceSelectAuth, Depends(require_workspace_select_auth)],
-) -> GlanceApiResponse:
+    auth: Annotated[WorkspaceIdentityAuth, Depends(require_identity_auth)],
+) -> ContentGlanceApiResponse:
     try:
         async def _run(_: Any = None) -> dict[str, Any]:
             data = await DashboardService(db).sync_pending_glance(auth.authorization)
@@ -136,7 +211,7 @@ async def sync_glance(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=envelope.get("msg") or "Glance sync failed",
         )
-    return _controller.dashboard_response.glance_success(
+    return _controller.dashboard_response.content_success(
         _MSG_GLANCE_SYNC, envelope["data"]
     )
 
@@ -144,13 +219,16 @@ async def sync_glance(
 async def dashboard_webhook(
     payload: DashboardWebhookPayload,
     db: DbSession,
-    auth: Annotated[WorkspaceSelectAuth, Depends(require_dashboard_webhook_auth)],
-) -> GlanceApiResponse:
+    _: Annotated[None, Depends(require_dashboard_webhook_auth)],
+) -> AppointmentsGlanceApiResponse:
+    """No Bearer — identity from body ``ph_user_id`` / ``ws_user_id`` / ``workspace_id``."""
     schedule = [item.model_dump(mode="json") for item in payload.todays_schedule]
     try:
         async def _run(_: Any = None) -> dict[str, Any]:
             data = await DashboardService(db).process_dashboard_webhook(
-                auth.authorization,
+                ph_user_id=int(payload.ph_user_id),
+                ws_user_id=int(payload.ws_user_id),
+                workspace_id=int(payload.workspace_id),
                 event_type=payload.event_type,
                 appointments=payload.appointments,
                 requests=payload.requests,
@@ -170,6 +248,11 @@ async def dashboard_webhook(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=str(exc),
             ) from exc
+        if exc.status_code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
@@ -179,17 +262,13 @@ async def dashboard_webhook(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=envelope.get("msg") or "Dashboard webhook failed",
         )
-    return _controller.dashboard_response.glance_success(
+    return _controller.dashboard_response.appointments_success(
         _MSG_DASHBOARD_WEBHOOK, envelope["data"]
     )
 
 
 async def dashboard_websocket(websocket: WebSocket, token: str = "") -> None:
-    """Subscribe to ``dashboard:{workspace_id}:{ws_user_id}`` (token query auth).
-
-    Room membership is derived from the workspace select JWT — clients cannot
-    pick an arbitrary room id.
-    """
+    """Subscribe to ``dashboard:{workspace_id}:{ws_user_id}`` (select token query auth)."""
     if not token or not str(token).strip():
         await websocket.close(code=4401)
         return
@@ -197,7 +276,11 @@ async def dashboard_websocket(websocket: WebSocket, token: str = "") -> None:
     if not header.lower().startswith("bearer "):
         header = f"Bearer {header}"
     try:
-        identity = workspace_identity_from_token(header)
+        identity = workspace_identity_from_token(
+            header,
+            require_ph_user_id=False,
+            require_workspace_id=True,
+        )
     except PracticeHubPendingError:
         await websocket.close(code=4401)
         return

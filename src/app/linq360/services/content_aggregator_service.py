@@ -356,15 +356,19 @@ class ContentAggregatorService:
 
     async def process_dashboard_webhook(
         self,
-        workspace_access_token: str,
         *,
+        ph_user_id: int,
+        ws_user_id: int,
+        workspace_id: int,
         event_type: str | None = None,
         appointments: int = 0,
         requests: int = 0,
         todays_schedule: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return await DashboardService(self.session).process_dashboard_webhook(
-            workspace_access_token,
+            ph_user_id=ph_user_id,
+            ws_user_id=ws_user_id,
+            workspace_id=workspace_id,
             event_type=event_type,
             appointments=appointments,
             requests=requests,

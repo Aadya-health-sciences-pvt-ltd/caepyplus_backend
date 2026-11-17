@@ -522,6 +522,9 @@ class TestBlogPodcastCommentStats:
         assert glance["content"]["blog_comments"]["comment_id"] == [2]
         assert glance["content"]["blog_comments"]["blog_id"] == [5]
         assert glance["content"]["total_pending_counts"] == 3
+        assert "appointments" not in glance
+        assert "todays_schedule" not in glance
+        assert glance["payments"] == {}
 
         from sqlalchemy import select
 
@@ -543,23 +546,8 @@ class TestBlogPodcastCommentStats:
         assert doctor.todays_glance["reviews"]["pending_count"] == 2
 
     async def test_dashboard_webhook_writes_schedule_then_syncs(
-        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, db_session: AsyncSession
     ) -> None:
-        import base64
-        import json
-
-        def _jwt(payload: dict) -> str:
-            header = base64.urlsafe_b64encode(b'{"alg":"none"}').decode().rstrip("=")
-            body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
-            return f"{header}.{body}.sig"
-
-        token = _jwt(
-            {
-                "appointment_doctor_id": "884",
-                "user_id": "325",
-                "workspace_id": "161",
-            }
-        )
         patient = {
             "patient_meta_code": "PAT-001",
             "appointment_type": "BOOKING",
@@ -570,30 +558,12 @@ class TestBlogPodcastCommentStats:
             "time_slot": "10:30 AM",
         }
 
-        async def _fake_fetch(access_token: str) -> dict:
-            return {
-                "reviews": {"pending_count": 1, "review_id": [9]},
-                "blog_comments": {
-                    "pending_count": 0,
-                    "comment_id": [],
-                    "blog_id": [],
-                },
-                "podcast_comments": {
-                    "pending_count": 0,
-                    "comment_id": [],
-                    "podcast_id": [],
-                },
-            }
-
-        monkeypatch.setattr(
-            "src.app.linq360.dashboard.realtime.refresh_service.fetch_pending_counts",
-            _fake_fetch,
-        )
         svc = ContentAggregatorService(db_session)
-        # Snapshot webhook upserts schedule immediately; content refresh is
-        # section-scoped (not in default dashboard.snapshot map).
+        # Webhook: no Bearer — identity in body; returns appointments envelope.
         glance = await svc.process_dashboard_webhook(
-            token,
+            ph_user_id=884,
+            ws_user_id=325,
+            workspace_id=161,
             appointments=2,
             requests=1,
             todays_schedule=[patient],
@@ -601,6 +571,7 @@ class TestBlogPodcastCommentStats:
         assert glance["appointments"] == 2
         assert glance["requests"] == 1
         assert glance["todays_schedule"] == [patient]
+        assert "content" not in glance
 
         dash = (
             await db_session.execute(

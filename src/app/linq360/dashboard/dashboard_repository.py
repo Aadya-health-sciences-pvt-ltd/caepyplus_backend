@@ -1,7 +1,7 @@
 """Dashboard data access (workspace_doctor_dashboard + doctor_dashboard)."""
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..common.base_repository import BaseRepository
@@ -99,6 +99,11 @@ class DashboardRepository(BaseRepository[WorkspaceDoctorDashboard]):
             appointments={},
         )
         return await self.add(row)
+
+    async def delete_all_workspace_dashboards(self) -> int:
+        """Delete every workspace_doctor_dashboard row; return deleted count."""
+        result = await self.session.execute(delete(WorkspaceDoctorDashboard))
+        return int(result.rowcount or 0)
 
     async def ensure_doctor_dashboard(
         self,

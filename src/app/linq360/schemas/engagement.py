@@ -46,17 +46,46 @@ class GlanceContent(BaseModel):
 
 
 class GlanceResponse(BaseModel):
-    content: GlanceContent
+    """Legacy merged glance (tests / WS snapshots may still use this shape)."""
+
+    content: GlanceContent = Field(default_factory=GlanceContent)
     appointments: int = 0
     requests: int = 0
     payments: dict[str, Any] = Field(default_factory=dict)
     todays_schedule: list[WorkspaceAppointmentItem] = Field(default_factory=list)
 
 
+class ContentGlanceData(BaseModel):
+    """GET /glance/content + POST /glance/sync response data."""
+
+    content: GlanceContent = Field(default_factory=GlanceContent)
+    payments: dict[str, Any] = Field(default_factory=dict)
+
+
+class AppointmentsGlanceData(BaseModel):
+    """GET /glance/appointments + webhook response data."""
+
+    appointments: int = 0
+    requests: int = 0
+    todays_schedule: list[WorkspaceAppointmentItem] = Field(default_factory=list)
+
+
 class GlanceApiResponse(BaseModel):
     status_code: int = 200
     msg: str
-    data: GlanceResponse | None = None
+    data: GlanceResponse | ContentGlanceData | AppointmentsGlanceData | None = None
+
+
+class ContentGlanceApiResponse(BaseModel):
+    status_code: int = 200
+    msg: str
+    data: ContentGlanceData | None = None
+
+
+class AppointmentsGlanceApiResponse(BaseModel):
+    status_code: int = 200
+    msg: str
+    data: AppointmentsGlanceData | None = None
 
 
 class GlanceSyncRequest(BaseModel):
@@ -64,12 +93,15 @@ class GlanceSyncRequest(BaseModel):
 
 
 class DashboardWebhookPayload(BaseModel):
-    """Appointment-system webhook body.
+    """Appointment-system webhook body (no Bearer).
 
-    Identity from JWT. Optional ``event_type`` drives which dashboard sections
-    refresh after debounce (default: appointments + requests snapshot).
+    Identity is required in the body. Optional ``event_type`` drives which
+    dashboard sections refresh after debounce.
     """
 
+    ph_user_id: int = Field(..., gt=0)
+    ws_user_id: int = Field(..., gt=0)
+    workspace_id: int = Field(..., gt=0)
     event_type: str | None = None
     appointments: int = 0
     requests: int = 0
