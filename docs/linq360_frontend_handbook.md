@@ -1,6 +1,6 @@
 # LinQ360 — Frontend / Integration Handbook
 
-Precise contract for **Today-at-a-Glance**: REST APIs, WebSocket, headers, bodies, responses, tables, and end-to-end flow.
+Precise contract for **Today-at-a-Glance**: every endpoint with **Local + Dev** URLs, **which access token** to send, WebSocket, webhook, daily schedule clear (ops), responses, tables, and end-to-end flow.
 
 ---
 
@@ -26,15 +26,26 @@ Path-only form (same for both): `{BASE}` = `/caepy/api/v1/linq360`.
 
 **Removed:** merged `GET {BASE}/glance` — use `/glance/content` and `/glance/appointments`.
 
-### Full URLs (copy/paste)
+### Full URLs + which token (copy/paste)
 
-| API | Local | Dev |
-|-----|-------|-----|
-| Sync | `POST …/glance/sync` | same path on `dev1.caepy.linqmd.com` |
-| Content GET | `GET …/glance/content` | same |
-| Appointments GET | `GET …/glance/appointments` | same |
-| Webhook | `POST …/webhooks/dashboard` | same |
-| WebSocket | `ws(s)://…/ws/dashboard?token=…` | same |
+| API | Token (client variable) | Local | Dev |
+|-----|-------------------------|-------|-----|
+| `POST /glance/sync` | `identity_access_token` | `http://127.0.0.1:8000/caepy/api/v1/linq360/glance/sync` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/sync` |
+| `GET /glance/content` | `identity_access_token` | `http://127.0.0.1:8000/caepy/api/v1/linq360/glance/content` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/content` |
+| `GET /glance/appointments` | `workspace_access_token_main` | `http://127.0.0.1:8000/caepy/api/v1/linq360/glance/appointments` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/appointments` |
+| `POST /webhooks/dashboard` | **none** (body ids) | `http://127.0.0.1:8000/caepy/api/v1/linq360/webhooks/dashboard` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/webhooks/dashboard` |
+| `WS /ws/dashboard` | `workspace_access_token_main` (query `token`) | `ws://127.0.0.1:8000/caepy/api/v1/linq360/ws/dashboard?token=…` | `wss://dev1.caepy.linqmd.com/caepy/api/v1/linq360/ws/dashboard?token=…` |
+| `GET /doctors/{id}/content-engagement` | Caepy JWT **or** `identity_access_token` | `http://127.0.0.1:8000/caepy/api/v1/linq360/doctors/{id}/content-engagement` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/doctors/{id}/content-engagement` |
+
+**How you get the tokens**
+
+| Client variable | From API | Response field |
+|-----------------|----------|----------------|
+| `identity_access_token` | `POST /v1/auth/workspace/login` | `data.access_token` |
+| `workspace_access_token_main` | `POST /v1/auth/workspace/select` | `data.access_token` |
+| `caepy_access_token` | Caepy app login | app JWT |
+
+Do **not** use the select token on content sync/GET. Do **not** use the identity token on appointments GET/WS.
 
 ### Practice Hub (called by CAEPY on sync — not by frontend)
 
@@ -112,6 +123,15 @@ Authorization: Bearer <identity_access_token>
 
 Pull Practice Hub pending counts and store **content** in Postgres.
 
+### Access token
+
+| | |
+|-|-|
+| **Required token** | `identity_access_token` |
+| **Header** | `Authorization: Bearer <identity_access_token>` |
+| **Where from** | Login → `data.access_token` |
+| **Wrong token** | Do **not** use `workspace_access_token_main` |
+
 ### How to call
 
 | | Local | Dev |
@@ -119,7 +139,7 @@ Pull Practice Hub pending counts and store **content** in Postgres.
 | Method | `POST` | `POST` |
 | URL | `http://127.0.0.1:8000/caepy/api/v1/linq360/glance/sync` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/sync` |
 | Body | empty | empty |
-| Auth | identity Bearer | identity Bearer |
+| Auth | `identity_access_token` | `identity_access_token` |
 
 **Local**
 ```bash
@@ -232,7 +252,16 @@ If `content` counts are all `0` after a successful Practice Hub call, the deploy
 
 ## 2a) GET `/glance/content`
 
-Read stored **content** only (no Practice Hub call). Identity token.
+Read stored **content** only (no Practice Hub call).
+
+### Access token
+
+| | |
+|-|-|
+| **Required token** | `identity_access_token` |
+| **Header** | `Authorization: Bearer <identity_access_token>` |
+| **Where from** | Login → `data.access_token` |
+| **Wrong token** | Do **not** use `workspace_access_token_main` |
 
 ### How to call
 
@@ -240,10 +269,18 @@ Read stored **content** only (no Practice Hub call). Identity token.
 |-|-------|-----|
 | Method | `GET` | `GET` |
 | URL | `http://127.0.0.1:8000/caepy/api/v1/linq360/glance/content` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/content` |
-| Auth | identity Bearer | identity Bearer |
+| Auth | `identity_access_token` | `identity_access_token` |
 
+**Local**
 ```bash
 curl "http://127.0.0.1:8000/caepy/api/v1/linq360/glance/content" \
+  -H "Authorization: Bearer <identity_access_token>" \
+  -H "Accept: application/json"
+```
+
+**Dev**
+```bash
+curl "https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/content" \
   -H "Authorization: Bearer <identity_access_token>" \
   -H "Accept: application/json"
 ```
@@ -255,15 +292,46 @@ Authorization: Bearer <identity_access_token>
 Accept: application/json
 ```
 
-### Response `data`
+### Success response `200`
 
 ```json
-{ "content": { "reviews": {}, "blog_comments": {}, "podcast_comments": {}, "total_pending_counts": 0 }, "payments": {} }
+{
+  "status_code": 200,
+  "msg": "Glance content retrieved successfully",
+  "data": {
+    "content": {
+      "reviews": {},
+      "blog_comments": {},
+      "podcast_comments": {},
+      "total_pending_counts": 0
+    },
+    "payments": {}
+  }
+}
 ```
+
+Empty store → zeros / empty arrays with **200**.
+
+### Errors
+
+| HTTP | Meaning |
+|------|---------|
+| `401` | Bad / missing `identity_access_token` |
+
+---
 
 ## 2b) GET `/glance/appointments`
 
-Read stored **appointments** only. Workspace select token.
+Read stored **appointments** only (schedule + badge counts).
+
+### Access token
+
+| | |
+|-|-|
+| **Required token** | `workspace_access_token_main` |
+| **Header** | `Authorization: Bearer <workspace_access_token_main>` |
+| **Where from** | Select workspace → `data.access_token` |
+| **Wrong token** | Do **not** use `identity_access_token` |
 
 ### How to call
 
@@ -271,10 +339,18 @@ Read stored **appointments** only. Workspace select token.
 |-|-------|-----|
 | Method | `GET` | `GET` |
 | URL | `http://127.0.0.1:8000/caepy/api/v1/linq360/glance/appointments` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/appointments` |
-| Auth | `workspace_access_token_main` | same |
+| Auth | `workspace_access_token_main` | `workspace_access_token_main` |
 
+**Local**
 ```bash
 curl "http://127.0.0.1:8000/caepy/api/v1/linq360/glance/appointments" \
+  -H "Authorization: Bearer <workspace_access_token_main>" \
+  -H "Accept: application/json"
+```
+
+**Dev**
+```bash
+curl "https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/appointments" \
   -H "Authorization: Bearer <workspace_access_token_main>" \
   -H "Accept: application/json"
 ```
@@ -286,39 +362,46 @@ Authorization: Bearer <workspace_access_token_main>
 Accept: application/json
 ```
 
-### Response `data`
-
-```json
-{ "appointments": 2, "requests": 1, "todays_schedule": [] }
-```
-
 ### Body / query
 
-None.
+None. Workspace / doctor come from the select JWT (`workspace_id`, `ws_user_id`, `ph_user_id` / `appointment_doctor_id`).
 
 ### Success response `200`
 
 ```json
 {
   "status_code": 200,
-  "msg": "Glance retrieved successfully",
-  "data": { /* GlanceData */ }
+  "msg": "Glance appointments retrieved successfully",
+  "data": {
+    "appointments": 2,
+    "requests": 1,
+    "todays_schedule": []
+  }
 }
 ```
 
-Empty store → zeros / `[]` with **200**.
+Empty store (or after daily clear, before next webhook) → zeros / `[]` with **200**.
 
 ### Errors
 
 | HTTP | Meaning |
 |------|---------|
-| `401` | Bad / missing token |
+| `401` | Bad / missing `workspace_access_token_main` |
 
 ---
 
 ## 3) POST `/webhooks/dashboard`
 
-Appointment backend → CAEPY. Upserts schedule; debounces section refresh; returns glance.
+Appointment backend → CAEPY. Upserts schedule; debounces section refresh; returns appointments glance.
+
+### Access token
+
+| | |
+|-|-|
+| **Required token** | **None** — do **not** send Bearer |
+| **Identity** | JSON body: `ph_user_id`, `ws_user_id`, `workspace_id` (all required) |
+| **Optional gate** | If `AI_SUGGESTIONS_OPEN_DOMAINS` is set, `Origin` / `Referer` must match |
+| **Who calls** | Appointment / Practice Hub backend — **not** the doctor app |
 
 ### How to call
 
@@ -326,7 +409,7 @@ Appointment backend → CAEPY. Upserts schedule; debounces section refresh; retu
 |-|-------|-----|
 | Method | `POST` | `POST` |
 | URL | `http://127.0.0.1:8000/caepy/api/v1/linq360/webhooks/dashboard` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/webhooks/dashboard` |
-| Body | JSON (see below) | JSON (see below) |
+| Body | JSON (full snapshot — see below) | JSON (full snapshot — see below) |
 | Auth | **none** (ids in body); Origin/Referer if open-domains set | same |
 
 **Local**
@@ -393,6 +476,9 @@ No Bearer. Required body fields: `ph_user_id`, `ws_user_id`, `workspace_id`.
 
 ```json
 {
+  "ph_user_id": 893,
+  "ws_user_id": 327,
+  "workspace_id": 161,
   "event_type": "appointment.created",
   "appointments": 2,
   "requests": 1,
@@ -412,10 +498,13 @@ No Bearer. Required body fields: `ph_user_id`, `ws_user_id`, `workspace_id`.
 
 | Field | Type | Required | Notes |
 |-------|------|----------|--------|
+| `ph_user_id` | int | **Yes** | Drupal / Practice Hub doctor uid |
+| `ws_user_id` | int | **Yes** | Portal user (debounce + WS room) |
+| `workspace_id` | int | **Yes** | Portal workspace |
 | `event_type` | string \| null | No | Maps to sections; omit → appointments + requests |
-| `appointments` | int | No (default `0`) | Badge count |
-| `requests` | int | No (default `0`) | Badge count |
-| `todays_schedule` | array | No (default `[]`) | Patient rows |
+| `appointments` | int | No (default `0`) | Badge count — full current value |
+| `requests` | int | No (default `0`) | Badge count — full current value |
+| `todays_schedule` | array | No (default `[]`) | **Full** patient list for today (replace, not patch) |
 
 #### `todays_schedule[]` item
 
@@ -465,14 +554,26 @@ After ~`DEBOUNCE_WINDOW_MS` (default **2000**), server may push the same glance 
 
 | HTTP | Meaning |
 |------|---------|
-| `401` | Bad/missing Bearer or missing `user_id` on token |
-| `404` | Cannot store dashboard row |
-| `422` | Invalid body |
+| `401` | Origin/Referer failed open-domain allowlist (when configured) |
+| `400` | Missing/invalid `workspace_id` or `ws_user_id` in body |
+| `404` | Cannot store dashboard row (non-numeric `ph_user_id`) |
+| `422` | Invalid body / enum values |
 | `502` | Upstream failure (rare on schedule-only path) |
 
 ---
 
 ## 4) WebSocket `/ws/dashboard`
+
+Realtime appointment pushes after webhook debounce.
+
+### Access token
+
+| | |
+|-|-|
+| **Required token** | `workspace_access_token_main` |
+| **Where** | Query string `?token=<workspace_access_token_main>` (raw JWT or `Bearer <jwt>`) |
+| **Where from** | Select workspace → `data.access_token` |
+| **Wrong token** | Do **not** use `identity_access_token` |
 
 ### How to call
 
@@ -481,7 +582,7 @@ After ~`DEBOUNCE_WINDOW_MS` (default **2000**), server may push the same glance 
 | Protocol | `ws://` | `wss://` |
 | URL | `ws://127.0.0.1:8000/caepy/api/v1/linq360/ws/dashboard?token=<workspace_access_token_main>` | `wss://dev1.caepy.linqmd.com/caepy/api/v1/linq360/ws/dashboard?token=<workspace_access_token_main>` |
 | Body | none (server pushes) | none (server pushes) |
-| Auth | `token` query (`workspace_access_token_main`) | same |
+| Auth | `token` query = `workspace_access_token_main` | same |
 
 **Local (browser)**
 ```js
@@ -531,11 +632,13 @@ Room is **server-assigned**: `dashboard:{workspace_id}:{ws_user_id}` from the to
 | `payments_updated` | Only payments |
 | `dashboard_updated` | Multiple sections |
 
-Frontend should treat `data` like `GET /glance` → `response.data`, then re-render badges/schedule.
+Frontend should treat `data` like `GET /glance/appointments` → `response.data`, then re-render badges/schedule.
 
 ---
 
-## Shared glance shape (`response.data` / WS `data`)
+## Response shapes (by endpoint)
+
+**Content** — `POST /glance/sync`, `GET /glance/content` (`identity_access_token`):
 
 ```json
 {
@@ -553,9 +656,16 @@ Frontend should treat `data` like `GET /glance` → `response.data`, then re-ren
     },
     "total_pending_counts": 3
   },
+  "payments": {}
+}
+```
+
+**Appointments** — `GET /glance/appointments`, webhook response, WS `data` (`workspace_access_token_main` on GET/WS):
+
+```json
+{
   "appointments": 1,
   "requests": 0,
-  "payments": {},
   "todays_schedule": [
     {
       "patient_meta_code": "PAT-001",
@@ -570,13 +680,13 @@ Frontend should treat `data` like `GET /glance` → `response.data`, then re-ren
 }
 ```
 
-| Field | Source table / column |
-|-------|------------------------|
-| `content` | `linq360.doctor_dashboard.todays_glance` |
-| `appointments` | `workspace_doctor_dashboard.appointments` → int count |
-| `requests` | `workspace_doctor_dashboard.requests` → int count |
-| `todays_schedule` | `workspace_doctor_dashboard.appointment_json.todays_schedule` |
-| `payments` | Always `{}` for now |
+| Field | Source table / column | Returned by |
+|-------|------------------------|-------------|
+| `content` | `linq360.doctor_dashboard.todays_glance` | content sync/GET |
+| `payments` | Always `{}` for now | content sync/GET |
+| `appointments` | `workspace_doctor_dashboard.appointments` → int | appointments GET / webhook / WS |
+| `requests` | `workspace_doctor_dashboard.requests` → int | appointments GET / webhook / WS |
+| `todays_schedule` | `workspace_doctor_dashboard.appointment_json.todays_schedule` | appointments GET / webhook / WS |
 
 ### TypeScript
 
@@ -591,7 +701,8 @@ type ScheduleItem = {
   time_slot: string;
 };
 
-type GlanceData = {
+/** POST /glance/sync + GET /glance/content — identity_access_token */
+type ContentGlanceData = {
   content: {
     reviews: { pending_count: number; review_id: number[] };
     blog_comments: {
@@ -606,16 +717,26 @@ type GlanceData = {
     };
     total_pending_counts: number;
   };
+  payments: Record<string, unknown>;
+};
+
+/** GET /glance/appointments + webhook + WS — select token on GET/WS */
+type AppointmentsGlanceData = {
   appointments: number;
   requests: number;
-  payments: Record<string, unknown>;
   todays_schedule: ScheduleItem[];
 };
 
-type GlanceApiResponse = {
+type ContentGlanceApiResponse = {
   status_code: number;
   msg: string;
-  data: GlanceData;
+  data: ContentGlanceData;
+};
+
+type AppointmentsGlanceApiResponse = {
+  status_code: number;
+  msg: string;
+  data: AppointmentsGlanceData;
 };
 
 type DashboardWsMessage = {
@@ -624,7 +745,7 @@ type DashboardWsMessage = {
   workspace_id: number;
   sections: string[];
   timestamp: string;
-  data: GlanceData;
+  data: AppointmentsGlanceData;
 };
 ```
 
@@ -632,21 +753,32 @@ type DashboardWsMessage = {
 
 ## When frontend should call what
 
-| Situation | Call |
-|-----------|------|
-| After login (first paint) | `POST /glance/sync` with **identity** token; open **WS** only after select (appointments) |
-| Soft refresh of last stored | `GET /glance` |
-| Need fresh pending content | `POST /glance/sync` |
-| Switched doctor (new token) | Reconnect **WS** with new token + `POST /glance/sync` |
-| Live schedule/badge updates | Listen on **WS** (appointment system hits webhook) |
+| Situation | Call | Token |
+|-----------|------|-------|
+| After login (first paint) | `POST /glance/sync` then `GET /glance/content` | `identity_access_token` |
+| Soft refresh of stored content | `GET /glance/content` | `identity_access_token` |
+| Need fresh pending content | `POST /glance/sync` | `identity_access_token` |
+| After workspace select | `GET /glance/appointments` + open **WS** | `workspace_access_token_main` |
+| Soft refresh of schedule | `GET /glance/appointments` | `workspace_access_token_main` |
+| Switched workspace/doctor | New select token → reconnect **WS** + appointments GET; content uses identity | both as above |
+| Live schedule/badge updates | Listen on **WS** (appointment system hits webhook) | `workspace_access_token_main` |
 
-Frontend does **not** call `/webhooks/dashboard` — that is the appointment backend.
+Frontend does **not** call `/webhooks/dashboard` — that is the appointment backend.  
+**Removed:** merged `GET /glance` — use the two GETs above.
 
 ---
 
 ## 5) GET `/doctors/{doctor_id}/content-engagement`
 
 Published engagement metrics (not Today-at-a-Glance).
+
+### Access token
+
+| | |
+|-|-|
+| **Required token** | `caepy_access_token` **or** `identity_access_token` (when `WORKSPACE_JWT_SECRET` is configured) |
+| **Header** | `Authorization: Bearer <token>` |
+| **Wrong token** | Do **not** use `workspace_access_token_main` |
 
 ### How to call
 
@@ -656,19 +788,33 @@ Published engagement metrics (not Today-at-a-Glance).
 | URL | `http://127.0.0.1:8000/caepy/api/v1/linq360/doctors/{doctor_id}/content-engagement` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/doctors/{doctor_id}/content-engagement` |
 | Path param | `doctor_id` = CAEPY doctor id | same |
 | Body | none | none |
-| Auth | **CAEPY app JWT** or **identity_access_token** (if `WORKSPACE_JWT_SECRET` set) | same |
+| Auth | Caepy JWT or identity | same |
 
-**Local**
+**Local (Caepy JWT)**
 ```bash
 curl "http://127.0.0.1:8000/caepy/api/v1/linq360/doctors/42/content-engagement" \
   -H "Authorization: Bearer <caepy_access_token>" \
   -H "Accept: application/json"
 ```
 
-**Dev**
+**Local (identity, if WORKSPACE_JWT_SECRET set)**
+```bash
+curl "http://127.0.0.1:8000/caepy/api/v1/linq360/doctors/42/content-engagement" \
+  -H "Authorization: Bearer <identity_access_token>" \
+  -H "Accept: application/json"
+```
+
+**Dev (Caepy JWT)**
 ```bash
 curl "https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/doctors/42/content-engagement" \
   -H "Authorization: Bearer <caepy_access_token>" \
+  -H "Accept: application/json"
+```
+
+**Dev (identity)**
+```bash
+curl "https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/doctors/42/content-engagement" \
+  -H "Authorization: Bearer <identity_access_token>" \
   -H "Accept: application/json"
 ```
 
@@ -676,6 +822,7 @@ curl "https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/doctors/42/content-enga
 
 ```http
 Authorization: Bearer <caepy_access_token>
+# or: Authorization: Bearer <identity_access_token>
 Accept: application/json
 ```
 
@@ -742,12 +889,84 @@ Same trio → upsert. Same doctor, different `workspace_id` → new row.
 ### How GET merges
 
 ```text
-content          ← doctor_dashboard.todays_glance
-appointments     ← as_count(workspace.appointments)
+content          ← doctor_dashboard.todays_glance          (identity GETs)
+appointments     ← as_count(workspace.appointments)       (select GET / WS)
 requests         ← as_count(workspace.requests)
 todays_schedule  ← workspace.appointment_json.todays_schedule
 payments         ← {}
 ```
+
+---
+
+## 6) Daily clear of `workspace_doctor_dashboard` (ops)
+
+Schedule data is **today-only**. At the start of each IST day, CAEPY deletes all rows in `linq360.workspace_doctor_dashboard` so yesterday’s patients/counts cannot linger. Content in `doctor_dashboard` is **not** cleared.
+
+### Access token
+
+This is a **CLI / ops job**, not an HTTP API. No Bearer token. No frontend call.
+
+### What runs
+
+| | |
+|-|-|
+| **Script** | `python scripts/clear_linq360_workspace_dashboard.py` |
+| **Service** | `DashboardService.clear_all_workspace_dashboards()` |
+| **SQL effect** | `DELETE` all rows from `linq360.workspace_doctor_dashboard` |
+| **Leaves alone** | `linq360.doctor_dashboard` (pending content) |
+| **When** | **00:00 Asia/Kolkata (IST)** every day |
+| **How scheduled** | External cron / ECS Scheduled Task / EventBridge / Windows Task Scheduler (timezone = IST) |
+| **Refill** | Next `POST /webhooks/dashboard` with a **full** `todays_schedule` snapshot recreates the row |
+
+### Local (manual run)
+
+From repo root, with `DATABASE_URL` pointing at your local DB:
+
+```bash
+python scripts/clear_linq360_workspace_dashboard.py
+```
+
+Expect log lines like `workspace_doctor_dashboard_cleared deleted=N` and exit code `0`.
+
+### Dev / prod (scheduled)
+
+```text
+# Example cron (scheduler timezone must be Asia/Kolkata)
+0 0 * * *  cd /path/to/caepyplus_backend && python scripts/clear_linq360_workspace_dashboard.py
+```
+
+On ECS: Scheduled Task at `00:00` with timezone `Asia/Kolkata`, same command, same task role / `DATABASE_URL` as the API.
+
+### After clear — what frontend sees
+
+| Call | Token | Result until next webhook |
+|------|-------|---------------------------|
+| `GET /glance/appointments` | `workspace_access_token_main` | `appointments: 0`, `requests: 0`, `todays_schedule: []` (**200**) |
+| `GET /glance/content` | `identity_access_token` | Unchanged (content still present) |
+| WS | `workspace_access_token_main` | No automatic push from the clear job; next webhook may push after debounce |
+
+### Flow
+
+```text
+00:00 IST  →  clear script  →  workspace_doctor_dashboard empty
+                │
+                ▼
+GET /glance/appointments  →  empty schedule (OK for new day)
+                │
+                ▼
+Appointment system POST /webhooks/dashboard  (full today's snapshot)
+                │
+                ▼
+ensure_workspace_dashboard + upsert  →  today's schedule visible again
+```
+
+### Why no “recovery” pull in CAEPY
+
+CAEPY does **not** have an API to list all of today’s appointments for a doctor. Schedule is push-only via webhook. Cleanup-only is enough when the appointment system keeps sending **full** snapshots after midnight / on first event of the day.
+
+### Debounce note (related)
+
+WS does **not** refresh every 2 seconds. `DEBOUNCE_WINDOW_MS` (default **2000**) is a quiet window **after a webhook**: coalesce events for the same `ws_user_id` + `workspace_id`, then one background refresh + one WS push. No events → no push.
 
 ---
 
@@ -757,8 +976,9 @@ payments         ← {}
 |-----|-------------------|---------|
 | `ROOT_PATH` | `/caepy/api` | Prefix before `/v1/linq360` (local + dev) |
 | `LINQMD_PRACTICE_HUB_API_URL` | `https://demo.linqmd.com` | Practice Hub base for pending-counts |
-| `DEBOUNCE_WINDOW_MS` | `2000` | Quiet window before background refresh + WS push |
-| `AI_SUGGESTIONS_OPEN_DOMAINS` | `["https://dev1.linqmd.com","https://app.linqmd.com"]` | Trusted Origins for webhook domain gate (Bearer still required) |
+| `DEBOUNCE_WINDOW_MS` | `2000` | Quiet window after webhook before background refresh + WS push |
+| `AI_SUGGESTIONS_OPEN_DOMAINS` | `["https://dev1.linqmd.com","https://app.linqmd.com"]` | Trusted Origins for webhook domain gate (**no** Bearer on webhook) |
+| `WORKSPACE_JWT_SECRET` | same as portal `AUTH_JWT_SECRET` | Verify identity / select JWTs |
 
 Sync URL CAEPY calls:
 
@@ -773,65 +993,76 @@ Redis is **not** required for debounce today (in-memory, single instance).
 
 ---
 
-## curl examples
+## curl cheat sheet (all endpoints)
+
+Set tokens once:
+
+```bash
+# From login / select responses — never log raw tokens in shared chats
+IDENTITY="<identity_access_token>"   # login data.access_token
+SELECT="<workspace_access_token_main>"  # select data.access_token
+```
 
 ### Local
 
 ```bash
 BASE="http://127.0.0.1:8000/caepy/api/v1/linq360"
-TOKEN="YOUR_WORKSPACE_SELECT_TOKEN"
 
+# Content sync — identity
 curl -s -X POST "$BASE/glance/sync" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/json"
+  -H "Authorization: Bearer $IDENTITY" -H "Accept: application/json"
 
-curl -s "$BASE/glance" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/json"
+# Content GET — identity
+curl -s "$BASE/glance/content" \
+  -H "Authorization: Bearer $IDENTITY" -H "Accept: application/json"
+
+# Appointments GET — select
+curl -s "$BASE/glance/appointments" \
+  -H "Authorization: Bearer $SELECT" -H "Accept: application/json"
+
+# Webhook — no Bearer; body ids
+curl -s -X POST "$BASE/webhooks/dashboard" \
+  -H "Content-Type: application/json" -H "Accept: application/json" \
+  -H "Origin: https://dev1.linqmd.com" \
+  -d '{"ph_user_id":893,"ws_user_id":327,"workspace_id":161,"event_type":"appointment.created","appointments":2,"requests":1,"todays_schedule":[]}'
+
+# Content engagement — Caepy JWT or identity
+curl -s "$BASE/doctors/42/content-engagement" \
+  -H "Authorization: Bearer $IDENTITY" -H "Accept: application/json"
+
+# Daily clear (ops CLI — no HTTP token)
+python scripts/clear_linq360_workspace_dashboard.py
 ```
 
 ### Dev
 
 ```bash
 BASE="https://dev1.caepy.linqmd.com/caepy/api/v1/linq360"
-TOKEN="YOUR_WORKSPACE_SELECT_TOKEN"
 
 curl -s -X POST "$BASE/glance/sync" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/json"
+  -H "Authorization: Bearer $IDENTITY" -H "Accept: application/json"
 
-curl -s "$BASE/glance" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Accept: application/json"
-```
+curl -s "$BASE/glance/content" \
+  -H "Authorization: Bearer $IDENTITY" -H "Accept: application/json"
 
-### Webhook (appointment backend → CAEPY)
+curl -s "$BASE/glance/appointments" \
+  -H "Authorization: Bearer $SELECT" -H "Accept: application/json"
 
-```bash
-# Local or Dev: set BASE accordingly
 curl -s -X POST "$BASE/webhooks/dashboard" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
+  -H "Content-Type: application/json" -H "Accept: application/json" \
   -H "Origin: https://dev1.linqmd.com" \
-  -d '{
-    "event_type": "appointment.created",
-    "appointments": 2,
-    "requests": 1,
-    "todays_schedule": [{
-      "patient_meta_code": "PAT-001",
-      "appointment_type": "BOOKING",
-      "patient_name": "Rajesh Kumar",
-      "first_name": "Rajesh",
-      "last_name": "Kumar",
-      "consultation_type": "in-person",
-      "time_slot": "10:30 AM"
-    }]
-  }'
+  -d '{"ph_user_id":893,"ws_user_id":327,"workspace_id":161,"event_type":"appointment.created","appointments":2,"requests":1,"todays_schedule":[]}'
+
+curl -s "$BASE/doctors/42/content-engagement" \
+  -H "Authorization: Bearer $IDENTITY" -H "Accept: application/json"
 ```
 
-WebSocket (browser):
+### WebSocket (browser)
 
 ```js
+// token = workspace_access_token_main from select
+const token = workspace_access_token_main;
+
 // Local
 const wsLocal = new WebSocket(
   `ws://127.0.0.1:8000/caepy/api/v1/linq360/ws/dashboard?token=${encodeURIComponent(token)}`
@@ -844,7 +1075,7 @@ const wsDev = new WebSocket(
 
 wsDev.onmessage = (ev) => {
   const msg = JSON.parse(ev.data); // DashboardWsMessage
-  // render msg.data like GET /glance
+  // render msg.data like GET /glance/appointments → response.data
 };
 ```
 
@@ -858,15 +1089,14 @@ wsDev.onmessage = (ev) => {
 Frontend                CAEPY                          Practice Hub
    │                      │                                 │
    │ POST {BASE}/glance/sync (empty body)                   │
-   │ Authorization: Bearer│                                 │
+   │ Authorization: Bearer <identity_access_token>          │
    │─────────────────────►│                                 │
    │                      │ GET {PH}/api/linq360/pending-counts
-   │                      │ Authorization: Bearer           │
+   │                      │ Authorization: Bearer <same identity>
    │                      │────────────────────────────────►│
    │                      │◄── { status_code, data.content }│
-   │                      │ unwrap data.content             │
    │                      │ upsert doctor_dashboard         │
-   │◄── GlanceApiResponse │                                 │
+   │◄── content glance    │                                 │
 
 Local BASE = http://127.0.0.1:8000/caepy/api/v1/linq360
 Dev   BASE = https://dev1.caepy.linqmd.com/caepy/api/v1/linq360
@@ -879,13 +1109,26 @@ PH         = https://demo.linqmd.com   (LINQMD_PRACTICE_HUB_API_URL)
 Appt system             CAEPY                      Frontend (WS)
    │                      │                            │
    │ POST /webhooks/dashboard                          │
-   │ Bearer + JSON body   │                            │
+   │ NO Bearer; body ph/ws/workspace + full schedule   │
    │─────────────────────►│ upsert schedule NOW        │
    │                      │ enqueue debounce           │
-   │◄── GlanceApiResponse │                            │
+   │◄── appointments glance                            │
    │                      │ ~2s quiet (same ws+workspace)
    │                      │ refresh sections → upsert  │
    │                      │───────────────────────────►│ WS JSON push
+   │                      │   (select token on WS)     │
+```
+
+### Daily clear (ops)
+
+```text
+Cron (00:00 IST)        CAEPY CLI                     Postgres
+   │                      │                              │
+   │ run clear script     │                              │
+   │─────────────────────►│ DELETE workspace_doctor_dashboard
+   │                      │─────────────────────────────►│
+   │                      │ doctor_dashboard untouched   │
+   │◄── exit 0            │                              │
 ```
 
 ---
@@ -894,11 +1137,12 @@ Appt system             CAEPY                      Frontend (WS)
 
 | HTTP / WS | Action |
 |-----------|--------|
-| `401` / close `4401` | Re-select workspace; refresh token; reconnect WS |
+| `401` on content | Refresh / re-login → new `identity_access_token` |
+| `401` / close `4401` on appointments/WS | Re-select workspace → new `workspace_access_token_main`; reconnect WS |
 | `403` / close `4403` | Token missing workspace/user claims |
-| `502` (incl. PH **522**) | Practice Hub unreachable from CAEPY; check `LINQMD_PRACTICE_HUB_API_URL` on ECS; optional fallback `GET /glance` |
+| `502` (incl. PH **522**) | Practice Hub unreachable from CAEPY; check `LINQMD_PRACTICE_HUB_API_URL` on ECS; soft fallback `GET /glance/content` |
 | `404` | Dashboard not ready for this doctor |
 | `422` | Fix webhook body / enum values |
-| Sync `200` but content all zeros | Deploy pending-counts `data.content` unwrap; confirm PH returns non-zero for that token |
+| Sync `200` but content all zeros | Confirm PH returns non-zero for that identity token |
 
 Missing id arrays → `[]`. Missing counts → `0`.

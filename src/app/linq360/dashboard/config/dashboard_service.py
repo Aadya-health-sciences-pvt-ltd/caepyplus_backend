@@ -1,6 +1,7 @@
 """Dashboard business logic (glance, webhook, content engagement)."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy.orm.attributes import flag_modified
@@ -26,6 +27,8 @@ from ..dashboard_repository import DashboardRepository, GlanceDashboardMissing
 
 __all__ = ["DashboardService", "GlanceDashboardMissing"]
 
+logger = logging.getLogger(__name__)
+
 
 class DashboardService(BaseService):
     """Orchestrates dashboard repository + Practice Hub pending sync."""
@@ -33,6 +36,12 @@ class DashboardService(BaseService):
     def __init__(self, session: Any) -> None:
         super().__init__(session)
         self.repo = DashboardRepository(session)
+
+    async def clear_all_workspace_dashboards(self) -> int:
+        """Wipe today-only schedule rows; leaves doctor_dashboard untouched."""
+        deleted = await self.repo.delete_all_workspace_dashboards()
+        logger.info("workspace_doctor_dashboard_cleared deleted=%s", deleted)
+        return deleted
 
     async def get_content_glance(self, linqmd_user_id: str) -> dict[str, Any]:
         """Content-only document from ``doctor_dashboard.todays_glance``."""

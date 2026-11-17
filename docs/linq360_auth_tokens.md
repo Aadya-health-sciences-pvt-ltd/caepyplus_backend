@@ -27,6 +27,19 @@ API response field names remain `access_token` / `refresh_token`.
 
 **Removed:** merged `GET /v1/linq360/glance`. Use the two GETs above.
 
+## Daily clear (ops — not an HTTP route)
+
+| Item | Detail |
+|------|--------|
+| Command | `python scripts/clear_linq360_workspace_dashboard.py` |
+| When | `00:00 Asia/Kolkata` |
+| Effect | Deletes all `workspace_doctor_dashboard` rows |
+| Does not clear | `doctor_dashboard` |
+| Token | None (CLI) |
+| Refill | Next full `POST /webhooks/dashboard` snapshot |
+
+Full local/dev curls + token matrix: [`linq360_frontend_handbook.md`](./linq360_frontend_handbook.md).
+
 ## Response shapes
 
 **Content** (`/glance/content`, `/glance/sync`):
