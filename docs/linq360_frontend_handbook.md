@@ -35,7 +35,7 @@ Path-only form (same for both): `{BASE}` = `/caepy/api/v1/linq360`.
 | `GET /glance/appointments` | `workspace_access_token_main` | `http://127.0.0.1:8000/caepy/api/v1/linq360/glance/appointments` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/glance/appointments` |
 | `POST /webhooks/dashboard` | **none** (body ids) | `http://127.0.0.1:8000/caepy/api/v1/linq360/webhooks/dashboard` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/webhooks/dashboard` |
 | `WS /ws/dashboard` | `workspace_access_token_main` (query `token`) | `ws://127.0.0.1:8000/caepy/api/v1/linq360/ws/dashboard?token=…` | `wss://dev1.caepy.linqmd.com/caepy/api/v1/linq360/ws/dashboard?token=…` |
-| `GET /doctors/{id}/content-engagement` | Caepy JWT **or** `identity_access_token` | `http://127.0.0.1:8000/caepy/api/v1/linq360/doctors/{id}/content-engagement` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/doctors/{id}/content-engagement` |
+| `GET /doctors/{id}/content-engagement` | Caepy JWT **or** LinQ360 `identity_access_token` (auth inside linq360; Caepy app `rbac` unchanged) | `http://127.0.0.1:8000/caepy/api/v1/linq360/doctors/{id}/content-engagement` | `https://dev1.caepy.linqmd.com/caepy/api/v1/linq360/doctors/{id}/content-engagement` |
 
 **How you get the tokens**
 
@@ -80,13 +80,15 @@ From select `access_token`. Used by `GET /glance/appointments` and WS `?token=`.
 
 Identity in JSON body: `ph_user_id`, `ws_user_id`, `workspace_id` (required). When `AI_SUGGESTIONS_OPEN_DOMAINS` is set, Origin/Referer must match.
 
-### CAEPY JWT / identity (content-engagement + doctor CRUD)
+### Content-engagement (LinQ360 route only)
 
 ```http
 Authorization: Bearer <caepy_access_token>
-# or, when WORKSPACE_JWT_SECRET is configured:
+# or LinQ360 identity (resolved inside linq360/, not via Caepy rbac):
 Authorization: Bearer <identity_access_token>
 ```
+
+Caepy app routes (`/v1/doctors/*`, admin, etc.) stay on **Caepy JWT** only — this branch does not change `src/app/core/rbac.py` / Caepy `_decode_jwt` flow.
 
 ---
 

@@ -73,24 +73,16 @@ async def get_current_user(
     payload = _decode_jwt(token, settings=settings)
 
     subject = payload.get("sub")
-    if isinstance(subject, str) and subject.strip():
-        subject = subject.strip()
-    else:
-        # Workspace identity_access_token uses email (no Caepy ``sub``).
-        email_claim = payload.get("email")
-        if isinstance(email_claim, str) and "@" in email_claim.strip():
-            subject = email_claim.strip().lower()
-        else:
-            subject = ""
+    if not isinstance(subject, str) or not subject.strip():
+        raise UnauthorizedError(message="Invalid token subject", error_code="INVALID_TOKEN")
 
+    subject = subject.strip()
     user_repo = UserRepository(db)
-    user = None
     # Phone OTP / admin: sub is a phone (normalised E.164 or 10-digit). Google: sub is email.
-    if subject:
-        if "@" in subject:
-            user = await user_repo.get_by_email(subject.lower())
-        else:
-            user = await user_repo.get_by_phone(subject)
+    if "@" in subject:
+        user = await user_repo.get_by_email(subject.lower())
+    else:
+        user = await user_repo.get_by_phone(subject)
 
     # Google sign-in (and some migrations): JWT may carry email in ``sub`` while the ``users``
     # row is still keyed by ``doctor_id`` only, or email casing drifted. ``doctor_id`` is always set.
@@ -105,32 +97,13 @@ async def get_current_user(
                     doctor_id=parsed_did,
                 )
 
-    # Workspace identity: ph_user_id / appointment_doctor_id → LinQMD creds → doctor → user
-    if user is None:
-        from ..repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
-
-        ph = payload.get("ph_user_id") or payload.get("appointment_doctor_id")
-        if ph is not None and str(ph).strip() and str(ph).strip().lower() != "none":
-            creds = await LinqmdCredentialsRepository(db).get_by_linqmd_user_id(
-                str(ph).strip()
-            )
-            if creds is not None:
-                user = await user_repo.get_by_doctor_id(int(creds.doctor_id))
-                if user is not None:
-                    logger.debug(
-                        "user_resolved_via_ph_user_id",
-                        user_id=user.id,
-                        doctor_id=int(creds.doctor_id),
-                    )
-
     if not user:
-        _sub_hash = hashlib.sha256((subject or "workspace").encode()).hexdigest()[:12]
+        _sub_hash = hashlib.sha256(subject.encode()).hexdigest()[:12]
         logger.warning(
             "user_not_found_for_jwt",
             subject_hash=_sub_hash,
             path=str(request.url.path),
             has_doctor_id_claim=payload.get("doctor_id") is not None,
-            has_ph_claim=bool(payload.get("ph_user_id") or payload.get("appointment_doctor_id")),
         )
         raise UnauthorizedError(
             message="User not found. Please contact administrator.",

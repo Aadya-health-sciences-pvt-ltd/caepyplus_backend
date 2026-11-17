@@ -7,13 +7,15 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 
+from ...core.config import Settings, get_settings
+from ...core.exceptions import ForbiddenError, UnauthorizedError
 from ...core.rbac import get_current_user
 from ...db.session import DbSession
 from ...models.enums import UserRole
-from ...models.user import User
 from ...repositories.doctor_repository import DoctorRepository
+from ...repositories.linqmd_credentials_repository import LinqmdCredentialsRepository
 from ..common.base_controller import BaseController
 from ..config.auth import (
     WorkspaceIdentityAuth,
@@ -56,21 +58,61 @@ _controller = DashboardController()
 
 async def require_doctor_engagement_access(
     doctor_id: int,
+    request: Request,
     db: DbSession,
-    user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> int:
+    """Authorize content-engagement without changing Caepy ``rbac`` / ``security``.
+
+    1. Caepy app JWT via unmodified ``get_current_user`` (admin / own doctor).
+    2. Else LinQ360 ``identity_access_token`` → own doctor via linqmd creds.
+    """
     doctor = await DoctorRepository(db).get_by_id(doctor_id)
     if doctor is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")
 
-    privileged = {
-        UserRole.ADMIN.value,
-        UserRole.OPERATION.value,
-        UserRole.CONTENT_CREATOR.value,
-    }
-    if user.role in privileged:
-        return doctor_id
-    if user.doctor_id is not None and int(user.doctor_id) == doctor_id:
+    try:
+        user = await get_current_user(request, settings, db)
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=exc.message,
+        ) from exc
+    except UnauthorizedError:
+        user = None
+
+    if user is not None:
+        privileged = {
+            UserRole.ADMIN.value,
+            UserRole.OPERATION.value,
+            UserRole.CONTENT_CREATOR.value,
+        }
+        if user.role in privileged:
+            return doctor_id
+        if user.doctor_id is not None and int(user.doctor_id) == doctor_id:
+            return doctor_id
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to view this doctor's content engagement",
+        )
+
+    try:
+        identity = await require_identity_auth(
+            db, request.headers.get("Authorization")
+        )
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Authentication required. Pass Caepy JWT or "
+                "Authorization: Bearer <identity_access_token>"
+            ),
+        ) from None
+
+    creds = await LinqmdCredentialsRepository(db).get_by_linqmd_user_id(
+        identity.linqmd_user_id
+    )
+    if creds is not None and int(creds.doctor_id) == doctor_id:
         return doctor_id
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

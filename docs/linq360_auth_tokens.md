@@ -22,8 +22,8 @@ API response field names remain `access_token` / `refresh_token`.
 | `GET /v1/linq360/glance/appointments` | `workspace_access_token_main` |
 | `POST /v1/linq360/webhooks/dashboard` | **none** — `ph_user_id`, `ws_user_id`, `workspace_id` in body |
 | `WS /v1/linq360/ws/dashboard?token=` | `workspace_access_token_main` |
-| `GET /v1/linq360/doctors/{id}/content-engagement` | Caepy JWT **or** identity (needs `WORKSPACE_JWT_SECRET`) |
-| `/v1/doctors/*` | Caepy JWT **or** identity (needs `WORKSPACE_JWT_SECRET`) |
+| `GET /v1/linq360/doctors/{id}/content-engagement` | Caepy JWT **or** LinQ360 `identity_access_token` (checked inside linq360; Caepy `rbac` unchanged) |
+| `/v1/doctors/*` (Caepy app) | Caepy JWT only — **not** altered for LinQ360 |
 
 **Removed:** merged `GET /v1/linq360/glance`. Use the two GETs above.
 
