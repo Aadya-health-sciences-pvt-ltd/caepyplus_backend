@@ -89,6 +89,29 @@ def count_document(value: object) -> dict[str, int]:
     return {"count": as_count(value, fallback=0)}
 
 
+def content_glance_response(content: dict[str, Any]) -> dict[str, Any]:
+    """Content-only glance document (identity token paths)."""
+    return {
+        GLANCE_CONTENT_KEY: content,
+        GLANCE_PAYMENTS_KEY: {},
+    }
+
+
+def appointments_glance_response(
+    *,
+    requests: object = None,
+    appointments: object = None,
+    appointment_json: object = None,
+) -> dict[str, Any]:
+    """Appointments-only glance document (select token / webhook paths)."""
+    schedule = schedule_items(appointment_json)
+    return {
+        GLANCE_APPOINTMENTS_KEY: as_count(appointments, fallback=len(schedule)),
+        GLANCE_REQUESTS_KEY: as_count(requests, fallback=0),
+        TODAYS_SCHEDULE_KEY: schedule,
+    }
+
+
 def merge_glance_response(
     content: dict[str, Any],
     *,
@@ -96,17 +119,14 @@ def merge_glance_response(
     appointments: object = None,
     appointment_json: object = None,
 ) -> dict[str, Any]:
-    """One glance document for sync and get.
-
-    Dashboard badges use integer counts; patient details are ``todays_schedule``.
-    """
-    schedule = schedule_items(appointment_json)
+    """Merged glance document (legacy / WS when both sections needed)."""
     return {
-        GLANCE_CONTENT_KEY: content,
-        GLANCE_APPOINTMENTS_KEY: as_count(appointments, fallback=len(schedule)),
-        GLANCE_REQUESTS_KEY: as_count(requests, fallback=0),
-        GLANCE_PAYMENTS_KEY: {},
-        TODAYS_SCHEDULE_KEY: schedule,
+        **content_glance_response(content),
+        **appointments_glance_response(
+            requests=requests,
+            appointments=appointments,
+            appointment_json=appointment_json,
+        ),
     }
 
 

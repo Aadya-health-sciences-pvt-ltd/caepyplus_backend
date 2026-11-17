@@ -236,6 +236,19 @@ class Settings(BaseSettings):
         description="JWT access token expiration time (minutes)"
     )
 
+    # Workspace portal HS256 secret (same value as AUTH_JWT_SECRET /
+    # workspace_jwt_secret used by Practice Hub + linqmd_workspace_backend).
+    # When set: Caepy verifies identity/select JWTs and accepts them on doctor
+    # CRUD (via get_current_user). When empty: Linq360 still payload-decodes
+    # and forwards the Bearer to Practice Hub (Drupal verifies).
+    WORKSPACE_JWT_SECRET: str | None = Field(
+        default=None,
+        description=(
+            "HS256 secret for workspace identity/select tokens "
+            "(AUTH_JWT_SECRET / workspace_jwt_secret)"
+        ),
+    )
+
     # OIDC (linqmd_workspace_backend_code's Authorization Server), additive
     # alongside the legacy SECRET_KEY/HS256 scheme above. OIDC_ENABLED false/
     # unset: _decode_jwt is unchanged, legacy HS256 only. true: also accepts

@@ -150,7 +150,7 @@ router.include_router(
     dependencies=[Depends(require_authentication)],
 )
 
-# Today-at-a-glance content badge. Public: linqmd_user_id only.
+# LinQ360 glance: content (identity) + appointments (select) + webhook (body ids).
 # Do not attach JWT auth — a Drupal access token must not 401 this route.
 router.include_router(
     glance_router,

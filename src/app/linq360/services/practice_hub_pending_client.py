@@ -1,9 +1,9 @@
-"""Fetch Drupal pending counts from Practice Hub (workspace-token flow).
+"""Fetch Drupal pending counts from Practice Hub (identity / workspace token flow).
 
 GET {LINQMD_PRACTICE_HUB_API_URL}/api/linq360/pending-counts
 
-No user_id in the URL or body. Doctor comes from the workspace select
-Bearer token (``appointment_doctor_id``). CAEPY does not implement this GET;
+No user_id in the URL or body. Doctor comes from the Bearer token
+(``ph_user_id`` / ``appointment_doctor_id``). CAEPY does not implement this GET;
 it pulls the Drupal payload into doctor_dashboard.todays_glance via
 POST /linq360/glance/sync, keeping both pending_count and id arrays.
 """
@@ -14,6 +14,7 @@ import json
 from typing import Any
 
 import httpx
+import jwt as pyjwt
 
 from ...core.config import get_settings
 
@@ -106,30 +107,6 @@ def _normalize_bearer_token(token: str) -> str:
     return raw
 
 
-def decode_workspace_select_claims(token: str) -> dict[str, Any]:
-    """Decode workspace select JWT payload (no signature verify).
-
-    Used only to read ``appointment_doctor_id`` / ``user_id`` for glance storage.
-    Drupal validates the token on the pending-counts call.
-    """
-    raw = _normalize_bearer_token(token)
-    parts = raw.split(".")
-    if len(parts) < 2:
-        raise PracticeHubPendingError("Workspace select token is not a valid JWT")
-    payload_b64 = parts[1]
-    padding = "=" * (-len(payload_b64) % 4)
-    try:
-        payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
-        claims = json.loads(payload_bytes.decode("utf-8"))
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise PracticeHubPendingError(
-            "Workspace select token payload could not be decoded"
-        ) from exc
-    if not isinstance(claims, dict):
-        raise PracticeHubPendingError("Workspace select token payload was not an object")
-    return claims
-
-
 def _optional_int_claim(claims: dict[str, Any], key: str) -> int | None:
     value = claims.get(key)
     if value is None or not str(value).strip():
@@ -140,35 +117,140 @@ def _optional_int_claim(claims: dict[str, Any], key: str) -> int | None:
         return None
 
 
-def workspace_identity_from_token(token: str) -> dict[str, Any]:
-    """Identity claims from the workspace select token.
+def _optional_str_claim(claims: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = claims.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text and text.lower() != "none":
+            return text
+    return None
+
+
+def resolve_ws_user_id_from_claims(claims: dict[str, Any]) -> int | None:
+    """Portal user id: ``ws_user_id`` → ``user_id`` → ``id``."""
+    for key in ("ws_user_id", "user_id", "id"):
+        parsed = _optional_int_claim(claims, key)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def resolve_ph_user_id_from_claims(claims: dict[str, Any]) -> str | None:
+    """Practice Hub Drupal uid: ``ph_user_id`` → ``appointment_doctor_id``."""
+    return _optional_str_claim(claims, "ph_user_id", "appointment_doctor_id")
+
+
+def decode_workspace_select_claims(token: str) -> dict[str, Any]:
+    """Decode workspace HS256 JWT payload.
+
+    When ``WORKSPACE_JWT_SECRET`` / ``workspace_jwt_secret`` is set, signature
+    and expiry are verified (Practice Hub contract). Otherwise payload-only
+    decode is used so local/dev can still forward the Bearer to Drupal.
+    """
+    raw = _normalize_bearer_token(token)
+    if not raw or raw.count(".") < 2:
+        raise PracticeHubPendingError("Workspace token is not a valid JWT")
+
+    settings = get_settings()
+    secret = (settings.WORKSPACE_JWT_SECRET or "").strip()
+    if secret:
+        try:
+            claims = pyjwt.decode(
+                raw,
+                secret,
+                algorithms=["HS256"],
+                options={"require": ["exp"]},
+            )
+        except pyjwt.ExpiredSignatureError as exc:
+            raise PracticeHubPendingError(
+                "Workspace token has expired",
+                status_code=401,
+            ) from exc
+        except pyjwt.PyJWTError as exc:
+            raise PracticeHubPendingError(
+                "Workspace token signature is invalid",
+                status_code=401,
+            ) from exc
+        if not isinstance(claims, dict):
+            raise PracticeHubPendingError("Workspace token payload was not an object")
+        return claims
+
+    parts = raw.split(".")
+    payload_b64 = parts[1]
+    padding = "=" * (-len(payload_b64) % 4)
+    try:
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
+        claims = json.loads(payload_bytes.decode("utf-8"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise PracticeHubPendingError(
+            "Workspace token payload could not be decoded"
+        ) from exc
+    if not isinstance(claims, dict):
+        raise PracticeHubPendingError("Workspace token payload was not an object")
+    return claims
+
+
+def workspace_identity_from_token(
+    token: str,
+    *,
+    require_ph_user_id: bool = True,
+    require_workspace_id: bool = False,
+) -> dict[str, Any]:
+    """Identity claims from a workspace login (identity) or select JWT.
+
+    Resolution order for Practice Hub doctor id:
+    ``ph_user_id`` → ``appointment_doctor_id`` (DB / email enrichment happens
+    in auth deps when claims omit both).
 
     Returns:
-        linqmd_user_id / ph_user_id: Drupal doctor uid (``appointment_doctor_id``)
-        workspace_id: portal workspace id (``workspace_id``), optional
-        ws_user_id: portal user id (``user_id``), optional
+        linqmd_user_id / ph_user_id: Drupal doctor uid (string or None)
+        workspace_id: portal workspace id, optional unless required
+        ws_user_id: portal user id, optional
+        email: claim email when present (for fallback mapping)
     """
     claims = decode_workspace_select_claims(token)
-    doctor = claims.get("appointment_doctor_id")
-    if doctor is None or not str(doctor).strip():
+    ph = resolve_ph_user_id_from_claims(claims)
+    ws_user_id = resolve_ws_user_id_from_claims(claims)
+    workspace_id = _optional_int_claim(claims, "workspace_id")
+    email_raw = claims.get("email")
+    email = (
+        str(email_raw).strip().lower()
+        if isinstance(email_raw, str) and str(email_raw).strip()
+        else None
+    )
+
+    if require_workspace_id and workspace_id is None:
         raise PracticeHubPendingError(
-            "Workspace select token has no appointment_doctor_id "
-            "(select a doctor workspace first)"
+            "Workspace select token has no workspace_id "
+            "(POST /auth/workspace/select first)",
+            status_code=401,
         )
+
+    if require_ph_user_id and not ph:
+        raise PracticeHubPendingError(
+            "Workspace token has no ph_user_id / appointment_doctor_id "
+            "(map the doctor or use identity enrichment)",
+            status_code=401,
+        )
+
     return {
-        "linqmd_user_id": str(doctor).strip(),
-        "workspace_id": _optional_int_claim(claims, "workspace_id"),
-        "ws_user_id": _optional_int_claim(claims, "user_id"),
+        "linqmd_user_id": ph,
+        "ph_user_id": ph,
+        "workspace_id": workspace_id,
+        "ws_user_id": ws_user_id,
+        "email": email,
     }
 
 
 def linqmd_user_id_from_workspace_token(token: str) -> str:
-    """Drupal doctor uid from ``appointment_doctor_id`` in the workspace select token."""
-    return workspace_identity_from_token(token)["linqmd_user_id"]
+    """Drupal doctor uid from ``ph_user_id`` / ``appointment_doctor_id``."""
+    return str(workspace_identity_from_token(token)["linqmd_user_id"])
 
 
 async def fetch_pending_counts(workspace_access_token: str) -> dict[str, dict[str, Any]]:
-    """GET Practice Hub pending counts using the workspace select Bearer token.
+    """GET Practice Hub pending counts using the Bearer token (identity or select).
 
     URL has no user_id. Doctor is resolved by Drupal from the token.
     Returns normalized source blocks including id arrays.
@@ -181,7 +263,7 @@ async def fetch_pending_counts(workspace_access_token: str) -> dict[str, dict[st
     bearer = _normalize_bearer_token(workspace_access_token)
     if not bearer:
         raise PracticeHubPendingError(
-            "Workspace select access token is required",
+            "Workspace access token is required",
             status_code=401,
         )
 
@@ -204,7 +286,7 @@ async def fetch_pending_counts(workspace_access_token: str) -> dict[str, dict[st
     if response.status_code == 401:
         raise PracticeHubPendingError(
             "Practice Hub pending-counts: Authentication required "
-            "(use workspace select Bearer token)",
+            "(use identity_access_token Bearer from workspace login)",
             status_code=401,
         )
     if response.status_code != 200:

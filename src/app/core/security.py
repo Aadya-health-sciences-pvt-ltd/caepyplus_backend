@@ -74,49 +74,30 @@ def _decode_oidc_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
         ) from exc
 
 
-def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
-    """Decode and validate a Bearer JWT.
-
-    OIDC_ENABLED false/unset (default): unchanged from before - HS256 only,
-    verified against SECRET_KEY, mirroring the encoding used in auth._encode_jwt.
-
-    OIDC_ENABLED true: also accepts RS256 tokens issued by
-    linqmd_workspace_backend_code's OIDC Authorization Server, routed to based
-    on the token's own (unverified) alg header - never a static choice, so a
-    legacy HS256 token from this service's own login flow keeps working
-    unchanged either way.
-    """
-
-    if settings.OIDC_ENABLED and settings.OIDC_ISSUER:
-        alg = _decode_jwt_header_alg(token)
-        if alg == "RS256":
-            return _decode_oidc_jwt(token, settings=settings)
-
+def _decode_hs256_with_secret(token: str, *, secret: str) -> dict[str, Any]:
+    """Verify one HS256 JWT against ``secret`` (signature + exp)."""
     try:
         header_b64, payload_b64, signature_b64 = token.split(".")
-    except ValueError as exc:  # not enough / too many segments
+    except ValueError as exc:
         raise UnauthorizedError(
             message="Invalid token format",
             error_code="INVALID_TOKEN",
         ) from exc
 
-    # Recompute signature
     signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
     expected_sig = hmac.new(
-        settings.SECRET_KEY.encode("utf-8"),
+        secret.encode("utf-8"),
         signing_input,
         hashlib.sha256,
     ).digest()
     expected_sig_b64 = base64.urlsafe_b64encode(expected_sig).rstrip(b"=").decode("ascii")
 
-    # Constant-time comparison
     if not hmac.compare_digest(signature_b64, expected_sig_b64):
         raise UnauthorizedError(
             message="Invalid token signature",
             error_code="INVALID_TOKEN",
         )
 
-    # Decode payload
     try:
         payload_bytes = _base64url_decode(payload_b64)
         payload = json.loads(payload_bytes)
@@ -126,7 +107,6 @@ def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
             error_code="INVALID_TOKEN",
         ) from exc
 
-    # Check expiration
     exp = payload.get("exp")
     if not isinstance(exp, int):
         raise UnauthorizedError(
@@ -142,6 +122,38 @@ def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
         )
 
     return payload  # type: ignore[no-any-return]
+
+
+def _decode_jwt(token: str, *, settings: Settings) -> dict[str, Any]:
+    """Decode and validate a Bearer JWT.
+
+    OIDC_ENABLED false/unset (default): HS256 against SECRET_KEY (Caepy login).
+    When WORKSPACE_JWT_SECRET is set, also accepts workspace portal
+    identity_access_token / workspace_access_token_main (same secret as
+    Practice Hub workspace_jwt_secret).
+
+    OIDC_ENABLED true: also accepts RS256 tokens issued by
+    linqmd_workspace_backend_code's OIDC Authorization Server, routed by the
+    token's own (unverified) alg header.
+    """
+
+    if settings.OIDC_ENABLED and settings.OIDC_ISSUER:
+        alg = _decode_jwt_header_alg(token)
+        if alg == "RS256":
+            return _decode_oidc_jwt(token, settings=settings)
+
+    try:
+        return _decode_hs256_with_secret(token, secret=settings.SECRET_KEY)
+    except UnauthorizedError as caepy_exc:
+        workspace_secret = (settings.WORKSPACE_JWT_SECRET or "").strip()
+        if not workspace_secret:
+            raise caepy_exc
+        if caepy_exc.error_code == "TOKEN_EXPIRED":
+            raise caepy_exc
+        try:
+            return _decode_hs256_with_secret(token, secret=workspace_secret)
+        except UnauthorizedError:
+            raise caepy_exc from None
 
 
 async def require_authentication(
@@ -176,13 +188,18 @@ async def require_authentication(
         return str(doc_id)
 
     subject = payload.get("sub")
-    if not isinstance(subject, str) or not subject:
-        raise UnauthorizedError(
-            message="Invalid token subject",
-            error_code="INVALID_TOKEN",
-        )
+    if isinstance(subject, str) and subject.strip():
+        return subject.strip()
 
-    return subject
+    # Workspace identity_access_token: no ``sub`` — use email (never log it).
+    email = payload.get("email")
+    if isinstance(email, str) and "@" in email.strip():
+        return email.strip().lower()
+
+    raise UnauthorizedError(
+        message="Invalid token subject",
+        error_code="INVALID_TOKEN",
+    )
 
 
 def decode_bearer_jwt_from_request(request: Request, *, settings: Settings) -> dict[str, Any]:

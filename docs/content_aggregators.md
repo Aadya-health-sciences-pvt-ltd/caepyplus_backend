@@ -10,19 +10,23 @@ Two separate concerns:
 ## Pending counts flow (counts only)
 
 ```text
-Workspace login → workspaces → workspace select
-        ↓  Bearer workspace_select_access_token
-        ↓  (appointment_doctor_id = Drupal uid, e.g. 892)
-CAEPY POST /v1/linq360/glance/sync
-  Authorization: Bearer <workspace_select_token>
+Workspace login → identity_access_token
         ↓
-Drupal GET /api/linq360/pending-counts   (no user_id; doctor from token)
+CAEPY POST /v1/linq360/glance/sync   (Bearer identity)
         ↓
-write content into doctor_dashboard.todays_glance for uid 892
+Drupal GET /api/linq360/pending-counts
         ↓
-CAEPY GET /v1/linq360/glance
-  Authorization: Bearer <same workspace_select_token>
-  merges doctor_dashboard + workspace_doctor_dashboard
+doctor_dashboard.todays_glance
+        ↓
+CAEPY GET /v1/linq360/glance/content   (Bearer identity) — content only
+
+workspace select → workspace_access_token_main
+        ↓
+CAEPY GET /v1/linq360/glance/appointments   (Bearer select)
+WS /ws/dashboard?token=<select>
+
+Appointment system POST /webhooks/dashboard
+  no Bearer; body: ph_user_id, ws_user_id, workspace_id, schedule
 ```
 
 - CAEPY does **not** implement `GET /api/linq360/pending-counts`.
