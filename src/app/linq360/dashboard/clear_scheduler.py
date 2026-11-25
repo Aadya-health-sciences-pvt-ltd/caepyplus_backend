@@ -30,12 +30,15 @@ def parse_clear_hhmm(value: str) -> tuple[int, int]:
     return hour, minute
 
 
-def resolve_clear_tz(name: str) -> ZoneInfo:
-    """Resolve IANA timezone name."""
+def resolve_clear_tz(name: str) -> timezone | ZoneInfo:
+    """Resolve IANA timezone; Asia/Kolkata falls back to UTC+05:30 if tzdata missing."""
+    key = (name or "").strip() or "Asia/Kolkata"
     try:
-        return ZoneInfo((name or "").strip() or "Asia/Kolkata")
-    except ZoneInfoNotFoundError as exc:
-        raise ValueError(f"Invalid CLEAR_TZ {name!r}") from exc
+        return ZoneInfo(key)
+    except ZoneInfoNotFoundError:
+        if key in {"Asia/Kolkata", "Asia/Calcutta"}:
+            return timezone(timedelta(hours=5, minutes=30), name="Asia/Kolkata")
+        raise ValueError(f"Invalid CLEAR_TZ {name!r}") from None
 
 
 def next_clear_datetime(
@@ -43,7 +46,7 @@ def next_clear_datetime(
     now: datetime,
     hour: int,
     minute: int,
-    tz: ZoneInfo,
+    tz: timezone | ZoneInfo,
 ) -> datetime:
     """Next clear time in ``tz`` (rolls to tomorrow if already past today)."""
     if now.tzinfo is None:
