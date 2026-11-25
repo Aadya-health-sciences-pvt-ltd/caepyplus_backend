@@ -513,7 +513,7 @@ No Bearer. Required body fields: `ph_user_id`, `ws_user_id`, `workspace_id`.
 | Field | Allowed values |
 |-------|----------------|
 | `patient_meta_code` | string |
-| `appointment_type` | `REQUEST` \| `BOOKING` \| `CALL` |
+| `appointment_type` | `REQUEST` \| `BOOKING` \| `CALL` \| `WALK_IN` |
 | `patient_name` | string |
 | `first_name` | string |
 | `last_name` | string |
@@ -695,7 +695,7 @@ Frontend should treat `data` like `GET /glance/appointments` → `response.data`
 ```ts
 type ScheduleItem = {
   patient_meta_code: string;
-  appointment_type: "REQUEST" | "BOOKING" | "CALL";
+  appointment_type: "REQUEST" | "BOOKING" | "CALL" | "WALK_IN";
   patient_name: string;
   first_name: string;
   last_name: string;
@@ -902,42 +902,55 @@ payments         ← {}
 
 ## 6) Daily clear of `workspace_doctor_dashboard` (ops)
 
-Schedule data is **today-only**. At the start of each IST day, CAEPY deletes all rows in `linq360.workspace_doctor_dashboard` so yesterday’s patients/counts cannot linger. Content in `doctor_dashboard` is **not** cleared.
+Schedule data is **today-only**. CAEPY deletes all rows in `linq360.workspace_doctor_dashboard` so yesterday’s patients/counts cannot linger. Content in `doctor_dashboard` is **not** cleared.
 
 ### Access token
 
-This is a **CLI / ops job**, not an HTTP API. No Bearer token. No frontend call.
+Not an HTTP API. No Bearer. No frontend call.
 
-### What runs
+### In-app auto clear (preferred)
+
+While uvicorn is running, a background loop clears the table at the configured time.
+
+| Env | Default | Meaning |
+|-----|---------|---------|
+| `LINQ360_DASHBOARD_CLEAR_ENABLED` | `false` | `true` = auto-clear; `false` = off |
+| `LINQ360_DASHBOARD_CLEAR_AT` | `00:00` | 24h `HH:MM` |
+| `LINQ360_DASHBOARD_CLEAR_TZ` | `Asia/Kolkata` | IANA timezone |
+
+**Normal (midnight IST)** — local `.env` or ECS:
+
+```env
+LINQ360_DASHBOARD_CLEAR_ENABLED=true
+LINQ360_DASHBOARD_CLEAR_AT=00:00
+LINQ360_DASHBOARD_CLEAR_TZ=Asia/Kolkata
+```
+
+**Local quick test** (do not wait until midnight): set `CLEAR_AT` a few minutes ahead, restart uvicorn, wait.
+
+```env
+LINQ360_DASHBOARD_CLEAR_ENABLED=true
+LINQ360_DASHBOARD_CLEAR_AT=12:12
+LINQ360_DASHBOARD_CLEAR_TZ=Asia/Kolkata
+```
+
+Then check logs (`linq360_dashboard_clear_ran`) and Postgres. After the test, set `CLEAR_AT` back to `00:00` or set `ENABLED=false`.
+
+App must be running; if uvicorn is stopped, nothing clears.
+
+### Manual CLI (still available)
 
 | | |
 |-|-|
 | **Script** | `python scripts/clear_linq360_workspace_dashboard.py` |
 | **Service** | `DashboardService.clear_all_workspace_dashboards()` |
 | **SQL effect** | `DELETE` all rows from `linq360.workspace_doctor_dashboard` |
-| **Leaves alone** | `linq360.doctor_dashboard` (pending content) |
-| **When** | **00:00 Asia/Kolkata (IST)** every day |
-| **How scheduled** | External cron / ECS Scheduled Task / EventBridge / Windows Task Scheduler (timezone = IST) |
-| **Refill** | Next `POST /webhooks/dashboard` with a **full** `todays_schedule` snapshot recreates the row |
-
-### Local (manual run)
-
-From repo root, with `DATABASE_URL` pointing at your local DB:
+| **Leaves alone** | `linq360.doctor_dashboard` |
+| **Refill** | Next full webhook snapshot |
 
 ```bash
 python scripts/clear_linq360_workspace_dashboard.py
 ```
-
-Expect log lines like `workspace_doctor_dashboard_cleared deleted=N` and exit code `0`.
-
-### Dev / prod (scheduled)
-
-```text
-# Example cron (scheduler timezone must be Asia/Kolkata)
-0 0 * * *  cd /path/to/caepyplus_backend && python scripts/clear_linq360_workspace_dashboard.py
-```
-
-On ECS: Scheduled Task at `00:00` with timezone `Asia/Kolkata`, same command, same task role / `DATABASE_URL` as the API.
 
 ### After clear — what frontend sees
 
@@ -950,7 +963,7 @@ On ECS: Scheduled Task at `00:00` with timezone `Asia/Kolkata`, same command, sa
 ### Flow
 
 ```text
-00:00 IST  →  clear script  →  workspace_doctor_dashboard empty
+CLEAR_AT (e.g. 00:00 IST)  →  in-app loop or CLI  →  workspace_doctor_dashboard empty
                 │
                 ▼
 GET /glance/appointments  →  empty schedule (OK for new day)
@@ -981,6 +994,9 @@ WS does **not** refresh every 2 seconds. `DEBOUNCE_WINDOW_MS` (default **2000**)
 | `DEBOUNCE_WINDOW_MS` | `2000` | Quiet window after webhook before background refresh + WS push |
 | `AI_SUGGESTIONS_OPEN_DOMAINS` | `["https://dev1.linqmd.com","https://app.linqmd.com"]` | Trusted Origins for webhook domain gate (**no** Bearer on webhook) |
 | `WORKSPACE_JWT_SECRET` | same as portal `AUTH_JWT_SECRET` | Verify identity / select JWTs |
+| `LINQ360_DASHBOARD_CLEAR_ENABLED` | `false` | In-app daily clear of `workspace_doctor_dashboard` |
+| `LINQ360_DASHBOARD_CLEAR_AT` | `00:00` | Clear clock time `HH:MM` |
+| `LINQ360_DASHBOARD_CLEAR_TZ` | `Asia/Kolkata` | Timezone for clear |
 
 Sync URL CAEPY calls:
 

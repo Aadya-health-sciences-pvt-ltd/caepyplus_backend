@@ -62,11 +62,7 @@ async def require_doctor_engagement_access(
     db: DbSession,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> int:
-    """Authorize content-engagement without changing Caepy ``rbac`` / ``security``.
-
-    1. Caepy app JWT via unmodified ``get_current_user`` (admin / own doctor).
-    2. Else LinQ360 ``identity_access_token`` → own doctor via linqmd creds.
-    """
+    """Caepy JWT via get_current_user, else LinQ360 identity → own doctor."""
     doctor = await DoctorRepository(db).get_by_id(doctor_id)
     if doctor is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doctor not found")

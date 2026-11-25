@@ -236,16 +236,24 @@ class Settings(BaseSettings):
         description="JWT access token expiration time (minutes)"
     )
 
-    # LinQ360 only: Practice Hub workspace JWT secret (AUTH_JWT_SECRET /
-    # workspace_jwt_secret). Used by linq360 auth to verify identity/select
-    # tokens. Does not change Caepy app login / get_current_user.
-    # When empty: LinQ360 payload-decodes and forwards Bearer to Practice Hub.
+    # LinQ360: Practice Hub workspace JWT secret (AUTH_JWT_SECRET).
     WORKSPACE_JWT_SECRET: str | None = Field(
         default=None,
-        description=(
-            "LinQ360: HS256 secret for workspace identity/select tokens "
-            "(AUTH_JWT_SECRET / workspace_jwt_secret)"
-        ),
+        description="LinQ360 workspace identity/select HS256 secret",
+    )
+
+    # LinQ360: in-app clear of workspace_doctor_dashboard only.
+    LINQ360_DASHBOARD_CLEAR_ENABLED: bool = Field(
+        default=False,
+        description="LinQ360: enable in-app workspace dashboard clear",
+    )
+    LINQ360_DASHBOARD_CLEAR_AT: str = Field(
+        default="00:00",
+        description="LinQ360: clear time HH:MM",
+    )
+    LINQ360_DASHBOARD_CLEAR_TZ: str = Field(
+        default="Asia/Kolkata",
+        description="LinQ360: clear timezone",
     )
 
     # OIDC (linqmd_workspace_backend_code's Authorization Server), additive

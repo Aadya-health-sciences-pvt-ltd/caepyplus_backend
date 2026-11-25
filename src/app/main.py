@@ -177,9 +177,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     Shutdown:
         1. Cancel background tasks gracefully.
-        2. Close all database connections.caepz
+        2. Close all database connections.
     """
     import asyncio
+
+    from .linq360.dashboard.clear_scheduler import (
+        start_workspace_dashboard_clear_scheduler,
+        stop_workspace_dashboard_clear_scheduler,
+    )
 
     settings = get_settings()
     logger = structlog.get_logger()
@@ -227,6 +232,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Database health check", result=db_health)
 
     cleanup_task = asyncio.create_task(_periodic_session_cleanup())
+    start_workspace_dashboard_clear_scheduler(settings)
 
     logger.info("Application started successfully")
 
@@ -234,6 +240,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ---- Shutdown ----
     logger.info("Shutting down application")
+
+    await stop_workspace_dashboard_clear_scheduler()
 
     if cleanup_task:
         cleanup_task.cancel()
