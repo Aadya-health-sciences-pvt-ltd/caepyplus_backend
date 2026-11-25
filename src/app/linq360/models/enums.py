@@ -10,6 +10,7 @@ class AppointmentType(str, Enum):
     REQUEST = "REQUEST"
     BOOKING = "BOOKING"
     CALL = "CALL"
+    WALK_IN = "WALK_IN"
 
 
 class ConsultationType(str, Enum):

@@ -513,7 +513,7 @@ No Bearer. Required body fields: `ph_user_id`, `ws_user_id`, `workspace_id`.
 | Field | Allowed values |
 |-------|----------------|
 | `patient_meta_code` | string |
-| `appointment_type` | `REQUEST` \| `BOOKING` \| `CALL` |
+| `appointment_type` | `REQUEST` \| `BOOKING` \| `CALL` \| `WALK_IN` |
 | `patient_name` | string |
 | `first_name` | string |
 | `last_name` | string |
@@ -695,7 +695,7 @@ Frontend should treat `data` like `GET /glance/appointments` → `response.data`
 ```ts
 type ScheduleItem = {
   patient_meta_code: string;
-  appointment_type: "REQUEST" | "BOOKING" | "CALL";
+  appointment_type: "REQUEST" | "BOOKING" | "CALL" | "WALK_IN";
   patient_name: string;
   first_name: string;
   last_name: string;
