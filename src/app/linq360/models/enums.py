@@ -5,8 +5,6 @@ from enum import Enum
 
 
 class AppointmentType(str, Enum):
-    """Appointment / request kind on the workspace doctor dashboard."""
-
     REQUEST = "REQUEST"
     BOOKING = "BOOKING"
     CALL = "CALL"
@@ -14,7 +12,6 @@ class AppointmentType(str, Enum):
 
 
 class ConsultationType(str, Enum):
-    """Consultation mode for a workspace appointment."""
 
     IN_PERSON = "in-person"
     TELECONSULTATION = "teleconsultation"

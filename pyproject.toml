@@ -54,6 +54,7 @@ dependencies = [
     "aioboto3>=13.0.0,<14.0.0",         # Async S3 client (blob storage)
     "redis>=5.0.0,<6.0.0",              # OTP storage / caching
     "python-dotenv>=1.0.1,<2.0.0",      # .env loading
+    "tzdata>=2024.1",                  # IANA timezones (Windows / ZoneInfo Asia/Kolkata)
     "firebase-admin>=6.5.0,<7.0.0",     # Google Sign-In verification
     # Legacy JWT is implemented with stdlib hmac+hashlib (otp.py + security.py).
     # pyjwt is added solely for verifying OIDC-issued RS256 tokens via JWKS

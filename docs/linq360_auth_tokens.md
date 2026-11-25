@@ -31,11 +31,12 @@ API response field names remain `access_token` / `refresh_token`.
 
 | Item | Detail |
 |------|--------|
-| Command | `python scripts/clear_linq360_workspace_dashboard.py` |
-| When | `00:00 Asia/Kolkata` |
+| In-app | `LINQ360_DASHBOARD_CLEAR_ENABLED=true` + `CLEAR_AT` + `CLEAR_TZ` (while uvicorn runs) |
+| CLI | `python scripts/clear_linq360_workspace_dashboard.py` |
+| Default when | `00:00` / `Asia/Kolkata` |
 | Effect | Deletes all `workspace_doctor_dashboard` rows |
 | Does not clear | `doctor_dashboard` |
-| Token | None (CLI) |
+| Token | None |
 | Refill | Next full `POST /webhooks/dashboard` snapshot |
 
 Full local/dev curls + token matrix: [`linq360_frontend_handbook.md`](./linq360_frontend_handbook.md).

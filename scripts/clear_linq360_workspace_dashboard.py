@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
-"""Clear linq360.workspace_doctor_dashboard (today-only appointment snapshots).
+"""Manual clear of linq360.workspace_doctor_dashboard (does not touch doctor_dashboard).
 
-Schedule at 00:00 Asia/Kolkata so yesterday's schedule cannot linger.
-Does not touch linq360.doctor_dashboard. Refill comes from the next full
-webhook snapshot (POST /webhooks/dashboard).
-
-Usage
------
-    python scripts/clear_linq360_workspace_dashboard.py
+Usage: python scripts/clear_linq360_workspace_dashboard.py
 """
 from __future__ import annotations
 

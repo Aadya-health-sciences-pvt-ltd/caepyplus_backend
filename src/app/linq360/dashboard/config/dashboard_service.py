@@ -38,7 +38,7 @@ class DashboardService(BaseService):
         self.repo = DashboardRepository(session)
 
     async def clear_all_workspace_dashboards(self) -> int:
-        """Wipe today-only schedule rows; leaves doctor_dashboard untouched."""
+        """Delete all workspace_doctor_dashboard rows."""
         deleted = await self.repo.delete_all_workspace_dashboards()
         logger.info("workspace_doctor_dashboard_cleared deleted=%s", deleted)
         return deleted

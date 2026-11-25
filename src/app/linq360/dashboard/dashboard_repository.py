@@ -101,7 +101,7 @@ class DashboardRepository(BaseRepository[WorkspaceDoctorDashboard]):
         return await self.add(row)
 
     async def delete_all_workspace_dashboards(self) -> int:
-        """Delete every workspace_doctor_dashboard row; return deleted count."""
+        """Delete all workspace_doctor_dashboard rows; return count."""
         result = await self.session.execute(delete(WorkspaceDoctorDashboard))
         return int(result.rowcount or 0)
 

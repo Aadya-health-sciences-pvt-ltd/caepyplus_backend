@@ -1,10 +1,4 @@
-"""Workspace identity vs select Bearer auth for LinQ360 endpoints.
-
-Token contract (aligned with Practice Hub):
-- ``identity_access_token`` — login; glance content GET + sync.
-- ``workspace_access_token_main`` — select; appointments GET + WS.
-- Dashboard webhook — **no Bearer**; identity in JSON body.
-"""
+"""LinQ360 identity / select / webhook auth deps."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -160,11 +154,7 @@ def require_workspace_select_auth(
 
 
 def require_dashboard_webhook_auth(request: Request) -> None:
-    """Webhook has **no Bearer**. Optional open-domain allowlist when configured.
-
-    When ``AI_SUGGESTIONS_OPEN_DOMAINS`` is non-empty, Origin/Referer must match.
-    When empty, any caller may post (identity must be in the JSON body).
-    """
+    """Webhook: no Bearer; optional Origin/Referer allowlist."""
     allowlist = ai_suggestions_open_domains()
     if not allowlist:
         return
